@@ -1,0 +1,18 @@
+{
+  "source": "actual keyboard input",
+  "playbackSpeed": 1.6129032258064517,
+  "milestones": [
+    {
+      "beacon": 0,
+      "time": 12.366666666666633
+    },
+    {
+      "beacon": 1,
+      "time": 32.96666666666736
+    },
+    {
+      "beacon": 2,
+      "time": 57.666666666665954
+    }
+  ]
+}

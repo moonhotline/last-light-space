@@ -1,0 +1,27 @@
+{
+  "date": "2026-09-13T15:08:28.213Z",
+  "url": "https://last-light-space.vercel.app/",
+  "errors": [],
+  "failures": [],
+  "rendering": {
+    "frames": 396,
+    "fps": 52,
+    "calls": 200,
+    "triangles": 418293,
+    "assets": true,
+    "audio": "running",
+    "camera": "first",
+    "cameraPosition": {
+      "x": -0.00003311583714094013,
+      "y": 10.660745961189969,
+      "z": 346.02116625616327
+    },
+    "cameraObstructed": false,
+    "cameraRange": 0,
+    "ownAvatarVisible": false,
+    "earthY": -420,
+    "moonY": -600,
+    "thermalCount": 0
+  },
+  "endpoint": "wss://export-league-being-acer.trycloudflare.com/"
+}

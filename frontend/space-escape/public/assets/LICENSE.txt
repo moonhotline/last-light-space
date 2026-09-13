@@ -1,0 +1,6 @@
+Last Light original assets
+
+The GLB props and synthesized audio in this directory were created for this
+project by scripts/generate_assets.py and scripts/generate-audio.mjs.
+No third-party model, texture, sample, or music recordings are embedded.
+They may be used, modified, and redistributed with this project.

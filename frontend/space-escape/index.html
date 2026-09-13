@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#101b25" />
+    <meta
+      name="description"
+      content="LAST LIGHT / 余晖：在低重力星球自由探索，与伙伴飞越峡谷、点亮信标，见证地球与月球升起。"
+    />
+    <title>LAST LIGHT / 余晖 · 星球远征</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <canvas id="world" aria-label="低重力星球探索游戏场景"></canvas>
+    <div class="film-edge" aria-hidden="true"></div>
+    <header class="topline">
+      <div class="wordmark">
+        <i data-lucide="orbit"></i><b>LAST LIGHT</b><span>余晖</span>
+      </div>
+      <div class="mission-clock">
+        <span id="sector">KEPLER / 07</span><b id="clock">00:00</b>
+      </div>
+      <div class="top-tools">
+        <span id="linkState">KEPLER / 07</span
+        ><button
+          id="camera"
+          class="icon"
+          title="切换视角 V"
+          aria-label="切换视角"
+        >
+          <i data-lucide="camera"></i></button
+        ><button id="sound" class="icon" title="静音" aria-label="静音">
+          <i data-lucide="volume-2"></i></button
+        ><button id="pause" class="icon" title="探索菜单" aria-label="探索菜单">
+          <i data-lucide="menu"></i>
+        </button>
+      </div>
+    </header>
+    <main id="overlay" class="overlay">
+      <section id="landing" class="sheet landing-sheet">
+        <p class="overline">
+          <span class="signal-dot"></span> AN EXPEDITION BEYOND THE HORIZON
+        </p>
+        <h1>LAST<br />LIGHT<span>余 晖</span></h1>
+        <p class="mission-title">走出峡谷。<br />让宇宙，在你眼前升起。</p>
+        <p class="intro-detail">低重力远征 / 三座信标 / 一片等待发现的天空</p>
+        <div class="entry-form">
+          <div class="mode" role="tablist" aria-label="游戏模式">
+            <button role="tab" id="practiceTab" aria-selected="true">
+              独自探索</button
+            ><button role="tab" id="coopTab" aria-selected="false">
+              合作远征
+            </button>
+          </div>
+          <label class="field callsign-field"
+            ><span>呼号</span
+            ><input
+              id="callsign"
+              maxlength="16"
+              value="探索员"
+              autocomplete="nickname"
+          /></label>
+          <div id="coopForm" hidden>
+            <label class="field"
+              >房间编号<input
+                id="roomCode"
+                maxlength="6"
+                placeholder="ABC123"
+                autocomplete="off" /></label
+            ><button id="join" class="secondary">
+              <i data-lucide="log-in"></i>加入房间
+            </button>
+          </div>
+          <button id="launch" class="primary" disabled>正在准备星球</button>
+          <p id="entryStatus" role="status">正在载入地形与星空…</p>
+        </div>
+        <div class="mission-spec">
+          <span>01 开放星球</span><span>04 人共同探索</span><span>∞ 远方</span>
+        </div>
+      </section>
+      <section id="lobby" class="sheet compact" hidden>
+        <p class="overline">CREW MANIFEST / 远征队</p>
+        <h2>等待一起出发的人</h2>
+        <div class="room-label">
+          <span>房间</span><b id="roomLabel"></b
+          ><button id="copy" class="icon" aria-label="复制邀请链接">
+            <i data-lucide="copy"></i>
+          </button>
+        </div>
+        <ul id="crew"></ul>
+        <p class="helper">
+          分享房间编号。每位队员都能为信标充能，共同开启新的路线。
+        </p>
+        <button id="begin" class="primary">
+          <i data-lucide="rocket"></i>开始远征</button
+        ><button id="leaveLobby" class="secondary">离开房间</button>
+      </section>
+      <section id="paused" class="sheet compact" hidden>
+        <p class="overline">EXPEDITION CONTROL</p>
+        <h2 id="pauseTitle">片刻，仰望星空</h2>
+        <button id="resume" class="primary">
+          <i data-lucide="play"></i>继续探索
+        </button>
+        <div class="key-guide">
+          <span>W A S D <b>移动</b></span
+          ><span>空格 <b>跳跃 / 长按喷射</b></span
+          ><span>Shift <b>奔跑</b></span
+          ><span>Q <b>冲刺</b></span
+          ><span>V <b>切换视角</b></span
+          ><span>E <b>信标共鸣</b></span
+          ><span>R <b>标记路线</b></span
+          ><span>H <b>隐藏界面</b></span>
+        </div>
+        <label class="field range-label"
+          >鼠标灵敏度<input
+            id="sensitivity"
+            type="range"
+            min="0.5"
+            max="2"
+            step="0.1"
+            value="1" /></label
+        ><label class="field range-label"
+          >音量<input
+            id="volume"
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            value="0.5" /></label
+        ><label class="field range-label"
+          >镜头反馈强度<input
+            id="effects"
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            value="0.55"
+        /></label>
+        <div class="button-pair">
+          <button id="fullscreen" class="secondary">全屏</button
+          ><button id="recall" class="secondary">返回最近信标</button>
+        </div>
+        <button id="journal" class="secondary" hidden>查看远征记录</button
+        ><button id="leave" class="secondary">结束本次远征</button>
+      </section>
+      <section id="result" class="sheet compact" hidden>
+        <p class="overline">CONSTELLATION COMPLETE</p>
+        <h2 id="resultTitle">我们点亮了这片星空</h2>
+        <p id="resultReason"></p>
+        <div id="resultStats" class="result-stats"></div>
+        <button id="explore" class="primary">继续探索 · 观看月升</button
+        ><button id="again" class="secondary">重新远征</button
+        ><button id="home" class="secondary">返回着陆页</button>
+      </section>
+    </main>
+    <div class="landing-caption">
+      <span>07 / THE SILENT FRONTIER</span><b>一颗陌生星球，一次共同的发现。</b
+      ><small>艺术化宇宙 · 自由探索</small>
+    </div>
+    <section id="hud" hidden aria-label="远征状态">
+      <div class="objective">
+        <span id="objectiveIndex">01 / 03</span>
+        <h2 id="objective">曙光之门</h2>
+        <p id="objectiveDetail">沿晶体光点穿过峡谷</p>
+      </div>
+      <div id="team" class="team"></div>
+      <div class="reticle" aria-hidden="true"></div>
+      <div id="targetMarker" class="target-marker" hidden>
+        <i data-lucide="diamond"></i><span id="targetDistance"></span>
+      </div>
+      <div id="interaction" class="interaction" hidden>
+        <span id="interactionText"></span
+        ><progress id="interactionProgress" max="1" value="0"></progress>
+      </div>
+      <div id="combo" class="combo"></div>
+      <div class="bottom-hud">
+        <div class="vitals">
+          <div class="pack-label">
+            <i data-lucide="wind"></i><span id="packLevel">ION PACK I</span
+            ><b><span id="fuel">100</span><small> FUEL</small></b>
+          </div>
+          <progress id="fuelBar" max="100" value="100"></progress>
+          <div class="pack-footer">
+            <span id="thermalStatus">晶体补充燃料</span
+            ><span id="cargo">00 晶体</span>
+          </div>
+          <div class="telemetry">
+            <b id="speed">00</b><span>m/s</span><i></i
+            ><span>离地 <b id="altitude">0 m</b></span>
+          </div>
+        </div>
+        <div class="controls-hud">
+          <div id="controlsHint">
+            <span><kbd>WASD</kbd> 移动</span
+            ><span><kbd>空格</kbd> 长按喷射</span><span><kbd>E</kbd> 共鸣</span>
+          </div>
+          <div class="control-row">
+            <span><kbd>Q</kbd> 冲刺 <b id="dashStatus">就绪</b></span
+            ><span><kbd>V</kbd> <b id="viewMode">第三人称</b></span
+            ><span><kbd>R</kbd> 标记</span>
+          </div>
+        </div>
+        <div class="radar">
+          <canvas
+            id="map"
+            width="180"
+            height="180"
+            aria-label="星球探索地图"
+          ></canvas
+          ><span>KEPLER / 07</span>
+        </div>
+      </div>
+      <div id="touchControls">
+        <div class="dpad">
+          <button data-move="forward" aria-label="前进">
+            <i data-lucide="chevron-up"></i></button
+          ><button data-move="left" aria-label="向左">
+            <i data-lucide="chevron-left"></i></button
+          ><button data-move="back" aria-label="后退">
+            <i data-lucide="chevron-down"></i></button
+          ><button data-move="right" aria-label="向右">
+            <i data-lucide="chevron-right"></i>
+          </button>
+        </div>
+        <button id="touchJet" class="touch-action" aria-label="跳跃与喷射">
+          <i data-lucide="rocket"></i></button
+        ><button id="touchInteract" class="touch-action" aria-label="信标共鸣">
+          <i data-lucide="hand"></i></button
+        ><button id="touchDash" class="touch-action" aria-label="冲刺">
+          <i data-lucide="zap"></i></button
+        ><button id="touchMark" class="touch-action" aria-label="标记路线">
+          <i data-lucide="map-pin"></i>
+        </button>
+      </div>
+    </section>
+    <div id="toast" role="status" aria-live="polite" hidden></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

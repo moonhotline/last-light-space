@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.vercel/
+.runtime/
+.env
+.env.*
+.DS_Store
+__pycache__/
+test-results/
+playwright-report/
+*.webm
+*.mp4

@@ -1,0 +1,39 @@
+{
+  "name": "last-light-space",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "space:dev": "vite --config frontend/space-escape/vite.config.ts",
+    "space:build": "tsc -p frontend/space-escape/tsconfig.json && vite build --config frontend/space-escape/vite.config.ts",
+    "space:server": "tsx frontend/space-escape/server/index.ts",
+    "space:test": "tsx --test tests/space-escape/*.test.ts",
+    "space:ui": "playwright test --config playwright.space.config.ts",
+    "space:record": "node frontend/space-escape/scripts/record-demo.mjs",
+    "space:prepare-vercel": "npm run space:build && node frontend/space-escape/scripts/prepare-vercel.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.20.2",
+    "@types/pathfinding": "^0.1.0",
+    "@types/three": "^0.186.0",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
+  },
+  "dependencies": {
+    "@colyseus/core": "^0.18.13",
+    "@colyseus/sdk": "^0.18.2",
+    "@colyseus/ws-transport": "^0.18.2",
+    "@dimforge/rapier3d-compat": "^0.20.0",
+    "@tonejs/midi": "^2.0.28",
+    "colyseus.js": "^0.16.22",
+    "express": "^5.2.1",
+    "gsap": "^3.15.0",
+    "lucide": "^1.27.0",
+    "pathfinding": "^0.4.18",
+    "three": "^0.185.1",
+    "tone": "^15.1.22"
+  }
+}
