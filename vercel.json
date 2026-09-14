@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": "npm run space:build && node frontend/space-escape/scripts/configure-hosted-room.mjs",
+  "outputDirectory": "frontend/space-escape/dist",
+  "headers": [
+    {
+      "source": "/connection.json",
+      "headers": [{ "key": "Cache-Control", "value": "no-store" }]
+    }
+  ]
+}

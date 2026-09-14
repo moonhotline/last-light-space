@@ -34,6 +34,8 @@ The 1.6 km landscape retains three optional upgrade beacons, Earthrise, a ringed
 
 The live frontend uses Vercel; multiplayer still depends on a local Node room server and a temporary Cloudflare tunnel. It is not a permanently hosted multiplayer service. Expeditions are not saved across sessions. Building, farming, persistent worlds, reconnect, and a second planet remain future work.
 
+Vercel Git deployments use the repository-root `vercel.json` to build the game and publish only `frontend/space-escape/dist`. Set `SPACE_ROOM_URL` in each deployed Vercel environment to the public `wss://` endpoint; the build writes `connection.json` without caching. After restarting the temporary tunnel, update that variable and redeploy. Missing or invalid room configuration fails the build instead of publishing an unusable multiplayer endpoint.
+
 `docs/source-snapshot.json` describes the original v0.1.0 import; it is not a checksum manifest for later versions. Baseline verification and screenshots remain under `docs/space-escape/planet-*`; chapter evidence uses `echo-*`.
 
 With the built room server running, `npm run space:record` records the complete chapter and exports an MP4 with FFmpeg. Set `SPACE_WEB_URL` if the built room server uses another origin.
