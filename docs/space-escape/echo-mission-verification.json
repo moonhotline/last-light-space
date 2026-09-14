@@ -1,0 +1,62 @@
+{
+  "date": "2026-09-14T12:06:58.401Z",
+  "url": "http://127.0.0.1:2569",
+  "errors": [],
+  "missionTime": 143.59999999999442,
+  "lore": [
+    0,
+    1,
+    2
+  ],
+  "ship": {
+    "x": -302.0754313213051,
+    "z": -197.3641870411658,
+    "y": 170,
+    "yaw": 0.5499999999999999,
+    "vx": -1.6899091290148963e-128,
+    "vy": 0,
+    "vz": -2.697510645266293e-128,
+    "bank": -4.1872762605115607e-29,
+    "repaired": true,
+    "progress": 1,
+    "cargo": {
+      "ore": 4,
+      "scrap": 4,
+      "cell": 2,
+      "circuit": 1,
+      "core": 1,
+      "medgel": 0
+    },
+    "seats": [
+      "",
+      "UdWRGH2eB",
+      "",
+      ""
+    ],
+    "grounded": true,
+    "thrust": 0,
+    "flightTime": 64.5999999999989,
+    "arrived": true
+  },
+  "rendering": {
+    "frames": 8735,
+    "fps": 60,
+    "calls": 130,
+    "triangles": 461817,
+    "assets": true,
+    "audio": "running",
+    "camera": "third",
+    "cameraPosition": {
+      "x": -306.10108073941876,
+      "y": 170.78892230386185,
+      "z": -186.71150111343016
+    },
+    "cameraObstructed": true,
+    "cameraRange": 7.0400000000000045,
+    "ownAvatarVisible": true,
+    "earthY": 1900,
+    "moonY": -599.56344375,
+    "thermalCount": 0
+  },
+  "input": "actual keyboard and UI; diagnostics read-only"
+}

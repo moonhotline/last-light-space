@@ -1,3 +1,4 @@
+import { LAB, LAB_BOXES } from "./adventure-data";
 import RAPIER from "@dimforge/rapier3d-compat";
 import {
   terrainMesh,
@@ -90,6 +91,14 @@ export class MovementWorld {
             }),
         );
       }
+    for (const b of LAB_BOXES)
+      this.world.createCollider(
+        RAPIER.ColliderDesc.cuboid(b.sx / 2, b.sy / 2, b.sz / 2).setTranslation(
+          LAB.x + b.x,
+          LAB.y + b.y,
+          LAB.z + b.z,
+        ),
+      );
     this.world.step();
   }
   add(id: string, p: Vec) {
@@ -121,6 +130,18 @@ export class MovementWorld {
   move(p: Player, i: Input) {
     const body = this.bodies.get(p.id);
     if (!body) return;
+    if (i.grapple && !p.grappleHeld) {
+      if (p.grapple) p.grapple = null;
+      else {
+        p.grapple = this.aim(p, 85);
+        if (p.grapple) {
+          p.grappleId++;
+          p.grounded = false;
+          p.vy = Math.max(p.vy, 5);
+        }
+      }
+    }
+    p.grappleHeld = i.grapple;
     const len = Math.max(1, Math.hypot(i.forward, i.side));
     const dx = (Math.cos(i.yaw) * i.side - Math.sin(i.yaw) * i.forward) / len,
       dz = (-Math.sin(i.yaw) * i.side - Math.cos(i.yaw) * i.forward) / len;
@@ -133,7 +154,7 @@ export class MovementWorld {
     }
     p.dashHeld = i.dash;
     const speed = p.dashTime > 0 ? 43 : i.sprint ? 23 : 15;
-    const factor = 1 - Math.exp(-(p.grounded ? 14 : 5) * DT);
+    const factor = 1 - Math.exp(-(p.grounded && !p.grapple ? 10 : 0.75) * DT);
     const dashForward =
       p.dashTime > 0 && len === 1 && i.forward === 0 && i.side === 0;
     p.vx += ((dashForward ? -Math.sin(i.yaw) : dx) * speed - p.vx) * factor;
@@ -165,6 +186,25 @@ export class MovementWorld {
           p.vy = Math.min(32, p.vy + 42 * DT);
           p.fuel = Math.min(fuelCapacity(p.level), p.fuel + DT * 15);
         }
+    if (p.grapple) {
+      const a = p.grapple,
+        dx = a.x - p.x,
+        dy = a.y - p.y,
+        dz = a.z - p.z;
+      const d = Math.hypot(dx, dy, dz);
+      if (d < 3 || d > 100) p.grapple = null;
+      else {
+        p.vx += (dx / d) * 52 * DT;
+        p.vy += (dy / d) * 52 * DT;
+        p.vz += (dz / d) * 52 * DT;
+        const speed = Math.hypot(p.vx, p.vy, p.vz);
+        if (speed > 48) {
+          p.vx *= 48 / speed;
+          p.vy *= 48 / speed;
+          p.vz *= 48 / speed;
+        }
+      }
+    }
     const impact = p.vy,
       wasGrounded = p.grounded;
     this.controller.computeColliderMovement(
@@ -192,6 +232,57 @@ export class MovementWorld {
   }
   step() {
     this.world.step();
+  }
+  aim(p: Player, range: number): Vec | null {
+    const origin = { x: p.x, y: p.y + 0.9, z: p.z };
+    const direction = {
+      x: -Math.sin(p.yaw) * Math.cos(p.pitch),
+      y: Math.sin(p.pitch),
+      z: -Math.cos(p.yaw) * Math.cos(p.pitch),
+    };
+    const hit = this.world.castRay(
+      new RAPIER.Ray(origin, direction),
+      range,
+      true,
+      RAPIER.QueryFilterFlags.EXCLUDE_KINEMATIC,
+    );
+    return hit && hit.timeOfImpact > 2
+      ? {
+          x: origin.x + direction.x * hit.timeOfImpact,
+          y: origin.y + direction.y * hit.timeOfImpact,
+          z: origin.z + direction.z * hit.timeOfImpact,
+        }
+      : null;
+  }
+  shipMotion(a: Vec, delta: Vec) {
+    // Swept hull samples prevent high-speed flight through terrain and architecture.
+    let fraction = 1;
+    const length = Math.hypot(delta.x, delta.y, delta.z);
+    if (length < 0.0001) return { ...a };
+    for (const x of [-4, 0, 4])
+      for (const z of [-5, 0, 5]) {
+        const origin = { x: a.x + x, y: a.y + 2, z: a.z + z };
+        const hit = this.world.castRay(
+          new RAPIER.Ray(origin, {
+            x: delta.x / length,
+            y: delta.y / length,
+            z: delta.z / length,
+          }),
+          length + 0.4,
+          true,
+          RAPIER.QueryFilterFlags.EXCLUDE_KINEMATIC,
+        );
+        if (hit)
+          fraction = Math.min(
+            fraction,
+            Math.max(0, hit.timeOfImpact - 0.4) / length,
+          );
+      }
+    return {
+      x: a.x + delta.x * fraction,
+      y: a.y + delta.y * fraction,
+      z: a.z + delta.z * fraction,
+    };
   }
   visible(a: Vec, b: Vec) {
     const d = { x: b.x - a.x, y: b.y - a.y, z: b.z - a.z },

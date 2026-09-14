@@ -11,7 +11,7 @@
       name="description"
       content="LAST LIGHT / 余晖：在低重力星球自由探索，与伙伴飞越峡谷、点亮信标，见证地球与月球升起。"
     />
-    <title>LAST LIGHT / 余晖 · 星球远征</title>
+    <title>LAST LIGHT / 余晖 · 回声协议</title>
     <link rel="icon" href="data:," />
   </head>
   <body>
@@ -25,7 +25,9 @@
         <span id="sector">KEPLER / 07</span><b id="clock">00:00</b>
       </div>
       <div class="top-tools">
-        <span id="linkState">KEPLER / 07</span
+        <button id="inventoryButton" class="secondary" aria-label="打开物品栏">
+          物品栏 <kbd>Tab</kbd></button
+        ><span id="linkState">KEPLER / 07</span
         ><button
           id="camera"
           class="icon"
@@ -43,11 +45,11 @@
     <main id="overlay" class="overlay">
       <section id="landing" class="sheet landing-sheet">
         <p class="overline">
-          <span class="signal-dot"></span> AN EXPEDITION BEYOND THE HORIZON
+          <span class="signal-dot"></span> CHAPTER I — THE ECHO PROTOCOL
         </p>
         <h1>LAST<br />LIGHT<span>余 晖</span></h1>
-        <p class="mission-title">走出峡谷。<br />让宇宙，在你眼前升起。</p>
-        <p class="intro-detail">低重力远征 / 三座信标 / 一片等待发现的天空</p>
+        <p class="mission-title">修复你的飞船。<br />揭开被遗弃的世界。</p>
+        <p class="intro-detail">第一章 · 回声协议 / 钩锁远征 / 合作生还</p>
         <div class="entry-form">
           <div class="mode" role="tablist" aria-label="游戏模式">
             <button role="tab" id="practiceTab" aria-selected="true">
@@ -93,7 +95,7 @@
         </div>
         <ul id="crew"></ul>
         <p class="helper">
-          分享房间编号。每位队员都能为信标充能，共同开启新的路线。
+          分享房间编号。共同收集材料、清除守卫、修复飞船。一名驾驶员，三名乘客。
         </p>
         <button id="begin" class="primary">
           <i data-lucide="rocket"></i>开始远征</button
@@ -109,9 +111,14 @@
           <span>W A S D <b>移动</b></span
           ><span>空格 <b>跳跃 / 长按喷射</b></span
           ><span>Shift <b>奔跑</b></span
-          ><span>Q <b>冲刺</b></span
+          ><span>Q <b>钩锁 / 松开</b></span
+          ><span>C <b>冲刺</b></span
+          ><span>左键 / T <b>切割 / 射击</b></span
+          ><span>Tab <b>物品栏 / 记录</b></span
+          ><span>G <b>修复护盾</b></span
+          ><span>X / Shift <b>飞船下降 / 刹车</b></span
           ><span>V <b>切换视角</b></span
-          ><span>E <b>信标共鸣</b></span
+          ><span>E <b>阅读 / 修复 / 登船</b></span
           ><span>R <b>标记路线</b></span
           ><span>H <b>隐藏界面</b></span>
         </div>
@@ -147,9 +154,53 @@
         <button id="journal" class="secondary" hidden>查看远征记录</button
         ><button id="leave" class="secondary">结束本次远征</button>
       </section>
+      <section
+        id="inventory"
+        class="sheet inventory-sheet"
+        hidden
+        aria-labelledby="inventoryTitle"
+      >
+        <p class="overline">FIELD KIT / 远征装备</p>
+        <h2 id="inventoryTitle">带走线索，留下回声。</h2>
+        <p id="inventorySubtitle" class="helper"></p>
+        <div class="inventory-columns">
+          <div>
+            <div id="inventoryGrid" class="inventory-grid"></div>
+            <p id="inventoryHealth"></p>
+            <button id="heal" class="secondary">使用修复凝胶 +55 护盾</button>
+            <p class="helper">
+              瞄准矿脉 / 物资箱，长按左键或 T。任务部件全队协作；靠近飞船长按 E
+              存入材料。
+            </p>
+          </div>
+          <div class="field-records">
+            <p class="overline" id="repairTitle">游隼号 · 修复清单</p>
+            <div id="repairRecipe"></div>
+            <p class="overline">RECOVERED RECORDS / 已发现的记录</p>
+            <div id="loreList"></div>
+          </div>
+        </div>
+        <button id="closeInventory" class="primary">
+          返回远征 · Tab / Esc
+        </button>
+        <p class="helper">合作模式下，打开界面不会暂停世界。</p>
+      </section>
+      <section
+        id="archive"
+        class="sheet archive-sheet"
+        hidden
+        aria-labelledby="loreTitle"
+      >
+        <p class="overline" id="loreSite"></p>
+        <h2 id="loreTitle"></h2>
+        <p id="loreText" class="lore-text"></p>
+        <p id="loreNext" class="lore-next"></p>
+        <button id="closeLore" class="primary">收起记录 · 继续探索</button>
+        <p class="helper">记录已同步至全队物品栏 · 合作模式下世界继续运行</p>
+      </section>
       <section id="result" class="sheet compact" hidden>
-        <p class="overline">CONSTELLATION COMPLETE</p>
-        <h2 id="resultTitle">我们点亮了这片星空</h2>
+        <p class="overline">CHAPTER I / ECHOES REMAIN</p>
+        <h2 id="resultTitle">有些回声，从未消失</h2>
         <p id="resultReason"></p>
         <div id="resultStats" class="result-stats"></div>
         <button id="explore" class="primary">继续探索 · 观看月升</button
@@ -168,7 +219,10 @@
         <p id="objectiveDetail">沿晶体光点穿过峡谷</p>
       </div>
       <div id="team" class="team"></div>
+      <div id="enemyLabels"></div>
       <div class="reticle" aria-hidden="true"></div>
+      <div id="hitFeedback" aria-hidden="true"></div>
+      <div id="damageFeedback" aria-hidden="true"></div>
       <div id="targetMarker" class="target-marker" hidden>
         <i data-lucide="diamond"></i><span id="targetDistance"></span>
       </div>
@@ -179,6 +233,10 @@
       <div id="combo" class="combo"></div>
       <div class="bottom-hud">
         <div class="vitals">
+          <div class="health-line">
+            <span>SUIT / 护盾</span><b id="healthValue">100</b>
+          </div>
+          <progress id="healthBar" max="100" value="100"></progress>
           <div class="pack-label">
             <i data-lucide="wind"></i><span id="packLevel">ION PACK I</span
             ><b><span id="fuel">100</span><small> FUEL</small></b>
@@ -194,14 +252,19 @@
           </div>
         </div>
         <div class="controls-hud">
+          <div class="flight-controls">
+            <span><kbd>WASD</kbd> 推进</span><span><kbd>空格</kbd> 上升</span
+            ><span><kbd>X</kbd> 下降</span><span><kbd>Shift</kbd> 刹车</span
+            ><span><kbd>V</kbd> 座舱视角</span>
+          </div>
           <div id="controlsHint">
             <span><kbd>WASD</kbd> 移动</span
-            ><span><kbd>空格</kbd> 长按喷射</span><span><kbd>E</kbd> 共鸣</span>
+            ><span><kbd>空格</kbd> 长按喷射</span><span><kbd>E</kbd> 交互</span>
           </div>
           <div class="control-row">
-            <span><kbd>Q</kbd> 冲刺 <b id="dashStatus">就绪</b></span
+            <span><kbd>Q</kbd> 钩锁 <b id="dashStatus">就绪</b></span
             ><span><kbd>V</kbd> <b id="viewMode">第三人称</b></span
-            ><span><kbd>R</kbd> 标记</span>
+            ><span><kbd>左键</kbd> 工具</span>
           </div>
         </div>
         <div class="radar">
@@ -215,6 +278,23 @@
         </div>
       </div>
       <div id="touchControls">
+        <button id="touchFire" class="touch-action" aria-label="切割与射击">
+          射击
+        </button>
+        <button
+          id="touchDown"
+          class="touch-action ship-touch"
+          aria-label="飞船下降"
+        >
+          下降
+        </button>
+        <button
+          id="touchBrake"
+          class="touch-action ship-touch"
+          aria-label="飞船刹车"
+        >
+          刹车
+        </button>
         <div class="dpad">
           <button data-move="forward" aria-label="前进">
             <i data-lucide="chevron-up"></i></button
@@ -228,9 +308,13 @@
         </div>
         <button id="touchJet" class="touch-action" aria-label="跳跃与喷射">
           <i data-lucide="rocket"></i></button
-        ><button id="touchInteract" class="touch-action" aria-label="信标共鸣">
+        ><button
+          id="touchInteract"
+          class="touch-action"
+          aria-label="阅读修复与登船"
+        >
           <i data-lucide="hand"></i></button
-        ><button id="touchDash" class="touch-action" aria-label="冲刺">
+        ><button id="touchDash" class="touch-action" aria-label="钩锁">
           <i data-lucide="zap"></i></button
         ><button id="touchMark" class="touch-action" aria-label="标记路线">
           <i data-lucide="map-pin"></i>

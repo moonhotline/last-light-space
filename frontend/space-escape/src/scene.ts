@@ -1,3 +1,6 @@
+import { weatherMaterials } from "./weathering";
+import { AdventureView, optimizeModel } from "./adventure-view";
+import { missionObjective } from "../shared/objectives";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
@@ -68,6 +71,7 @@ export class GameView {
   jetGain: GainNode | null = null;
   jetFilter: BiquadFilterNode | null = null;
   astronaut = new THREE.Group();
+  toolModel = new THREE.Group();
   avatars = new Map<string, THREE.Group>();
   beacons: THREE.Group[] = [];
   beaconBeams: THREE.Mesh[] = [];
@@ -93,6 +97,7 @@ export class GameView {
   lastMe = "";
   cameraObstructed = false;
   cameraRange = 8;
+  adventure: AdventureView;
   private dummy = new THREE.Object3D();
   private cinematic: ShaderPass;
   constructor(public canvas: HTMLCanvasElement) {
@@ -107,7 +112,7 @@ export class GameView {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.scene.fog = new THREE.FogExp2(0x667f91, 0.00095);
     this.scene.add(new THREE.HemisphereLight(0x8db4d8, 0x222f3a, 1.8));
     this.sun.position.set(-240, 190, -140);
@@ -123,7 +128,7 @@ export class GameView {
     });
     this.sun.shadow.bias = -0.00025;
     this.sun.shadow.normalBias = 0.22;
-    this.scene.add(this.sun, this.sun.target);
+    this.scene.add(this.sun, this.sun.target, this.camera);
     this.buildSky();
     this.buildTerrain();
     const crystalMat = new THREE.MeshStandardMaterial({
@@ -149,6 +154,11 @@ export class GameView {
     this.crystalHalo.frustumCulled = false;
     this.scene.add(this.crystals, this.crystalHalo);
     this.buildThermals();
+    this.adventure = new AdventureView(
+      this.scene,
+      (p, n, c, s) => this.burst(p, n, c, s),
+      (n, p) => this.sound(n, p),
+    );
     const pg = new THREE.BufferGeometry();
     pg.setAttribute(
       "position",
@@ -500,16 +510,24 @@ export class GameView {
   async load() {
     const loader = new GLTFLoader(),
       textureLoader = new THREE.TextureLoader();
-    const [explorer, beacon, observatory, lander, earth, moon] =
-      await Promise.all([
-        loader.loadAsync("/assets/explorer.glb"),
-        loader.loadAsync("/assets/beacon.glb"),
-        loader.loadAsync("/assets/observatory.glb"),
-        loader.loadAsync("/assets/lander.glb"),
-        textureLoader.loadAsync("/assets/earth.jpg"),
-        textureLoader.loadAsync("/assets/moon.jpg"),
-      ]);
+    const [explorer, beacon, observatory, earth, moon] = await Promise.all([
+      loader.loadAsync("/assets/explorer-v2.glb"),
+      loader.loadAsync("/assets/beacon.glb"),
+      loader.loadAsync("/assets/observatory.glb"),
+      textureLoader.loadAsync("/assets/earth.jpg"),
+      textureLoader.loadAsync("/assets/moon.jpg"),
+    ]);
     this.astronaut = explorer.scene;
+    optimizeModel(this.astronaut);
+    weatherMaterials(this.astronaut);
+    await this.adventure.load();
+    const tool = await loader.loadAsync("/assets/tool.glb");
+    optimizeModel(tool.scene);
+    this.toolModel.add(tool.scene);
+    this.toolModel.rotation.y = Math.PI;
+    this.toolModel.position.set(0.32, -0.3, -0.58);
+    this.camera.add(this.toolModel);
+    this.toolModel.visible = false;
     this.astronaut.traverse((o) => {
       if (o instanceof THREE.Mesh) {
         o.castShadow = true;
@@ -566,16 +584,6 @@ export class GameView {
         this.scene.add(arch);
       }
     });
-    const ship = lander.scene;
-    ship.position.set(-11, groundAt(-11, 367), 367);
-    ship.rotation.y = 0.4;
-    ship.traverse((o) => {
-      if (o instanceof THREE.Mesh) {
-        o.castShadow = true;
-        o.receiveShadow = true;
-      }
-    });
-    this.scene.add(ship);
     earth.colorSpace = moon.colorSpace = THREE.SRGBColorSpace;
     const planetMat = (map: THREE.Texture) =>
       new THREE.ShaderMaterial({
@@ -655,6 +663,11 @@ export class GameView {
       land: [70, 28, 0.28],
       beacon: [220, 880, 1.7],
       mark: [520, 660, 0.26],
+      tool: [760, 110, 0.16],
+      grapple: [280, 1100, 0.32],
+      kill: [160, 32, 0.65],
+      hurt: [110, 42, 0.35],
+      enemy: [340, 70, 0.22],
     };
     const [a, b, d] = sounds[name] || sounds.mark;
     o.type =
@@ -713,6 +726,15 @@ export class GameView {
     playing: boolean,
     physics?: MovementWorld | null,
   ) {
+    this.adventure.update(s, me, dt, t);
+    this.toolModel.visible = !!me && !this.thirdPerson && me.seat < 0;
+    if (me) {
+      this.toolModel.position.y =
+        -0.3 +
+        Math.sin(t * 7) * Math.min(0.012, Math.hypot(me.vx, me.vz) * 0.001);
+      this.toolModel.position.z =
+        -0.58 + Math.max(0, me.toolCooldown - 0.15) * 0.45;
+    }
     const worldTime = s ? s.time : t * 0.4 + 80,
       level = s?.beacons.filter((b) => b.active).length || 0;
     if (!me) {
@@ -731,16 +753,16 @@ export class GameView {
         fov = 66 + clamp(speed / 43) * 8 * this.effects;
       this.camera.fov = THREE.MathUtils.damp(this.camera.fov, fov, 5, dt);
       this.camera.updateProjectionMatrix();
-      const target = new THREE.Vector3(
-          me.x,
-          me.y + (this.thirdPerson ? 0.65 : 0.9),
-          me.z,
-        ),
+      const target = new THREE.Vector3(me.x, me.y + 0.9, me.z),
         rotation = new THREE.Euler(me.pitch, me.yaw, 0, "YXZ");
       this.camera.rotation.copy(rotation);
       this.cameraObstructed = false;
       if (this.thirdPerson) {
-        const offset = new THREE.Vector3(0.65, 1.0, 8).applyEuler(rotation),
+        const offset = new THREE.Vector3(
+            0,
+            me.seat >= 0 ? 6 : 0,
+            me.seat >= 0 ? 23 : 8,
+          ).applyEuler(rotation),
           desired = target.clone().add(offset);
         let range = offset.length();
         if (physics)
@@ -761,6 +783,13 @@ export class GameView {
       } else {
         this.cameraRange = 0;
         this.camera.position.copy(target);
+        if (me.seat >= 0 && s) {
+          this.camera.position.set(
+            s.adventure.ship.x - Math.sin(s.adventure.ship.yaw) * 4.7,
+            s.adventure.ship.y + 3.9,
+            s.adventure.ship.z - Math.cos(s.adventure.ship.yaw) * 4.7,
+          );
+        }
       }
       this.shake *= Math.exp(-dt * 12);
       if (playing && this.effects > 0) {
@@ -820,7 +849,12 @@ export class GameView {
     if (this.jetGain && this.listener) {
       const ctx = this.listener.context;
       this.jetGain.gain.setTargetAtTime(
-        playing && me?.jetting ? 0.18 : 0,
+        playing &&
+          (me?.jetting || (me && me.seat >= 0 && s?.adventure.ship.repaired))
+          ? me?.seat! >= 0
+            ? 0.1 + Math.min(0.12, (s?.adventure.ship.thrust || 0) * 0.05)
+            : 0.18
+          : 0,
         ctx.currentTime,
         0.09,
       );
@@ -931,15 +965,51 @@ export class GameView {
         this.avatars.set(p.id, a);
         this.scene.add(a);
       }
-      a.visible = !(own && (!this.thirdPerson || this.cameraRange < 1.2));
+      a.visible =
+        p.seat < 0 && !(own && (!this.thirdPerson || this.cameraRange < 1.2));
       if (own) a.position.set(p.x, p.y - 0.82, p.z);
       else
         a.position.lerp(
           new THREE.Vector3(p.x, p.y - 0.82, p.z),
           1 - Math.exp(-dt * 14),
         );
-      a.rotation.y = p.yaw + Math.PI;
-      a.rotation.z = 0;
+      const targetYaw = p.yaw + Math.PI;
+      a.rotation.y +=
+        Math.atan2(
+          Math.sin(targetYaw - a.rotation.y),
+          Math.cos(targetYaw - a.rotation.y),
+        ) *
+        (1 - Math.exp(-dt * 12));
+      a.rotation.z = THREE.MathUtils.damp(
+        a.rotation.z,
+        p.grapple ? Math.sin(t * 3) * 0.08 : 0,
+        8,
+        dt,
+      );
+      const torso = a.getObjectByName("body");
+      if (torso) {
+        torso.rotation.x = THREE.MathUtils.damp(
+          torso.rotation.x,
+          p.grapple
+            ? -0.22
+            : p.jetting
+              ? 0.13
+              : p.grounded
+                ? Math.min(0.16, Math.hypot(p.vx, p.vz) * 0.008)
+                : -0.08,
+          7,
+          dt,
+        );
+        torso.position.y = 0.98 + (p.grounded ? Math.sin(t * 2) * 0.008 : 0);
+      }
+      const head = a.getObjectByName("head");
+      if (head)
+        head.rotation.x = THREE.MathUtils.damp(
+          head.rotation.x,
+          -p.pitch * 0.35,
+          10,
+          dt,
+        );
       for (const side of [-1, 1]) {
         const jet = a.getObjectByName("jet-" + side);
         if (jet) {
@@ -963,6 +1033,35 @@ export class GameView {
             : p.jetting
               ? -0.27
               : amount * sign;
+      }
+      for (const side of ["L", "R"]) {
+        const sign = side === "L" ? 1 : -1,
+          knee = a.getObjectByName("knee_" + side),
+          elbow = a.getObjectByName("elbow_" + side);
+        if (knee)
+          knee.rotation.x = THREE.MathUtils.damp(
+            knee.rotation.x,
+            p.grounded
+              ? Math.max(0, -stride * sign) * amount * 0.9
+              : p.jetting
+                ? 0.4
+                : 0.7,
+            12,
+            dt,
+          );
+        if (elbow)
+          elbow.rotation.x = THREE.MathUtils.damp(
+            elbow.rotation.x,
+            p.toolCooldown > 0 || p.grapple
+              ? -1.1
+              : -0.16 - Math.max(0, stride * sign) * amount * 0.4,
+            14,
+            dt,
+          );
+        if (p.grapple && side === "L") {
+          const arm = a.getObjectByName("arm_L");
+          if (arm) arm.rotation.x = -1.3;
+        }
       }
       if (p.jetting && !own && hash(Math.floor(t * 30), p.color) > 0.4)
         this.burst({ x: p.x, y: p.y - 0.3, z: p.z }, 2, COLORS[p.color], 1.5);
@@ -1053,7 +1152,12 @@ export class GameView {
       ctx.arc(px(p.x), pz(p.z), r, 0, Math.PI * 2);
       ctx.fill();
     };
-    s.beacons.forEach((b) => dot(b, b.active ? "#b0f5ff" : "#eabf83", 4));
+    s.beacons.forEach((b) => dot(b, b.active ? "#b0f5ff" : "#eabf83", 3));
+    dot(s.adventure.ship, "#d1e3dc", 5);
+    dot(missionObjective(s, me).p, "#ffe1a6", 5);
+    s.adventure.drones
+      .filter((d) => d.hp > 0)
+      .forEach((d) => dot(d, "#f28d78", 2));
     s.markers.forEach((m) => dot(m, "#ffc97f", 3));
     s.players.forEach((p) =>
       dot(

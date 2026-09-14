@@ -160,13 +160,13 @@ test("two explorers charge a shared beacon faster and receive the same upgrade",
   assert.equal(g.level, 1);
   sim.dispose();
 });
-test("three beacons complete the expedition and free exploration stays playable", () => {
+test("three optional beacons unlock upgrades without ending the ship expedition", () => {
   const { sim, p } = setup();
   for (const b of sim.s.beacons) {
     place(sim, p.id, b.x, b.z + 2);
     ticks(sim, 95, p.id, { interact: true });
   }
-  assert.equal(sim.s.phase, "won");
+  assert.equal(sim.s.phase, "active");
   assert.ok(sim.s.completedAt > 0);
   const before = p.z;
   ticks(sim, 30, p.id, { forward: 1 });

@@ -1,0 +1,34 @@
+{
+  "date": "2026-09-14T12:14:16.353Z",
+  "url": "https://last-light-space.vercel.app",
+  "errors": [],
+  "httpFailures": [],
+  "rendering": {
+    "frames": 906,
+    "fps": 60,
+    "calls": 343,
+    "triangles": 497359,
+    "assets": true,
+    "audio": "running",
+    "camera": "first",
+    "cameraPosition": {
+      "x": 0.01001856404479895,
+      "y": 11.749471858819016,
+      "z": 313.5739777500837
+    },
+    "cameraObstructed": false,
+    "cameraRange": 0,
+    "ownAvatarVisible": false,
+    "earthY": -420,
+    "moonY": -600,
+    "thermalCount": 0
+  },
+  "checks": [
+    "two browsers join and start",
+    "remote movement",
+    "buffered E interaction",
+    "shared lore",
+    "12 inventory slots",
+    "first-person avatar hidden"
+  ]
+}

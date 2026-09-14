@@ -1,6 +1,6 @@
 {
   "name": "last-light-space",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,7 @@
     "space:server": "tsx frontend/space-escape/server/index.ts",
     "space:test": "tsx --test tests/space-escape/*.test.ts",
     "space:ui": "playwright test --config playwright.space.config.ts",
-    "space:record": "node frontend/space-escape/scripts/record-demo.mjs",
+    "space:record": "node frontend/space-escape/scripts/record-echo.mjs",
     "space:prepare-vercel": "npm run space:build && node frontend/space-escape/scripts/prepare-vercel.mjs"
   },
   "devDependencies": {

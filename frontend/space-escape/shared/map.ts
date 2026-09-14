@@ -98,6 +98,12 @@ export function terrainRaw(x: number, z: number) {
   y = y * (1 - blend) + (route.h + detail * 0.8) * blend;
   // The crystal arch crosses this 22 m wide, shallow ravine; walking around remains possible.
   y -= 30 * Math.exp(-(((x - 77) / 17) ** 4) - ((z - 59) / 40) ** 4);
+  const labBlend =
+    1 -
+    smooth((Math.max(Math.abs(x - 12) / 11, Math.abs(z - 192) / 14) - 1) / 0.7);
+  y = y * (1 - labBlend) + 17.2 * labBlend;
+  const grovePad = 1 - smooth((Math.hypot(x + 310, z + 210) - 25) / 18);
+  y = y * (1 - grovePad) + 170 * grovePad;
   return y;
 }
 let terrainCache: { vertices: Float32Array; indices: Uint32Array } | undefined;

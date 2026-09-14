@@ -44,3 +44,26 @@ test("four players share a room, a fifth is rejected, and host departure opens a
     await Promise.allSettled(rooms.map((r) => r.leave()));
   }
 });
+
+test("closing a record does not suppress the immediately following recall command", async () => {
+  const client = new Client(
+    process.env.SPACE_ROOM_URL || "ws://127.0.0.1:2567",
+  );
+  const room = await client.create("escape", { name: "Command check" });
+  let snapshot: Snapshot | undefined;
+  room.onMessage("snapshot", (s) => (snapshot = s));
+  try {
+    room.send("sync");
+    await expect.poll(() => snapshot?.players.length).toBe(1);
+    room.send("start");
+    await expect.poll(() => snapshot?.phase).toBe("active");
+    room.send("action", "close-lore");
+    room.send("action", "respawn");
+    await expect.poll(() => snapshot?.players[0].respawns).toBe(1);
+    room.send("action", { inventory: { core: 99 }, health: 999 });
+    room.send("sync");
+    await expect.poll(() => snapshot?.players[0].inventory.core).toBe(0);
+  } finally {
+    await room.leave();
+  }
+});

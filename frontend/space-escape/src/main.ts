@@ -1,4 +1,13 @@
 import "./style.css";
+import {
+  ITEMS,
+  REPAIR,
+  LORE,
+  RESOURCE_SITES,
+  type ItemId,
+} from "../shared/adventure-data";
+import { missionObjective } from "../shared/objectives";
+import { distance3 } from "../shared/map";
 import { Client, type Room } from "@colyseus/sdk";
 import {
   createIcons,
@@ -39,7 +48,8 @@ const text = (id: string, s: string) => {
 };
 const canvas = $<HTMLCanvasElement>("world"),
   view = new GameView(canvas),
-  keys = new Set<string>();
+  keys = new Set<string>(),
+  pulses = new Set<string>();
 const colors = ["#b0edff", "#ffd397", "#ffa994", "#bbc5ff"];
 let mode: "practice" | "coop" = "practice",
   sim: Simulation | null = null,
@@ -55,14 +65,23 @@ let pending: Input[] = [],
   accumulator = 0,
   lastFrame = performance.now(),
   spaceAt = 0;
-let panel: "landing" | "lobby" | "paused" | "result" | null = "landing",
+let panel:
+    | "landing"
+    | "lobby"
+    | "paused"
+    | "result"
+    | "inventory"
+    | "archive"
+    | null = "landing",
   endpoint = "",
   muted = false,
   loading = true,
   reconnecting = false,
   lastEvent = 0,
   uiAt = 0,
-  toastTimer = 0;
+  toastTimer = 0,
+  lastLore = -1,
+  inventorySignature = "";
 let correction = { x: 0, y: 0, z: 0 };
 let SimulationCtor: typeof import("../shared/simulation").Simulation | null =
     null,
@@ -117,12 +136,20 @@ function notice(message: string) {
 }
 function show(next: typeof panel) {
   panel = next;
-  for (const id of ["landing", "lobby", "paused", "result"])
+  for (const id of [
+    "landing",
+    "lobby",
+    "paused",
+    "result",
+    "inventory",
+    "archive",
+  ])
     $(id).hidden = next !== id;
   $("overlay").hidden = !next;
   $("hud").hidden = !state || state.phase === "lobby";
   document.body.dataset.paused = String(!!next);
   keys.clear();
+  pulses.clear();
   spaceAt = 0;
   if (next) document.exitPointerLock();
 }
@@ -173,6 +200,7 @@ function releaseSession() {
   accumulator = 0;
   correction = { x: 0, y: 0, z: 0 };
   lastEvent = 0;
+  lastLore = -1;
   view.lastMe = "";
   delete document.body.dataset.phase;
   $("journal").hidden = true;
@@ -201,12 +229,12 @@ function receive(next: Snapshot) {
       prediction.add(me.id, me);
     }
     const before = predicted;
-    predicted = { ...me };
+    predicted = structuredClone(me);
     prediction.reset(me.id, me);
     pending = pending.filter((i) => i.seq > me!.ack);
     if (state.phase !== "lobby")
       for (const i of pending) {
-        prediction.move(predicted, i);
+        if (predicted.seat < 0) prediction.move(predicted, i);
         prediction.step();
       }
     if (before && previous !== "lobby" && distance(before, predicted) < 3)
@@ -237,6 +265,10 @@ function receive(next: Snapshot) {
   if (next.eventId !== lastEvent) {
     lastEvent = next.eventId;
     if (next.eventId) notice(next.event);
+  }
+  if (me && me.lore !== lastLore) {
+    lastLore = me.lore;
+    if (lastLore >= 0 && panel !== "result") openLore(lastLore);
   }
   document.body.dataset.phase = state.phase;
   document.body.dataset.players = String(state.players.length);
@@ -314,7 +346,7 @@ function command(action: string) {
 }
 function makeInput(): Input {
   const active = !panel && !reconnecting;
-  return {
+  const input: Input = {
     seq: ++sequence,
     forward: active
       ? Number(keys.has("KeyW") || keys.has("ArrowUp")) -
@@ -324,14 +356,20 @@ function makeInput(): Input {
     yaw,
     pitch,
     sprint: active && (keys.has("ShiftLeft") || keys.has("ShiftRight")),
-    jump: active && keys.has("Space"),
+    jump: active && (keys.has("Space") || pulses.has("Space")),
     jet:
       active &&
       (keys.has("KeyF") ||
-        (keys.has("Space") && performance.now() - spaceAt > 220)),
-    dash: active && keys.has("KeyQ"),
-    interact: active && keys.has("KeyE"),
+        ((keys.has("Space") || pulses.has("Space")) &&
+          performance.now() - spaceAt > 220)),
+    dash: active && (keys.has("KeyC") || pulses.has("KeyC")),
+    grapple: active && (keys.has("KeyQ") || pulses.has("KeyQ")),
+    fire: active && (keys.has("Mouse0") || keys.has("KeyT")),
+    brake: active && keys.has("KeyX"),
+    interact: active && (keys.has("KeyE") || pulses.has("KeyE")),
   };
+  pulses.clear();
+  return input;
 }
 function step() {
   if (!state || state.phase === "lobby" || !me || reconnecting) return;
@@ -363,34 +401,39 @@ function step() {
       show("paused");
       notice("网络延迟过高，请等待同步");
     }
-    prediction.move(predicted, i);
+    if (predicted.seat < 0) prediction.move(predicted, i);
     prediction.step();
   }
 }
 function objective() {
-  if (!state) return null;
-  const b = state.beacons.find((b) => !b.active);
-  return b
-    ? {
-        p: b,
-        index: `0${b.id + 1} / 03`,
-        title: b.name,
-        detail:
-          b.id === 0
-            ? "沿晶体光点穿过峡谷"
-            : b.id === 1
-              ? "背包已升级 · 越过裂谷"
-              : "乘上升气流，抵达最高处",
-      }
-    : {
-        p: state.beacons[2],
-        index: "03 / 03",
-        title: "星图已点亮",
-        detail: "月球正在升起 · 自由探索",
-      };
+  return state && me ? missionObjective(state, me) : null;
 }
 function prompt() {
   if (!state || !me) return { label: "", progress: 0 };
+  const a = state.adventure,
+    ship = a.ship;
+  if (me.seat >= 0)
+    return { label: ship.grounded ? "E · 已着陆，可以离舱" : "", progress: 0 };
+  if (distance3(me, { ...ship, y: ship.y + 1 }) < 15)
+    return {
+      label: ship.repaired
+        ? "E · 登上游隼号"
+        : "长按 E · 存入材料 / 修复游隼号 · Tab 查看配方",
+      progress: ship.progress,
+    };
+  const clue = LORE.find((l) => distance3(me!, l) < 8);
+  if (clue) return { label: `E · 阅读 ${clue.site}`, progress: 0 };
+  const n = a.nodes.find(
+    (n) => n.readyAt <= state!.time && distance3(me!, n) < 11,
+  );
+  if (n)
+    return {
+      label:
+        n.item === "core" && a.drones.some((d) => d.hp > 0)
+          ? "核心被封锁 · 先清除守卫"
+          : `瞄准并长按左键 / T · ${RESOURCE_SITES[n.id].name}`,
+      progress: 1 - n.hp / RESOURCE_SITES[n.id].hp,
+    };
   const b = state.beacons.find(
     (b) => !b.active && distance(me!, b) < 10 && Math.abs(me!.y - b.y) < 10,
   );
@@ -399,10 +442,107 @@ function prompt() {
       label:
         b.id > 0 && !state.beacons[b.id - 1].active
           ? "先点亮上一座信标"
-          : "长按 E · 与信标共鸣",
+          : "长按 E · 与信标共鸣（支线升级）",
       progress: b.progress,
     };
   return { label: "", progress: 0 };
+}
+function openLore(id: number) {
+  const clue = LORE[id];
+  if (!clue) return;
+  text("loreSite", clue.site);
+  text("loreTitle", clue.title);
+  text("loreText", clue.text);
+  text("loreNext", clue.short);
+  show("archive");
+}
+function inventory() {
+  if (!state || state.phase === "lobby") return;
+  if (panel === "inventory") {
+    resumeGame();
+    return;
+  }
+  show("inventory");
+  paintInventory();
+}
+function resumeGame() {
+  show(null);
+  command("close-lore");
+  lock();
+  unlockAudio();
+}
+function paintInventory() {
+  if (!state || !me) return;
+  const signature = JSON.stringify([
+    me.inventory,
+    me.health,
+    state.adventure.ship.cargo,
+    state.adventure.ship.repaired,
+    state.adventure.lore,
+  ]);
+  if (signature === inventorySignature) return;
+  inventorySignature = signature;
+  const a = state.adventure;
+  const entries = (Object.keys(ITEMS) as ItemId[]).filter(
+    (k) => me!.inventory[k] > 0,
+  );
+  $("inventoryGrid").replaceChildren(
+    ...Array.from({ length: 12 }, (_, index) => {
+      const div = document.createElement("div");
+      div.className = "inventory-slot";
+      const key = entries[index];
+      if (key) {
+        const item = ITEMS[key];
+        div.style.setProperty("--item-color", item.color);
+        div.title = item.description;
+        const icon = document.createElement("b"),
+          label = document.createElement("span"),
+          qty = document.createElement("small");
+        icon.textContent = item.label;
+        label.textContent = item.name;
+        qty.textContent = String(me!.inventory[key]);
+        div.append(icon, label, qty);
+      } else {
+        div.classList.add("empty");
+        div.textContent = String(index + 1).padStart(2, "0");
+      }
+      return div;
+    }),
+  );
+  text(
+    "inventorySubtitle",
+    `${entries.length} / 12 格 · 每类最多 99 · 本次远征结束后不保留`,
+  );
+  $("repairRecipe").replaceChildren(
+    ...(Object.keys(REPAIR) as ItemId[]).map((k) => {
+      const row = document.createElement("div");
+      const total = a.ship.cargo[k],
+        needed = REPAIR[k]!;
+      row.textContent = `${ITEMS[k].name}   ${Math.min(total, needed)} / ${needed} 已存入 · 携带 ${me!.inventory[k]}`;
+      row.className = total >= needed ? "supplied" : "";
+      return row;
+    }),
+  );
+  text(
+    "repairTitle",
+    a.ship.repaired ? "游隼号 · 已修复" : "游隼号 · 修复清单",
+  );
+  $("loreList").replaceChildren(
+    ...LORE.map((l) => {
+      const b = document.createElement("button");
+      b.className = "secondary";
+      b.disabled = !a.lore.includes(l.id);
+      b.textContent = a.lore.includes(l.id) ? l.title : "未发现的记录";
+      b.onclick = () => openLore(l.id);
+      return b;
+    }),
+  );
+  text(
+    "inventoryHealth",
+    `护盾 ${Math.ceil(me.health)} / 100 · 凝胶 ${me.inventory.medgel}`,
+  );
+  $<HTMLButtonElement>("heal").disabled =
+    me.health >= 100 || me.inventory.medgel <= 0;
 }
 function crewList(id: string, players: Player[]) {
   $(id).replaceChildren(
@@ -425,7 +565,10 @@ function crewList(id: string, players: Player[]) {
 }
 function renderResult() {
   if (!state) return;
-  text("resultReason", "三座信标连接成星图。抬头，等待月球越过地平线。");
+  text(
+    "resultReason",
+    "游隼号驶入回声林地。月球缓缓升起，而这片不该存在的森林，仍在呼吸。第一章完成，世界继续开放。",
+  );
   $("resultStats").innerHTML =
     `<div>探索用时<b>${clock(state.time)}</b></div><div>能源晶体<b>${state.players.reduce((n, p) => n + p.crystals, 0)}</b></div>`;
   $<HTMLButtonElement>("again").disabled =
@@ -445,6 +588,10 @@ function hud() {
   text("fuel", String(Math.ceil(p.fuel)));
   $<HTMLProgressElement>("fuelBar").max = cap;
   $<HTMLProgressElement>("fuelBar").value = p.fuel;
+  text("healthValue", `${Math.ceil(me.health)}`);
+  $<HTMLProgressElement>("healthBar").value = me.health;
+  document.body.classList.toggle("aboard", me.seat >= 0);
+  if (panel === "inventory") paintInventory();
   text("packLevel", `ION PACK ${p.level >= 1 ? "II" : "I"}`);
   text("speed", Math.round(Math.hypot(p.vx, p.vz)).toString().padStart(2, "0"));
   text(
@@ -454,10 +601,13 @@ function hud() {
   text("cargo", `${me.crystals.toString().padStart(2, "0")} 晶体`);
   text("combo", me.combo >= 2 ? `×${me.combo} 连续收集` : "");
   $("combo").classList.toggle("visible", me.combo >= 2);
-  text(
-    "dashStatus",
-    p.dashCooldown > 0 ? `${p.dashCooldown.toFixed(1)} s` : "就绪",
-  );
+  text("dashStatus", p.grapple ? "牵引中 · Q 松开" : "瞄准岩壁");
+  const anchor = p.seat < 0 ? (sim?.physics || prediction)?.aim(p, 85) : null;
+  document
+    .querySelector(".reticle")
+    ?.classList.toggle("grapple-ready", !!anchor);
+  if (!p.grapple && anchor)
+    text("dashStatus", `${Math.round(distance3(p, anchor))} m 可挂接`);
   text("viewMode", view.thirdPerson ? "第三人称" : "第一人称");
   text("thermalStatus", me.level >= 2 ? "上升气流已开启" : "晶体补充燃料");
   crewList(
@@ -476,6 +626,20 @@ function hud() {
       text("targetDistance", `${Math.round(distance(p, target.p))} m`);
     }
   }
+  $("enemyLabels").replaceChildren(
+    ...state.adventure.drones
+      .filter((d) => d.hp > 0 && distance(p, d) < 80)
+      .flatMap((d) => {
+        const point = view.project({ ...d, y: d.y - 5 });
+        if (!point) return [];
+        const label = document.createElement("div");
+        label.className = "enemy-label";
+        label.style.left = point.x + "px";
+        label.style.top = point.y + "px";
+        label.textContent = `守卫 ${d.hp} / 100${d.mode === "charge" ? " · 已锁定，移动闪避" : ""}`;
+        return [label];
+      }),
+  );
   const near = prompt();
   $("interaction").hidden = !near.label;
   text("interactionText", near.label);
@@ -619,13 +783,24 @@ $("recall").onclick = () => {
   lock();
 };
 function keyDown(key: string) {
+  if (!keys.has(key) && ["KeyE", "KeyQ", "KeyC", "Space"].includes(key))
+    pulses.add(key);
   if (key === "Space" && !keys.has(key)) spaceAt = performance.now();
   keys.add(key);
 }
 addEventListener("keydown", (e) => {
   if ((e.target as HTMLElement)?.matches("input")) return;
   if (e.code === "Escape" && state && state.phase !== "lobby") {
+    if (panel === "inventory" || panel === "archive") {
+      resumeGame();
+      return;
+    }
     show("paused");
+    return;
+  }
+  if (e.code === "Tab" && state && state.phase !== "lobby") {
+    e.preventDefault();
+    inventory();
     return;
   }
   if (panel) return;
@@ -640,6 +815,7 @@ addEventListener("keydown", (e) => {
   if (e.code === "KeyV") camera();
   if (e.code === "KeyR") command("mark");
   if (e.code === "KeyB") command("respawn");
+  if (e.code === "KeyG") command("heal");
   if (e.code === "KeyH") {
     document.body.classList.toggle("hide-hud");
   }
@@ -656,6 +832,8 @@ document.addEventListener("mousemove", (e) => {
   pitch = Math.max(-1.35, Math.min(1.35, pitch - e.movementY * s));
 });
 canvas.addEventListener("mousedown", (e) => {
+  if (e.button === 0 && !panel && document.pointerLockElement === canvas)
+    keys.add("Mouse0");
   if (
     e.button === 0 &&
     !panel &&
@@ -664,6 +842,7 @@ canvas.addEventListener("mousedown", (e) => {
   )
     lock();
 });
+addEventListener("mouseup", () => keys.delete("Mouse0"));
 function holdKey(el: HTMLElement, key: string) {
   el.onpointerdown = (e) => {
     e.preventDefault();
@@ -672,25 +851,32 @@ function holdKey(el: HTMLElement, key: string) {
   };
   el.onpointerup = el.onpointercancel = () => keys.delete(key);
 }
-document
-  .querySelectorAll<HTMLElement>("[data-move]")
-  .forEach((b) =>
-    holdKey(
-      b,
-      (
-        {
-          forward: "KeyW",
-          back: "KeyS",
-          left: "KeyA",
-          right: "KeyD",
-        } as Record<string, string>
-      )[b.dataset.move!],
-    ),
-  );
+document.querySelectorAll<HTMLElement>("[data-move]").forEach((b) =>
+  holdKey(
+    b,
+    (
+      {
+        forward: "KeyW",
+        back: "KeyS",
+        left: "KeyA",
+        right: "KeyD",
+      } as Record<string, string>
+    )[b.dataset.move!],
+  ),
+);
 holdKey($("touchInteract"), "KeyE");
 holdKey($("touchJet"), "Space");
 holdKey($("touchDash"), "KeyQ");
 $("touchMark").onclick = () => command("mark");
+holdKey($("touchFire"), "KeyT");
+holdKey($("touchDown"), "KeyX");
+holdKey($("touchBrake"), "ShiftLeft");
+$("inventoryButton").onclick = inventory;
+$("closeInventory").onclick = resumeGame;
+$("closeLore").onclick = resumeGame;
+$("heal").onclick = () => {
+  sim ? sim.action(me!.id, "heal") : room?.send("action", "heal");
+};
 let touch: { id: number; x: number; y: number } | null = null;
 canvas.onpointerdown = (e) => {
   if (e.pointerType !== "mouse" && !panel) {

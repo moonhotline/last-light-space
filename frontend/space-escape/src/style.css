@@ -1075,3 +1075,270 @@ body[data-paused="true"] .reticle {
     transition: none !important;
   }
 }
+/* Chapter I: restrained field equipment and archive typography. */
+.inventory-sheet {
+  width: min(920px, calc(100vw - 48px));
+  max-height: calc(100dvh - 120px);
+  overflow: auto;
+  padding: 32px 40px !important;
+  background: linear-gradient(
+    125deg,
+    rgba(13, 24, 30, 0.98),
+    rgba(26, 38, 43, 0.97)
+  );
+}
+.inventory-sheet h2 {
+  font-size: 28px;
+  line-height: 1.5;
+  margin: 8px 0;
+}
+.inventory-columns {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 30px;
+  margin: 20px 0;
+}
+.inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.inventory-slot {
+  height: 88px;
+  border: 1px solid #a5c3c32c;
+  background: #abcaca08;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  color: #cedbdd;
+}
+.inventory-slot > b {
+  color: var(--item-color);
+  font:
+    26px Georgia,
+    serif;
+}
+.inventory-slot > span {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+.inventory-slot > small {
+  position: absolute;
+  right: 7px;
+  top: 6px;
+  font: 11px monospace;
+}
+.inventory-slot.empty {
+  color: #b8c9ca30;
+  font: 12px monospace;
+}
+.field-records {
+  padding-left: 24px;
+  border-left: 1px solid #b3c8c82b;
+}
+#repairRecipe {
+  font-size: 12px;
+  line-height: 2.4;
+  color: #dfbd96;
+  margin: 12px 0 24px;
+}
+#repairRecipe .supplied {
+  color: #99d9bc;
+}
+#loreList {
+  display: grid;
+  gap: 6px;
+}
+#loreList button {
+  text-align: left;
+  padding: 10px;
+  font-size: 12px;
+}
+#inventoryButton {
+  padding: 7px 12px;
+  font-size: 11px;
+  min-height: 34px;
+}
+.archive-sheet {
+  width: min(620px, calc(100vw - 40px));
+  padding: 40px !important;
+  background: linear-gradient(135deg, #192a2bf5, #111b23fa);
+  border-left: 2px solid #e1c29780;
+}
+.lore-text {
+  white-space: pre-line;
+  font:
+    17px/2.15 Georgia,
+    "Songti SC",
+    serif;
+  color: #e5e2d7;
+  margin: 30px 0;
+}
+.lore-next {
+  font-size: 12px;
+  line-height: 1.8;
+  color: #b7e0db;
+  border-top: 1px solid #c1d0ca33;
+  padding-top: 18px;
+}
+.health-line {
+  display: flex;
+  justify-content: space-between;
+  font: 10px monospace;
+  letter-spacing: 0.12em;
+  color: #afc5c5;
+  margin-bottom: 5px;
+}
+#healthBar {
+  height: 3px;
+  accent-color: #b7d8bd;
+  margin-bottom: 14px;
+}
+#healthBar::-webkit-progress-value {
+  background: #b7d8bd;
+}
+#damageFeedback {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 120px #da514c;
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+#damageFeedback.flash {
+  opacity: 0.6;
+  transition: none;
+}
+#hitFeedback {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: 20px;
+  height: 20px;
+  transform: translate(-50%, -50%) rotate(45deg);
+  border: 2px solid #f1d9b2;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+#hitFeedback.flash {
+  opacity: 1;
+  transition: none;
+}
+#touchFire {
+  right: 88px;
+  bottom: 300px;
+}
+#touchDown {
+  right: 20px;
+  bottom: 366px;
+}
+#touchBrake {
+  right: 88px;
+  bottom: 366px;
+}
+.ship-touch {
+  display: none !important;
+}
+.aboard .ship-touch {
+  display: flex !important;
+}
+@media (max-width: 760px) {
+  .inventory-sheet {
+    padding: 20px !important;
+    max-height: calc(100dvh - 90px);
+    width: calc(100vw - 28px);
+  }
+  .inventory-sheet h2 {
+    font-size: 20px;
+  }
+  .inventory-columns {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .inventory-slot {
+    height: 66px;
+  }
+  .field-records {
+    border-left: 0;
+    padding-left: 0;
+  }
+  .archive-sheet {
+    padding: 24px !important;
+    max-height: calc(100dvh - 100px);
+    overflow: auto;
+  }
+  .lore-text {
+    font-size: 15px;
+    line-height: 1.9;
+    margin: 20px 0;
+  }
+  #inventoryButton {
+    font-size: 10px;
+    padding: 6px;
+  }
+  #inventoryButton kbd {
+    display: none;
+  }
+  .health-line {
+    font-size: 9px;
+  }
+  #healthBar {
+    margin-bottom: 7px;
+  }
+}
+#inventoryButton {
+  width: auto;
+  flex: none;
+  white-space: nowrap;
+  margin: 0;
+}
+#linkState {
+  white-space: nowrap;
+  flex: none;
+}
+.top-tools > .icon {
+  flex: none;
+}
+.reticle.grapple-ready {
+  border-color: #a8efda;
+  box-shadow: 0 0 12px #a8efda88;
+}
+.enemy-label {
+  position: fixed;
+  transform: translate(-50%, -50%);
+  color: #ffd3bf;
+  border-top: 2px solid #e78e6f;
+  background: #291e1baf;
+  padding: 5px 9px;
+  font: 10px/1.4 monospace;
+  pointer-events: none;
+  white-space: nowrap;
+}
+body[data-paused="true"] #enemyLabels {
+  display: none;
+}
+.flight-controls {
+  display: none;
+  gap: 16px;
+  font-size: 11px;
+  align-items: center;
+}
+.aboard .flight-controls {
+  display: flex;
+}
+.aboard #controlsHint,
+.aboard .controls-hud .control-row,
+.aboard .pack-label,
+.aboard #fuelBar,
+.aboard .pack-footer {
+  display: none;
+}
+@media (max-width: 760px) {
+  .flight-controls {
+    display: none !important;
+  }
+}

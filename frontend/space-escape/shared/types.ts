@@ -1,4 +1,5 @@
 import type { Vec } from "./map";
+import type { Inventory, ItemId } from "./adventure-data";
 export const DT = 1 / 30;
 export type Phase = "lobby" | "active" | "won";
 export interface Input {
@@ -12,6 +13,9 @@ export interface Input {
   jet: boolean;
   dash: boolean;
   interact: boolean;
+  grapple: boolean;
+  fire: boolean;
+  brake: boolean;
 }
 export interface Player extends Vec {
   id: string;
@@ -39,6 +43,20 @@ export interface Player extends Vec {
   travel: number;
   checkpoint: number;
   respawns: number;
+  grapple: Vec | null;
+  grappleHeld: boolean;
+  grappleId: number;
+  inventory: Inventory;
+  health: number;
+  damageId: number;
+  toolCooldown: number;
+  shotId: number;
+  shotEnd: Vec;
+  hitKind: string;
+  interactHeld: boolean;
+  lore: number;
+  seat: number;
+  invulnerable: number;
 }
 export interface Beacon extends Vec {
   id: number;
@@ -47,6 +65,47 @@ export interface Beacon extends Vec {
   active: boolean;
   progress: number;
   activatedAt: number;
+}
+export interface ResourceNode extends Vec {
+  id: number;
+  item: ItemId;
+  amount: number;
+  hp: number;
+  readyAt: number;
+  hitId: number;
+}
+export interface Drone extends Vec {
+  id: number;
+  hp: number;
+  yaw: number;
+  target: string;
+  mode: "patrol" | "charge" | "fire" | "stunned" | "dead";
+  timer: number;
+  hitId: number;
+  shotId: number;
+  aim: Vec;
+}
+export interface Ship extends Vec {
+  yaw: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  bank: number;
+  repaired: boolean;
+  progress: number;
+  cargo: Inventory;
+  seats: string[];
+  grounded: boolean;
+  thrust: number;
+  flightTime: number;
+  arrived: boolean;
+}
+export interface Adventure {
+  lore: number[];
+  nodes: ResourceNode[];
+  drones: Drone[];
+  ship: Ship;
+  completeAt: number;
 }
 export interface Snapshot {
   phase: Phase;
@@ -62,6 +121,7 @@ export interface Snapshot {
   completedAt: number;
   event: string;
   eventId: number;
+  adventure: Adventure;
 }
 export const idleInput = (seq = 0): Input => ({
   seq,
@@ -74,6 +134,9 @@ export const idleInput = (seq = 0): Input => ({
   jet: false,
   dash: false,
   interact: false,
+  grapple: false,
+  fire: false,
+  brake: false,
 });
 export function parseInput(raw: unknown): Input | null {
   if (!raw || typeof raw !== "object") return null;
@@ -96,5 +159,8 @@ export function parseInput(raw: unknown): Input | null {
     jet: v.jet === true,
     dash: v.dash === true,
     interact: v.interact === true,
+    grapple: v.grapple === true,
+    fire: v.fire === true,
+    brake: v.brake === true,
   };
 }

@@ -1,3 +1,12 @@
+import {
+  createAdventure,
+  adventurePlayer,
+  interactAdventure,
+  tickShip,
+  tickDrones,
+  tool,
+} from "./adventure";
+import { type ItemId } from "./adventure-data";
 import { MovementWorld, fuelCapacity } from "./physics";
 import {
   SPAWN,
@@ -42,6 +51,7 @@ export class Simulation {
       completedAt: -1,
       event: "星球着陆准备就绪",
       eventId: 0,
+      adventure: createAdventure(),
     };
   }
   add(id: string, name = "探索员") {
@@ -82,6 +92,7 @@ export class Simulation {
       travel: 0,
       checkpoint: 0,
       respawns: 0,
+      ...adventurePlayer(),
     };
     p.y = groundAt(p.x, p.z) + 0.85;
     this.s.players.push(p);
@@ -91,6 +102,20 @@ export class Simulation {
     return p;
   }
   remove(id: string) {
+    const departed = this.player(id);
+    const ship = this.s.adventure.ship;
+    if (departed)
+      for (const k of Object.keys(departed.inventory) as ItemId[])
+        ship.cargo[k] += departed.inventory[k];
+    ship.seats = ship.seats.map((v) => (v === id ? "" : v));
+    if (!ship.seats[0]) {
+      const next = ship.seats.findIndex(Boolean);
+      if (next > 0) {
+        ship.seats[0] = ship.seats[next];
+        ship.seats[next] = "";
+        this.player(ship.seats[0])!.seat = 0;
+      }
+    }
     this.s.players = this.s.players.filter((p) => p.id !== id);
     this.physics.remove(id);
     this.queues.delete(id);
@@ -108,7 +133,7 @@ export class Simulation {
   start(id: string) {
     if (id !== this.s.host || this.s.phase !== "lobby") return false;
     this.s.phase = "active";
-    this.emit("沿光点穿越峡谷 · 长按空格喷射");
+    this.emit("游隼号失去动力 · 调查刻石，回收坠船废料 · Tab 查看任务");
     return true;
   }
   input(id: string, raw: unknown) {
@@ -120,6 +145,12 @@ export class Simulation {
     q.push(i);
   }
   respawn(p: Player) {
+    if (p.seat >= 0) {
+      this.s.adventure.ship.seats[p.seat] = "";
+      p.seat = -1;
+    }
+    p.grapple = null;
+    p.invulnerable = 4;
     const b = p.checkpoint ? this.s.beacons[p.checkpoint - 1] : SPAWN;
     Object.assign(p, {
       x: b.x,
@@ -140,6 +171,12 @@ export class Simulation {
     const p = this.player(id);
     if (!p || this.s.phase === "lobby") return;
     if (command === "respawn") this.respawn(p);
+    if (command === "heal" && p.inventory.medgel > 0 && p.health < 100) {
+      p.inventory.medgel--;
+      p.health = Math.min(100, p.health + 55);
+      this.emit("修复凝胶已使用 · 护盾恢复");
+    }
+    if (command === "close-lore") p.lore = -1;
     if (command === "mark") {
       const x = p.x - Math.sin(p.yaw) * 65,
         z = p.z - Math.cos(p.yaw) * 65;
@@ -158,22 +195,27 @@ export class Simulation {
     if (s.phase === "lobby") return;
     s.time += DT;
     const interactions = new Set<string>();
+    const inputs = new Map<string, Input>();
     for (const p of s.players) {
-      const q = this.queues.get(p.id)!,
-        i = q.shift();
+      const i = this.queues.get(p.id)!.shift();
       if (i) {
+        inputs.set(p.id, i);
         this.latest.set(p.id, i);
         p.ack = i.seq;
-        this.physics.move(p, i);
-        if (i.interact) interactions.add(p.id);
-      } else {
-        // Missing packets never repeat movement or interactions. Gravity still runs.
-        const idle = { ...idleInput(), yaw: p.yaw, pitch: p.pitch };
-        this.physics.move(p, idle);
-      }
+      } else inputs.set(p.id, { ...idleInput(), yaw: p.yaw, pitch: p.pitch });
+    }
+    tickShip(this, inputs);
+    for (const p of s.players) {
+      const i = inputs.get(p.id)!;
+      if (p.seat < 0) this.physics.move(p, i);
+      interactAdventure(this, p, i);
+      if (i.fire) tool(this, p);
+      if (i.interact && p.seat < 0) interactions.add(p.id);
     }
     this.physics.step();
+    tickDrones(this);
     for (const p of s.players) {
+      if (p.seat >= 0) continue;
       if (p.y < groundAt(p.x, p.z) - 8 || p.y < -100) this.respawn(p);
       if (p.comboUntil < s.time) p.combo = 0;
       if (s.earthAt < 0 && p.z < 260) {
@@ -210,7 +252,7 @@ export class Simulation {
           this.emit(`${b.name} 已点亮 · ${BEACON_SITES[b.id].upgrade}`);
           if (b.id === 2) {
             s.completedAt = s.time;
-            s.phase = "won";
+            this.emit("星图已连接 · 修复游隼号，探索回声林地");
           }
         }
       }

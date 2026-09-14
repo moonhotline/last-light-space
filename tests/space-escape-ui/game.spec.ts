@@ -21,7 +21,7 @@ test("planet scene, jetpack, finite fuel, landing feedback and both cameras work
     if (m.type() === "error") errors.push(m.text());
   });
   await ready(page);
-  await page.screenshot({ path: "docs/space-escape/planet-landing.png" });
+  await page.screenshot({ path: "docs/space-escape/echo-landing.png" });
   await page.locator("#launch").click();
   await expect(page.locator("#hud")).toBeVisible();
   await expect
@@ -58,7 +58,7 @@ test("planet scene, jetpack, finite fuel, landing feedback and both cameras work
       ),
     )
     .toBe(1);
-  await page.screenshot({ path: "docs/space-escape/planet-start.png" });
+  await page.screenshot({ path: "docs/space-escape/echo-start.png" });
   await page.keyboard.press("Escape");
   await expect(page.locator("#paused")).toBeVisible();
   const before = await read(page);
@@ -93,7 +93,7 @@ test("mobile layout exposes movement, flight and camera controls within the view
     390,
   );
   await page.screenshot({
-    path: "docs/space-escape/planet-mobile-landing.png",
+    path: "docs/space-escape/echo-mobile-landing.png",
   });
   await page.locator("#launch").click();
   await expect(page.locator("#touchControls")).toBeVisible();
@@ -115,7 +115,7 @@ test("mobile layout exposes movement, flight and camera controls within the view
   await page.mouse.up();
   await page.locator("#camera").click();
   await expect.poll(async () => (await rendering(page)).camera).toBe("first");
-  await page.screenshot({ path: "docs/space-escape/planet-mobile-game.png" });
+  await page.screenshot({ path: "docs/space-escape/echo-mobile-game.png" });
   const rects = await page
     .locator(".vitals,.touch-action,.dpad,.top-tools")
     .evaluateAll((nodes) =>
@@ -124,6 +124,35 @@ test("mobile layout exposes movement, flight and camera controls within the view
         return { x: r.x, right: r.right, bottom: r.bottom };
       }),
     );
+  const actions = await page
+    .locator(".touch-action:visible")
+    .evaluateAll((nodes) =>
+      nodes.map((n) => {
+        const r = n.getBoundingClientRect();
+        return { id: n.id, x: r.x, y: r.y, right: r.right, bottom: r.bottom };
+      }),
+    );
+  for (let i = 0; i < actions.length; i++)
+    for (let j = i + 1; j < actions.length; j++) {
+      const a = actions[i],
+        b = actions[j];
+      expect(
+        Math.max(0, Math.min(a.right, b.right) - Math.max(a.x, b.x)) *
+          Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.y, b.y)),
+        `${a.id} overlaps ${b.id}`,
+      ).toBe(0);
+    }
+  const fire = await page.locator("#touchFire").boundingBox();
+  await page.mouse.move(fire!.x + 20, fire!.y + 20);
+  await page.mouse.down();
+  await expect.poll(async () => (await read(page)).shotId).toBeGreaterThan(0);
+  await page.mouse.up();
+  await page.locator("#inventoryButton").click();
+  await expect(page.locator("#inventory")).toBeVisible();
+  await page.screenshot({
+    path: "docs/space-escape/echo-mobile-inventory.png",
+  });
+  await page.locator("#closeInventory").click();
   for (const r of rects) {
     expect(r.x).toBeGreaterThanOrEqual(0);
     expect(r.right).toBeLessThanOrEqual(390);
