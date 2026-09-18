@@ -228,7 +228,7 @@ function receive(next: Snapshot) {
   const previous = state?.phase;
   state = next;
   me = state.players.find((p) => p.id === (room?.sessionId || "local")) || null;
-  if (mode === "coop" && me) {
+  if (mode === "coop" && me && next.phase !== "lobby") {
     if (!prediction) {
       if (!MovementWorldCtor) return;
       prediction = new MovementWorldCtor();
@@ -317,7 +317,6 @@ async function connect(create: boolean) {
   text("entryStatus", "正在建立通讯…");
   unlockAudio();
   try {
-    await loadSimulation();
     const client = new Client(endpoint);
     const joined = create
       ? await client.create("escape", { name: callsign() })
@@ -336,6 +335,9 @@ async function connect(create: boolean) {
     text("linkState", `房间 ${joined.roomId}`);
     joined.send("sync");
     show("lobby");
+    // Prediction is only needed after the expedition starts. Warm it while the
+    // crew gathers so a large physics module never blocks room creation.
+    void loadSimulation().catch(() => notice("本地预测暂不可用"));
     history.replaceState({}, "", `?room=${joined.roomId}`);
   } catch {
     text("entryStatus", "房间不可用：检查编号或创建新房间");
