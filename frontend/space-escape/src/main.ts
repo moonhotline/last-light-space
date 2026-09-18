@@ -229,26 +229,26 @@ function receive(next: Snapshot) {
   state = next;
   me = state.players.find((p) => p.id === (room?.sessionId || "local")) || null;
   if (mode === "coop" && me && next.phase !== "lobby") {
-    if (!prediction) {
-      if (!MovementWorldCtor) return;
+    if (!prediction && MovementWorldCtor) {
       prediction = new MovementWorldCtor();
       prediction.add(me.id, me);
     }
-    const before = predicted;
-    predicted = structuredClone(me);
-    prediction.reset(me.id, me);
-    pending = pending.filter((i) => i.seq > me!.ack);
-    if (state.phase !== "lobby")
+    if (prediction) {
+      const before = predicted;
+      predicted = structuredClone(me);
+      prediction.reset(me.id, me);
+      pending = pending.filter((i) => i.seq > me!.ack);
       for (const i of pending) {
         if (predicted.seat < 0) prediction.move(predicted, i);
         prediction.step();
       }
-    if (before && previous !== "lobby" && distance(before, predicted) < 3)
-      correction = {
-        x: before.x - predicted.x,
-        y: Math.abs(before.y - predicted.y) < 1 ? before.y - predicted.y : 0,
-        z: before.z - predicted.z,
-      };
+      if (before && previous !== "lobby" && distance(before, predicted) < 3)
+        correction = {
+          x: before.x - predicted.x,
+          y: Math.abs(before.y - predicted.y) < 1 ? before.y - predicted.y : 0,
+          z: before.z - predicted.z,
+        };
+    }
   }
   if (next.phase !== previous) {
     if (next.phase === "lobby") {
