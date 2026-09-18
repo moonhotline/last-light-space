@@ -17,8 +17,15 @@ import {
   SPAWN,
   THERMALS,
   distance,
+  WORLD_SIZE,
 } from "../../frontend/space-escape/shared/map";
 await initPhysics();
+
+test("expanded basin keeps the authored world at five times the prior area", () => {
+  assert.equal(WORLD_SIZE, 3580);
+  assert.ok(Math.abs((WORLD_SIZE * WORLD_SIZE) / (1600 * 1600) - 5) < 0.02);
+});
+
 function setup() {
   const sim = new Simulation(42),
     p = sim.add("pilot");

@@ -17,8 +17,10 @@ import {
   BEACON_SITES,
   CRYSTALS,
   THERMALS,
+  SCENIC_SITES,
   SPAWN,
   HALF,
+  WORLD_SIZE,
   distance,
   clamp,
   smooth,
@@ -50,7 +52,7 @@ export class GameView {
   scene = new THREE.Scene();
   skyScene = new THREE.Scene();
   skyCamera = new THREE.PerspectiveCamera(66, 1, 100, 22000);
-  camera = new THREE.PerspectiveCamera(66, 1, 0.1, 4000);
+  camera = new THREE.PerspectiveCamera(66, 1, 0.1, 6500);
   renderer: THREE.WebGLRenderer;
   composer: EffectComposer;
   bloom: UnrealBloomPass;
@@ -113,7 +115,7 @@ export class GameView {
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
-    this.scene.fog = new THREE.FogExp2(0x667f91, 0.00095);
+    this.scene.fog = new THREE.FogExp2(0x667f91, 0.00052);
     this.scene.add(new THREE.HemisphereLight(0x8db4d8, 0x222f3a, 1.8));
     this.sun.position.set(-240, 190, -140);
     this.sun.castShadow = true;
@@ -215,6 +217,9 @@ export class GameView {
     const dark = new THREE.Color(0x364e61),
       ice = new THREE.Color(0x9aafb5),
       sand = new THREE.Color(0x8d9290),
+      snow = new THREE.Color(0xdce9ee),
+      redRock = new THREE.Color(0x8d4d3d),
+      blueIce = new THREE.Color(0x9fc4cf),
       temp = new THREE.Color();
     for (let i = 0; i < vertices.length / 3; i++) {
       const x = vertices[i * 3],
@@ -232,6 +237,12 @@ export class GameView {
       temp.multiplyScalar(0.8 + noise(x * 0.11, z * 0.11) * 0.28);
       if (y > 170)
         temp.lerp(ice, smooth((y - 170) / 100) * Math.max(0, flat) * 0.52);
+      const north = smooth((z - 520) / 420);
+      const west = smooth((-x - 520) / 520) * smooth((-z - 60) / 620);
+      const east = smooth((x - 520) / 560) * smooth((z + 180) / 720);
+      temp.lerp(snow, north * 0.32);
+      temp.lerp(redRock, west * 0.34);
+      temp.lerp(blueIce, east * 0.28);
       temp.toArray(colors, i * 3);
       uv[i * 2] = x / 35;
       uv[i * 2 + 1] = z / 35;
@@ -314,7 +325,7 @@ export class GameView {
     for (let row = 0; row <= rings; row++)
       for (let col = 0; col <= angular; col++) {
         const angle = (col / angular) * Math.PI * 2,
-          radius = 1120 + (row / rings) * 2400;
+          radius = HALF + 140 + (row / rings) * 2400;
         const x = Math.sin(angle) * radius,
           z = Math.cos(angle) * radius;
         const ridge =
@@ -345,6 +356,68 @@ export class GameView {
     rangeGeometry.computeVertexNormals();
     far.add(new THREE.Mesh(rangeGeometry, farMat));
     this.scene.add(far);
+    const scenic = new THREE.Group();
+    const towerMat = new THREE.MeshStandardMaterial({
+      color: 0x354b56,
+      roughness: 0.72,
+      metalness: 0.52,
+      emissive: 0x0d3441,
+      emissiveIntensity: 0.28,
+    });
+    const redMat = new THREE.MeshStandardMaterial({
+      color: 0x7d3e32,
+      roughness: 0.9,
+      metalness: 0.08,
+    });
+    for (const site of SCENIC_SITES) {
+      const g = new THREE.Group();
+      g.position.set(site.x, site.y, site.z);
+      g.scale.setScalar(site.scale);
+      if (site.kind === "tower") {
+        const shaft = new THREE.Mesh(
+          new THREE.CylinderGeometry(5.5, 13, 86, 6),
+          towerMat,
+        );
+        shaft.position.y = 43;
+        shaft.castShadow = true;
+        g.add(shaft);
+        const cap = new THREE.Mesh(
+          new THREE.ConeGeometry(12, 28, 6),
+          towerMat,
+        );
+        cap.position.y = 100;
+        cap.castShadow = true;
+        g.add(cap);
+        const light = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.9, 1.8, 36, 12),
+          glowMaterial(0x65dcff, 0.82),
+        );
+        light.position.y = 112;
+        g.add(light);
+      } else if (site.kind === "spire") {
+        for (let j = 0; j < 5; j++) {
+          const rock = new THREE.Mesh(
+            new THREE.ConeGeometry(7 - j * 0.8, 34 + j * 10, 5),
+            redMat,
+          );
+          rock.position.set((j - 2) * 8, (34 + j * 10) / 2, (j % 2) * 8 - 4);
+          rock.rotation.z = (j - 2) * 0.08;
+          rock.castShadow = true;
+          g.add(rock);
+        }
+      } else {
+        const arch = new THREE.Mesh(
+          new THREE.TorusGeometry(18, 4, 10, 6, Math.PI),
+          towerMat,
+        );
+        arch.rotation.z = Math.PI / 2;
+        arch.position.y = 18;
+        arch.castShadow = true;
+        g.add(arch);
+      }
+      scenic.add(g);
+    }
+    this.scene.add(scenic);
   }
   buildSky() {
     this.skyScene.add(this.sky);
@@ -511,7 +584,7 @@ export class GameView {
     const loader = new GLTFLoader(),
       textureLoader = new THREE.TextureLoader();
     const [explorer, beacon, observatory, earth, moon] = await Promise.all([
-      loader.loadAsync("/assets/explorer-v2.glb"),
+      loader.loadAsync("/assets/explorer-v3.glb"),
       loader.loadAsync("/assets/beacon.glb"),
       loader.loadAsync("/assets/observatory.glb"),
       textureLoader.loadAsync("/assets/earth.jpg"),
@@ -1129,9 +1202,9 @@ export class GameView {
       w = canvas.width,
       h = canvas.height;
     ctx.clearRect(0, 0, w, h);
-    const scale = w / 1050,
+    const scale = w / (WORLD_SIZE * 1.05),
       px = (x: number) => w / 2 + x * scale,
-      pz = (z: number) => h / 2 + (z + 30) * scale;
+      pz = (z: number) => h / 2 + z * scale;
     ctx.strokeStyle = "#93b8c422";
     ctx.lineWidth = 1;
     for (let r = 25; r < 120; r += 25) {

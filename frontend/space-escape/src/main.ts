@@ -36,7 +36,13 @@ import {
   Navigation,
   Zap,
 } from "lucide";
-import { distance, groundAt, sector, BEACON_SITES } from "../shared/map";
+import {
+  distance,
+  groundAt,
+  sector,
+  BEACON_SITES,
+  WORLD_SIZE,
+} from "../shared/map";
 import { DT, type Input, type Player, type Snapshot } from "../shared/types";
 import type { Simulation } from "../shared/simulation";
 import type { MovementWorld } from "../shared/physics";
@@ -958,6 +964,14 @@ Object.assign(window, {
       cameraObstructed: view.cameraObstructed,
       cameraRange: view.cameraRange,
       ownAvatarVisible: me ? view.avatars.get(me.id)?.visible : false,
+      worldSize: WORLD_SIZE,
+      rigBones: (() => {
+        const names: string[] = [];
+        view.astronaut.traverse((object) => {
+          if ((object as { isBone?: boolean }).isBone) names.push(object.name);
+        });
+        return names;
+      })(),
       earthY: view.earth.position.y,
       moonY: view.moon.position.y,
       thermalCount: view.thermalGroups.filter((g) => g.visible).length,

@@ -1,0 +1,49 @@
+{
+  "url": "http://127.0.0.1:2571/",
+  "errors": [],
+  "diagnostics": {
+    "frames": 312,
+    "fps": 60,
+    "calls": 384,
+    "triangles": 1221611,
+    "assets": true,
+    "audio": "running",
+    "camera": "third",
+    "cameraPosition": {
+      "x": 0.01145910915499826,
+      "y": 11.070589712382935,
+      "z": 342.03949301317243
+    },
+    "cameraObstructed": false,
+    "cameraRange": 8,
+    "ownAvatarVisible": true,
+    "worldSize": 3580,
+    "rigBones": [
+      "root",
+      "pelvis",
+      "body",
+      "arm_L",
+      "elbow_L",
+      "hand_L",
+      "arm_R",
+      "elbow_R",
+      "hand_R",
+      "head",
+      "leg_L",
+      "knee_L",
+      "foot_L",
+      "leg_R",
+      "knee_R",
+      "foot_R"
+    ],
+    "earthY": -420,
+    "moonY": -600,
+    "thermalCount": 0
+  },
+  "encodedBytes": 860735,
+  "byteDistribution": {
+    "dark": 53861,
+    "light": 53720,
+    "chroma": 587501
+  }
+}

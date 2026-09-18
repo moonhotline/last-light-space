@@ -1,11 +1,14 @@
-/** One authored 1.6 km basin. Rendering and Rapier use the exact same triangles. */
+/** One authored 3.58 km basin. Rendering and Rapier use the exact same triangles. */
 export interface Vec {
   x: number;
   y: number;
   z: number;
 }
-export const WORLD_SIZE = 1600;
-export const SEGMENTS = 256;
+// The v0.2 basin was 1.6 km across. This release expands the walkable square
+// to 3.58 km, which is 5x the explorable area while keeping the authored route
+// and mission landmarks close enough to remain readable.
+export const WORLD_SIZE = 3580;
+export const SEGMENTS = 512;
 export const CELL = WORLD_SIZE / SEGMENTS;
 export const HALF = WORLD_SIZE / 2;
 export const clamp = (v: number, lo = 0, hi = 1) =>
@@ -84,9 +87,27 @@ export function terrainRaw(x: number, z: number) {
   y +=
     hill(x, z, 210, -620, 210, 100, 285) + hill(x, z, 570, 270, 150, 300, 170);
   y +=
+    hill(x, z, -980, 850, 310, 520, 360) +
+    hill(x, z, -420, 1260, 430, 260, 430) +
+    hill(x, z, 610, 1160, 350, 310, 390) +
+    hill(x, z, 1180, 540, 280, 620, 330);
+  y +=
+    hill(x, z, -1210, -510, 390, 310, 280) +
+    hill(x, z, -860, -1190, 520, 260, 350) +
+    hill(x, z, 520, -1310, 440, 250, 380) +
+    hill(x, z, 1280, -570, 290, 520, 320);
+  y +=
     45 *
     (1 - Math.abs(noise(x * 0.012 + 4, z * 0.012) * 2 - 1)) *
     smooth((Math.hypot(x, z) - 220) / 400);
+  // Broad biome signatures make the added land readable from the air instead
+  // of turning the extra area into a uniform procedural carpet.
+  const northSnow = smooth((z - 520) / 420);
+  const westRed = smooth((-x - 520) / 520) * smooth((-z - 60) / 620);
+  const eastIce = smooth((x - 520) / 560) * smooth((z + 180) / 720);
+  y += northSnow * (18 * noise(x * 0.008, z * 0.008) + 8);
+  y += westRed * (12 * noise(x * 0.014, z * 0.014) - 3);
+  y += eastIce * (22 * noise(x * 0.006, z * 0.006) + 6);
   // A crater to the west rewards leaving the main path with an energy-rich rim.
   const crater = Math.hypot((x + 310) * 0.95, z + 210);
   y +=
@@ -100,7 +121,7 @@ export function terrainRaw(x: number, z: number) {
   y -= 30 * Math.exp(-(((x - 77) / 17) ** 4) - ((z - 59) / 40) ** 4);
   const labBlend =
     1 -
-    smooth((Math.max(Math.abs(x - 12) / 11, Math.abs(z - 192) / 14) - 1) / 0.7);
+    smooth((Math.max(Math.abs(x - 12) / 18, Math.abs(z - 192) / 18) - 1) / 0.7);
   y = y * (1 - labBlend) + 17.2 * labBlend;
   const grovePad = 1 - smooth((Math.hypot(x + 310, z + 210) - 25) / 18);
   y = y * (1 - grovePad) + 170 * grovePad;
@@ -206,18 +227,32 @@ for (let i = 0; i < 16; i++) {
   });
 }
 export const ROCKS: (Vec & { size: number; angle: number })[] = [];
-for (let i = 0; i < 480; i++) {
-  const x = (hash(i, 3) * 2 - 1) * 745,
-    z = (hash(i, 9) * 2 - 1) * 745,
+for (let i = 0; i < 1400; i++) {
+  const x = (hash(i, 3) * 2 - 1) * (HALF - 55),
+    z = (hash(i, 9) * 2 - 1) * (HALF - 55),
     size = 1.1 + hash(i, 20) ** 3 * 12;
   if (
     routeInfo(x, z).d < 19 + size ||
-    BEACON_SITES.some((b) => distance(b, { x, z }) < 28)
+    BEACON_SITES.some((b) => distance(b, { x, z }) < 28) ||
+    distance({ x, z }, { x: 12, z: 192 }) < 42 ||
+    distance({ x, z }, { x: -11, z: 347 }) < 35 ||
+    distance({ x, z }, { x: 176, z: -68 }) < 48 ||
+    distance({ x, z }, { x: -310, z: -210 }) < 48
   )
     continue;
   ROCKS.push({ ...atGround(x, z), size, angle: hash(i, 4) * Math.PI * 2 });
 }
+export const SCENIC_SITES = [
+  { ...atGround(-470, -1010), kind: "tower" as const, scale: 1.25 },
+  { ...atGround(660, 980), kind: "tower" as const, scale: 0.86 },
+  { ...atGround(-1120, 580), kind: "spire" as const, scale: 1.45 },
+  { ...atGround(1160, -390), kind: "spire" as const, scale: 1.1 },
+  { ...atGround(890, 1260), kind: "arch" as const, scale: 1.25 },
+] as const;
 export function sector(z: number, x = 0) {
+  if (z > 700) return "06 / 极昼雪原";
+  if (x < -700 && z < 180) return "07 / 赤岩裂谷";
+  if (x > 700 && z < 220) return "08 / 冰环台地";
   if (x < -200 && z < 0) return "04 / 回声陨石坑";
   if (z > 235) return "01 / 寂静峡谷";
   if (z > 35) return "02 / 曙光平原";

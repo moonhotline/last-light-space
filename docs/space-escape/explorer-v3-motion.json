@@ -1,0 +1,438 @@
+{
+  "world_up": "+Z",
+  "character_forward": "-Y in Blender / +Z after glTF import",
+  "armature": "Explorer_Rig",
+  "meshes": 58,
+  "bones": [
+    {
+      "name": "root",
+      "parent": null,
+      "head": [
+        0.0,
+        0.0,
+        0.02
+      ],
+      "tail": [
+        0.0,
+        0.0,
+        0.22
+      ]
+    },
+    {
+      "name": "pelvis",
+      "parent": "root",
+      "head": [
+        0.0,
+        0.0,
+        0.83
+      ],
+      "tail": [
+        0.0,
+        0.0,
+        1.04
+      ]
+    },
+    {
+      "name": "body",
+      "parent": "pelvis",
+      "head": [
+        0.0,
+        0.0,
+        1.02
+      ],
+      "tail": [
+        0.0,
+        0.0,
+        1.48
+      ]
+    },
+    {
+      "name": "head",
+      "parent": "body",
+      "head": [
+        0.0,
+        0.0,
+        1.5
+      ],
+      "tail": [
+        0.0,
+        0.0,
+        1.92
+      ]
+    },
+    {
+      "name": "arm_L",
+      "parent": "body",
+      "head": [
+        -0.35,
+        0.0,
+        1.42
+      ],
+      "tail": [
+        -0.35,
+        0.0,
+        1.08
+      ]
+    },
+    {
+      "name": "elbow_L",
+      "parent": "arm_L",
+      "head": [
+        -0.35,
+        0.0,
+        1.08
+      ],
+      "tail": [
+        -0.35,
+        -0.02,
+        0.8
+      ]
+    },
+    {
+      "name": "hand_L",
+      "parent": "elbow_L",
+      "head": [
+        -0.35,
+        -0.02,
+        0.8
+      ],
+      "tail": [
+        -0.35,
+        -0.08,
+        0.68
+      ]
+    },
+    {
+      "name": "arm_R",
+      "parent": "body",
+      "head": [
+        0.35,
+        0.0,
+        1.42
+      ],
+      "tail": [
+        0.35,
+        0.0,
+        1.08
+      ]
+    },
+    {
+      "name": "elbow_R",
+      "parent": "arm_R",
+      "head": [
+        0.35,
+        0.0,
+        1.08
+      ],
+      "tail": [
+        0.35,
+        -0.02,
+        0.8
+      ]
+    },
+    {
+      "name": "hand_R",
+      "parent": "elbow_R",
+      "head": [
+        0.35,
+        -0.02,
+        0.8
+      ],
+      "tail": [
+        0.35,
+        -0.08,
+        0.68
+      ]
+    },
+    {
+      "name": "leg_L",
+      "parent": "pelvis",
+      "head": [
+        -0.17,
+        0.0,
+        0.94
+      ],
+      "tail": [
+        -0.17,
+        0.0,
+        0.56
+      ]
+    },
+    {
+      "name": "knee_L",
+      "parent": "leg_L",
+      "head": [
+        -0.17,
+        0.0,
+        0.56
+      ],
+      "tail": [
+        -0.17,
+        -0.025,
+        0.18
+      ]
+    },
+    {
+      "name": "foot_L",
+      "parent": "knee_L",
+      "head": [
+        -0.17,
+        -0.02,
+        0.18
+      ],
+      "tail": [
+        -0.17,
+        -0.27,
+        0.12
+      ]
+    },
+    {
+      "name": "leg_R",
+      "parent": "pelvis",
+      "head": [
+        0.17,
+        0.0,
+        0.94
+      ],
+      "tail": [
+        0.17,
+        0.0,
+        0.56
+      ]
+    },
+    {
+      "name": "knee_R",
+      "parent": "leg_R",
+      "head": [
+        0.17,
+        0.0,
+        0.56
+      ],
+      "tail": [
+        0.17,
+        -0.025,
+        0.18
+      ]
+    },
+    {
+      "name": "foot_R",
+      "parent": "knee_R",
+      "head": [
+        0.17,
+        -0.02,
+        0.18
+      ],
+      "tail": [
+        0.17,
+        -0.27,
+        0.12
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "name": "Idle_Breathing",
+      "frame_range": [
+        1.0,
+        48.0
+      ]
+    },
+    {
+      "name": "Jetpack_Flight",
+      "frame_range": [
+        1.0,
+        40.0
+      ]
+    },
+    {
+      "name": "Walk_LowGravity",
+      "frame_range": [
+        1.0,
+        33.0
+      ]
+    }
+  ],
+  "model_bounds": {
+    "min": [
+      -0.4899,
+      -0.4335,
+      -0.0553
+    ],
+    "max": [
+      0.4899,
+      0.575,
+      2.11
+    ]
+  },
+  "ground_contact": {
+    "idle_foot_min_z": -0.0127,
+    "verdict": "pass: 1.27 cm sole compression is within the 2 cm visible-contact threshold"
+  },
+  "samples": [
+    {
+      "action": "Idle_Breathing",
+      "frame": 1,
+      "foot_min_z": -0.0127,
+      "pelvis": [
+        0.0,
+        0.0,
+        0.83
+      ],
+      "head": [
+        0.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "action": "Idle_Breathing",
+      "frame": 24,
+      "foot_min_z": -0.0127,
+      "pelvis": [
+        0.0,
+        0.0,
+        0.83
+      ],
+      "head": [
+        0.0,
+        -0.0058,
+        1.5
+      ]
+    },
+    {
+      "action": "Idle_Breathing",
+      "frame": 48,
+      "foot_min_z": -0.0127,
+      "pelvis": [
+        0.0,
+        0.0,
+        0.83
+      ],
+      "head": [
+        0.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "action": "Walk_LowGravity",
+      "frame": 1,
+      "foot_min_z": 0.0055,
+      "pelvis": [
+        0.0,
+        0.0,
+        0.83
+      ],
+      "head": [
+        0.0,
+        -0.0336,
+        1.4988
+      ]
+    },
+    {
+      "action": "Walk_LowGravity",
+      "frame": 9,
+      "foot_min_z": -0.0127,
+      "pelvis": [
+        0.0,
+        0.0,
+        0.83
+      ],
+      "head": [
+        0.0,
+        -0.0336,
+        1.4988
+      ]
+    },
+    {
+      "action": "Walk_LowGravity",
+      "frame": 17,
+      "foot_min_z": 0.0055,
+      "pelvis": [
+        0.0,
+        0.0,
+        0.83
+      ],
+      "head": [
+        0.0,
+        -0.0336,
+        1.4988
+      ]
+    },
+    {
+      "action": "Walk_LowGravity",
+      "frame": 25,
+      "foot_min_z": -0.0127,
+      "pelvis": [
+        0.0,
+        0.0,
+        0.83
+      ],
+      "head": [
+        0.0,
+        -0.0336,
+        1.4988
+      ]
+    },
+    {
+      "action": "Walk_LowGravity",
+      "frame": 33,
+      "foot_min_z": 0.0055,
+      "pelvis": [
+        0.0,
+        0.0,
+        0.83
+      ],
+      "head": [
+        0.0,
+        -0.0336,
+        1.4988
+      ]
+    },
+    {
+      "action": "Jetpack_Flight",
+      "frame": 1,
+      "foot_min_z": -0.0553,
+      "pelvis": [
+        0.0,
+        0.0,
+        0.83
+      ],
+      "head": [
+        0.0,
+        0.067,
+        1.4953
+      ]
+    },
+    {
+      "action": "Jetpack_Flight",
+      "frame": 20,
+      "foot_min_z": -0.0553,
+      "pelvis": [
+        0.0,
+        0.0,
+        0.83
+      ],
+      "head": [
+        0.0,
+        0.067,
+        1.4953
+      ]
+    },
+    {
+      "action": "Jetpack_Flight",
+      "frame": 40,
+      "foot_min_z": -0.0553,
+      "pelvis": [
+        0.0,
+        0.0,
+        0.83
+      ],
+      "head": [
+        0.0,
+        0.067,
+        1.4953
+      ]
+    }
+  ]
+}

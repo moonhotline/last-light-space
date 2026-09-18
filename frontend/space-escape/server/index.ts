@@ -75,7 +75,7 @@ class EscapeRoom extends Room {
 
 const app = express();
 app.get("/health", (_req, res) =>
-  res.json({ ok: true, game: "last-light", version: "0.2.0", capacity: 4 }),
+  res.json({ ok: true, game: "last-light", version: "0.3.0", capacity: 4 }),
 );
 // One origin serves both the built game and WebSocket rooms for local/tunnel play.
 // Static-only hosts retain their own connection.json with an explicit room URL.
