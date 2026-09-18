@@ -7,6 +7,8 @@
     "space:dev": "vite --config frontend/space-escape/vite.config.ts",
     "space:build": "tsc -p frontend/space-escape/tsconfig.json && vite build --config frontend/space-escape/vite.config.ts",
     "space:server": "tsx frontend/space-escape/server/index.ts",
+    "space:party": "partykit dev",
+    "space:party:deploy": "partykit deploy",
     "space:test": "tsx --test tests/space-escape/*.test.ts",
     "space:ui": "playwright test --config playwright.space.config.ts",
     "space:record": "node frontend/space-escape/scripts/record-echo.mjs",
@@ -33,6 +35,8 @@
     "gsap": "^3.15.0",
     "lucide": "^1.27.0",
     "pathfinding": "^0.4.18",
+    "partykit": "^0.0.115",
+    "partysocket": "^1.1.4",
     "three": "^0.185.1",
     "tone": "^15.1.22"
   }

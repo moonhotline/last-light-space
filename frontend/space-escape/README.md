@@ -48,6 +48,6 @@ Earth and Moon texture sources are listed in `public/assets/ATTRIBUTION.md`. The
 
 The existing Vercel project `last-light-space` serves static files. The Colyseus process runs locally behind a free Cloudflare Quick Tunnel. This avoids a purchased server, but multiplayer requires this computer, room process and tunnel to stay running. A restarted Quick Tunnel changes its public hostname, requiring frontend connection configuration to be redeployed. This setup provides no guarantee of availability across mainland China networks.
 
-`npm run space:prepare-vercel -- wss://ACTUAL-TUNNEL-HOST` verifies the public room health endpoint and prepares Vercel Build Output. Deploy with `npx vercel deploy --prebuilt --prod --yes --scope moonhotline-9118s-projects --cwd frontend/space-escape` after legitimate CLI login. The preparer copies only the built game, never private runtime files.
+`npm run space:prepare-vercel -- https://YOUR-PARTYKIT-HOST` verifies the PartyKit room health endpoint and prepares Vercel Build Output. Deploy with `npx vercel deploy --prebuilt --prod --yes --scope moonhotline-9118s-projects --cwd frontend/space-escape` after legitimate CLI login. The preparer copies only the built game, never private runtime files.
 
 Rooms are ephemeral; reconnect/resume, persistent inventory, accounts, planetary streaming, and interplanetary travel are outside this prototype. Planetary ship flight is available in v0.2.0.

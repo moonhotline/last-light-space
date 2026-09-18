@@ -2,14 +2,15 @@ import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 const value = process.argv[2] || process.env.SPACE_ROOM_URL;
-if (!value) throw new Error('Pass the public wss:// room URL as the first argument.');
+if (!value) throw new Error('Pass the public PartyKit URL as the first argument.');
 const endpoint = new URL(value);
-if (endpoint.protocol !== 'wss:' || endpoint.username || endpoint.password || endpoint.search || endpoint.hash)
-  throw new Error('Use a public wss:// URL without credentials, a query, or a fragment.');
-const health = new URL('/health', endpoint);
+if (!['https:', 'wss:'].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash)
+  throw new Error('Use a public https:// or wss:// PartyKit URL without credentials, a query, or a fragment.');
+const health = new URL('/parties/main/_health', endpoint);
 health.protocol = 'https:';
 const response = await fetch(health, { signal: AbortSignal.timeout(15000) });
-if (!response.ok || (await response.json()).game !== 'last-light')
+const status = await response.json();
+if (!response.ok || status.game !== 'last-light' || status.transport !== 'partykit')
   throw new Error('The public room service did not pass its health check.');
 
 const gameRoot = new URL('../', import.meta.url);
