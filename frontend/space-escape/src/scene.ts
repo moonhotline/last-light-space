@@ -3,6 +3,7 @@ import { AdventureView, optimizeModel } from "./adventure-view";
 import { missionObjective } from "../shared/objectives";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
@@ -73,6 +74,18 @@ export class GameView {
   jetGain: GainNode | null = null;
   jetFilter: BiquadFilterNode | null = null;
   astronaut = new THREE.Group();
+  astronautAnimations: THREE.AnimationClip[] = [];
+  avatarMixers = new Map<
+    string,
+    {
+      mixer: THREE.AnimationMixer;
+      actions: Record<string, THREE.AnimationAction>;
+      currentAction: string;
+      head?: THREE.Object3D;
+      torso?: THREE.Object3D;
+      armL?: THREE.Object3D;
+    }
+  >();
   toolModel = new THREE.Group();
   avatars = new Map<string, THREE.Group>();
   beacons: THREE.Group[] = [];
@@ -584,14 +597,14 @@ export class GameView {
     const loader = new GLTFLoader(),
       textureLoader = new THREE.TextureLoader();
     const [explorer, beacon, observatory, earth, moon] = await Promise.all([
-      loader.loadAsync("/assets/explorer-v3.glb"),
+      loader.loadAsync("/assets/explorer-v4.glb"),
       loader.loadAsync("/assets/beacon.glb"),
       loader.loadAsync("/assets/observatory.glb"),
       textureLoader.loadAsync("/assets/earth.jpg"),
       textureLoader.loadAsync("/assets/moon.jpg"),
     ]);
     this.astronaut = explorer.scene;
-    optimizeModel(this.astronaut);
+    this.astronautAnimations = explorer.animations;
     weatherMaterials(this.astronaut);
     await this.adventure.load();
     const tool = await loader.loadAsync("/assets/tool.glb");
@@ -1011,18 +1024,26 @@ export class GameView {
       if (!ids.has(id)) {
         this.scene.remove(a);
         this.avatars.delete(id);
+        const anim = this.avatarMixers.get(id);
+        if (anim) {
+          anim.mixer.stopAllAction();
+          this.avatarMixers.delete(id);
+        }
       }
     for (const remote of s?.players || []) {
       const own = remote.id === me?.id,
         p = own ? me! : remote;
       let a = this.avatars.get(p.id);
+      let anim = this.avatarMixers.get(p.id);
       if (!a) {
-        a = this.astronaut.clone(true);
+        const cloned = SkeletonUtils.clone(this.astronaut);
+        a = new THREE.Group();
+        a.add(cloned);
         const lamp = new THREE.Mesh(
           new THREE.SphereGeometry(0.06, 12, 8),
           new THREE.MeshBasicMaterial({ color: COLORS[p.color] }),
         );
-        lamp.position.set(0, 1.48, 0.23);
+        lamp.position.set(0, 1.68, 0.16);
         a.add(lamp);
         a.position.set(p.x, p.y - 0.82, p.z);
         for (const side of [-1, 1]) {
@@ -1032,9 +1053,33 @@ export class GameView {
           );
           jet.name = "jet-" + side;
           jet.rotation.z = Math.PI;
-          jet.position.set(side * 0.18, 0.46, -0.31);
+          jet.position.set(side * 0.18, 1.15, -0.28);
           a.add(jet);
         }
+
+        const mixer = new THREE.AnimationMixer(cloned);
+        const findClip = (name: string, fallbackIdx = 0) =>
+          THREE.AnimationClip.findByName(this.astronautAnimations, name) ||
+          this.astronautAnimations[fallbackIdx] ||
+          new THREE.AnimationClip(name, 1, []);
+
+        const actions: Record<string, THREE.AnimationAction> = {
+          idle: mixer.clipAction(findClip("idle", 0)),
+          walk: mixer.clipAction(findClip("moon_walk", 1)),
+          floating: mixer.clipAction(findClip("floating", 2)),
+          wave: mixer.clipAction(findClip("wave", 3)),
+        };
+        actions.idle.play();
+
+        anim = {
+          mixer,
+          actions,
+          currentAction: "idle",
+          head: cloned.getObjectByName("head.42") || cloned.getObjectByName("head"),
+          torso: cloned.getObjectByName("Spine_2.7") || cloned.getObjectByName("body"),
+          armL: cloned.getObjectByName("L_Arm.10") || cloned.getObjectByName("arm_L"),
+        };
+        this.avatarMixers.set(p.id, anim);
         this.avatars.set(p.id, a);
         this.scene.add(a);
       }
@@ -1059,30 +1104,57 @@ export class GameView {
         8,
         dt,
       );
-      const torso = a.getObjectByName("body");
-      if (torso) {
-        torso.rotation.x = THREE.MathUtils.damp(
-          torso.rotation.x,
-          p.grapple
-            ? -0.22
-            : p.jetting
-              ? 0.13
-              : p.grounded
-                ? Math.min(0.16, Math.hypot(p.vx, p.vz) * 0.008)
-                : -0.08,
-          7,
-          dt,
-        );
-        torso.position.y = 0.98 + (p.grounded ? Math.sin(t * 2) * 0.008 : 0);
+
+      if (anim) {
+        anim.mixer.update(dt);
+        const speed = Math.hypot(p.vx, p.vz);
+        let target = "idle";
+        if (p.jetting || !p.grounded) {
+          target = "floating";
+        } else if (speed > 0.35) {
+          target = "walk";
+          anim.actions.walk.timeScale = Math.max(0.65, Math.min(2.5, speed * 0.28));
+        } else {
+          target = "idle";
+        }
+
+        if (anim.currentAction !== target) {
+          const prev = anim.actions[anim.currentAction];
+          const next = anim.actions[target];
+          if (prev && next) {
+            prev.fadeOut(0.2);
+            next.reset().fadeIn(0.2).play();
+            anim.currentAction = target;
+          }
+        }
+
+        if (anim.torso) {
+          anim.torso.rotation.x = THREE.MathUtils.damp(
+            anim.torso.rotation.x,
+            p.grapple
+              ? -0.22
+              : p.jetting
+                ? 0.13
+                : p.grounded
+                  ? Math.min(0.16, speed * 0.008)
+                  : -0.08,
+            7,
+            dt,
+          );
+        }
+        if (anim.head) {
+          anim.head.rotation.x = THREE.MathUtils.damp(
+            anim.head.rotation.x,
+            -p.pitch * 0.35,
+            10,
+            dt,
+          );
+        }
+        if (anim.armL && p.grapple) {
+          anim.armL.rotation.x = -1.2;
+        }
       }
-      const head = a.getObjectByName("head");
-      if (head)
-        head.rotation.x = THREE.MathUtils.damp(
-          head.rotation.x,
-          -p.pitch * 0.35,
-          10,
-          dt,
-        );
+
       for (const side of [-1, 1]) {
         const jet = a.getObjectByName("jet-" + side);
         if (jet) {
@@ -1090,52 +1162,7 @@ export class GameView {
           jet.scale.y = 0.75 + Math.sin(t * 63) * 0.25;
         }
       }
-      const speed = Math.hypot(p.vx, p.vz),
-        stride = Math.sin(worldTime * Math.min(18, speed * 0.85)),
-        amount = p.grounded ? clamp(speed / 15) * 0.56 : 0.2;
-      for (const [n, sign] of [
-        ["leg_L", 1],
-        ["leg_R", -1],
-        ["arm_L", -1],
-        ["arm_R", 1],
-      ] as const) {
-        const limb = a.getObjectByName(n);
-        if (limb)
-          limb.rotation.x = p.grounded
-            ? stride * amount * sign
-            : p.jetting
-              ? -0.27
-              : amount * sign;
-      }
-      for (const side of ["L", "R"]) {
-        const sign = side === "L" ? 1 : -1,
-          knee = a.getObjectByName("knee_" + side),
-          elbow = a.getObjectByName("elbow_" + side);
-        if (knee)
-          knee.rotation.x = THREE.MathUtils.damp(
-            knee.rotation.x,
-            p.grounded
-              ? Math.max(0, -stride * sign) * amount * 0.9
-              : p.jetting
-                ? 0.4
-                : 0.7,
-            12,
-            dt,
-          );
-        if (elbow)
-          elbow.rotation.x = THREE.MathUtils.damp(
-            elbow.rotation.x,
-            p.toolCooldown > 0 || p.grapple
-              ? -1.1
-              : -0.16 - Math.max(0, stride * sign) * amount * 0.4,
-            14,
-            dt,
-          );
-        if (p.grapple && side === "L") {
-          const arm = a.getObjectByName("arm_L");
-          if (arm) arm.rotation.x = -1.3;
-        }
-      }
+
       if (p.jetting && !own && hash(Math.floor(t * 30), p.color) > 0.4)
         this.burst({ x: p.x, y: p.y - 0.3, z: p.z }, 2, COLORS[p.color], 1.5);
     }

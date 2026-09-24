@@ -28,6 +28,7 @@ export function optimizeModel(root: THREE.Object3D) {
   for (const child of root.children)
     if (
       child instanceof THREE.Mesh &&
+      !(child instanceof THREE.SkinnedMesh) &&
       !Array.isArray(child.material) &&
       !child.name.startsWith("engine_glow")
     ) {
