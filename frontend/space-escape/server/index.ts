@@ -89,6 +89,7 @@ const server = new Server({
   transport: new WebSocketTransport({ server: http, maxPayload: 8192 }),
 });
 server.define("escape", EscapeRoom);
-const port = Number(process.env.SPACE_PORT || 2567);
-await server.listen(port, "127.0.0.1");
-console.log(`Last Light room server: http://127.0.0.1:${port}`);
+const port = Number(process.env.PORT || process.env.SPACE_PORT || 2567);
+const host = process.env.SPACE_HOST || "0.0.0.0";
+await server.listen(port, host);
+console.log(`Last Light room server: http://${host}:${port}`);
