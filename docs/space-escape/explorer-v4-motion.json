@@ -1,358 +1,358 @@
 {
   "world_up": "+Z in Blender / +Y after glTF import",
   "character_forward": "-Y in Blender / +Z after glTF import",
-  "armature": "Astronaut_Rig",
-  "meshes": 3,
-  "bones_count": 49,
+  "armature": "skeletal.3",
+  "meshes": 4,
+  "bones_count": 90,
   "bones": [
     {
-      "name": "mixamorig:Hips",
+      "name": "Root.4",
       "parent": null,
       "head": [
-        -0.0016,
-        0.0115,
-        1.0613
+        0.0,
+        0.0,
+        0.0
       ],
       "tail": [
-        -0.0016,
-        0.0115,
-        10.6534
+        0.0,
+        0.0,
+        130.6216
       ]
     },
     {
-      "name": "mixamorig:Spine",
-      "parent": "mixamorig:Hips",
+      "name": "Center.5",
+      "parent": "Root.4",
       "head": [
-        -0.0012,
-        -0.0024,
-        1.1562
+        -0.0,
+        3.3445,
+        130.5788
       ],
       "tail": [
-        -0.0012,
-        -0.0024,
-        12.3471
+        -0.0,
+        3.3445,
+        131.4647
       ]
     },
     {
-      "name": "mixamorig:Spine1",
-      "parent": "mixamorig:Spine",
+      "name": "Hip.81",
+      "parent": "Center.5",
       "head": [
-        -0.0008,
-        -0.0187,
-        1.2669
+        -0.0,
+        3.3445,
+        129.6928
       ],
       "tail": [
-        -0.0008,
-        -0.0187,
-        14.0565
+        -0.0,
+        3.3445,
+        146.4684
       ]
     },
     {
-      "name": "mixamorig:Spine2",
-      "parent": "mixamorig:Spine1",
+      "name": "L_Thigh.82",
+      "parent": "Hip.81",
       "head": [
-        -0.0003,
-        -0.0372,
-        1.3935
+        15.906,
+        3.3186,
+        124.3615
       ],
       "tail": [
-        -0.0003,
-        -0.0372,
-        15.095
+        15.906,
+        -49.749,
+        127.4234
       ]
     },
     {
-      "name": "mixamorig:Neck",
-      "parent": "mixamorig:Spine2",
+      "name": "L_Knee.83",
+      "parent": "L_Thigh.82",
       "head": [
-        0.0003,
-        -0.0581,
-        1.5358
+        15.1938,
+        0.2541,
+        71.2483
       ],
       "tail": [
-        0.0003,
-        -0.0581,
-        4.831
+        15.1437,
+        -52.7844,
+        70.5669
       ]
     },
     {
-      "name": "mixamorig:Head",
-      "parent": "mixamorig:Neck",
+      "name": "L_Ankle.84",
+      "parent": "L_Knee.83",
       "head": [
-        0.0003,
-        -0.055,
-        1.5686
+        14.4855,
+        0.9361,
+        18.2145
       ],
       "tail": [
-        0.0003,
-        -0.055,
-        4.8638
+        14.4855,
+        -13.6022,
+        33.9379
       ]
     },
     {
-      "name": "mixamorig:LeftShoulder",
-      "parent": "mixamorig:Spine2",
+      "name": "L_Toe.85",
+      "parent": "L_Ankle.84",
       "head": [
-        -0.0676,
-        -0.0578,
-        1.511
+        14.4855,
+        -14.7873,
+        3.6761
       ],
       "tail": [
-        -14.5164,
-        -0.0578,
-        1.511
+        14.4855,
+        -14.7873,
+        14.843
       ]
     },
     {
-      "name": "mixamorig:LeftArm",
-      "parent": "mixamorig:LeftShoulder",
+      "name": "L_Toe_End.86",
+      "parent": "L_Toe.85",
       "head": [
-        -0.2085,
-        -0.0572,
-        1.4793
+        14.4855,
+        -25.9541,
+        3.6761
       ],
       "tail": [
-        -23.3688,
-        -0.0572,
-        1.4793
+        14.4855,
+        -25.9542,
+        14.8429
       ]
     },
     {
-      "name": "mixamorig:LeftForeArm",
-      "parent": "mixamorig:LeftArm",
+      "name": "L_Knee_spo.87",
+      "parent": "L_Thigh.82",
       "head": [
-        -0.4401,
-        -0.0572,
-        1.4793
+        15.1946,
+        1.2497,
+        71.2507
       ],
       "tail": [
-        -24.5119,
-        -0.0572,
-        1.4793
+        15.1444,
+        -51.9018,
+        70.5677
       ]
     },
     {
-      "name": "mixamorig:LeftHand",
-      "parent": "mixamorig:LeftForeArm",
+      "name": "R_Thigh.88",
+      "parent": "Hip.81",
       "head": [
-        -0.6808,
-        -0.0572,
-        1.4793
+        -15.906,
+        3.3186,
+        124.362
       ],
       "tail": [
-        -5.5188,
-        -0.0572,
-        1.4793
+        -15.906,
+        -49.7495,
+        127.4239
       ]
     },
     {
-      "name": "mixamorig:LeftHandThumb1",
-      "parent": "mixamorig:LeftHand",
+      "name": "R_Knee.89",
+      "parent": "R_Thigh.88",
       "head": [
-        -0.7226,
-        -0.0421,
-        1.46
+        -15.1938,
+        0.2541,
+        71.2484
       ],
       "tail": [
-        -4.5929,
-        -0.0421,
-        1.46
+        -15.1438,
+        -52.7845,
+        70.5669
       ]
     },
     {
-      "name": "mixamorig:LeftHandThumb2",
-      "parent": "mixamorig:LeftHandThumb1",
+      "name": "R_Ankle.90",
+      "parent": "R_Knee.89",
       "head": [
-        -0.7525,
-        -0.0248,
-        1.4427
+        -14.4855,
+        0.9361,
+        18.2145
       ],
       "tail": [
-        -4.6229,
-        -0.0248,
-        1.4427
+        -14.4855,
+        -13.6023,
+        33.9378
       ]
     },
     {
-      "name": "mixamorig:LeftHandIndex1",
-      "parent": "mixamorig:LeftHand",
+      "name": "R_Toe.91",
+      "parent": "R_Ankle.90",
       "head": [
-        -0.8275,
-        -0.0287,
-        1.4753
+        -14.4855,
+        -14.7873,
+        3.6762
       ],
       "tail": [
-        -4.0761,
-        -0.0287,
-        1.4753
+        -14.4855,
+        -14.7873,
+        14.843
       ]
     },
     {
-      "name": "mixamorig:LeftHandIndex2",
-      "parent": "mixamorig:LeftHandIndex1",
+      "name": "R_Toe_End.92",
+      "parent": "R_Toe.91",
       "head": [
-        -0.86,
-        -0.0287,
-        1.4753
+        -14.4855,
+        -25.9541,
+        3.6761
       ],
       "tail": [
-        -3.5196,
-        -0.0287,
-        1.4753
+        -14.4855,
+        -25.9541,
+        14.8429
       ]
     },
     {
-      "name": "mixamorig:LeftHandIndex3",
-      "parent": "mixamorig:LeftHandIndex2",
+      "name": "R_Knee_spo.93",
+      "parent": "R_Thigh.88",
       "head": [
-        -0.8866,
-        -0.0287,
-        1.4753
+        -15.1946,
+        1.2497,
+        71.2506
       ],
       "tail": [
-        -3.5462,
-        -0.0287,
-        1.4753
+        -15.1445,
+        -51.9022,
+        70.5677
       ]
     },
     {
-      "name": "mixamorig:LeftHandMiddle1",
-      "parent": "mixamorig:LeftHand",
+      "name": "Spine_1.6",
+      "parent": "Center.5",
       "head": [
-        -0.8249,
-        -0.0572,
-        1.4793
+        -0.0,
+        3.3445,
+        131.6096
       ],
       "tail": [
-        -4.084,
-        -0.0572,
-        1.4793
+        -0.0,
+        4.2274,
+        152.0472
       ]
     },
     {
-      "name": "mixamorig:LeftHandMiddle2",
-      "parent": "mixamorig:LeftHandMiddle1",
+      "name": "Spine_2.7",
+      "parent": "Spine_1.6",
       "head": [
-        -0.8575,
-        -0.0572,
-        1.4793
+        -0.0,
+        4.2274,
+        152.0472
       ],
       "tail": [
-        -3.4974,
-        -0.0572,
-        1.4793
+        -0.0,
+        5.1103,
+        172.4847
       ]
     },
     {
-      "name": "mixamorig:LeftHandMiddle3",
-      "parent": "mixamorig:LeftHandMiddle2",
+      "name": "bagPack.76",
+      "parent": "Spine_2.7",
       "head": [
-        -0.8839,
-        -0.0572,
-        1.4793
+        0.0,
+        30.0075,
+        168.7749
       ],
       "tail": [
-        -3.5238,
-        -0.0572,
-        1.4793
+        0.0,
+        30.0075,
+        202.3663
       ]
     },
     {
-      "name": "mixamorig:LeftHandRing1",
-      "parent": "mixamorig:LeftHand",
+      "name": "L_bagPackHandle.77",
+      "parent": "bagPack.76",
       "head": [
-        -0.8127,
-        -0.0903,
-        1.4824
+        29.9297,
+        25.8379,
+        154.1048
       ],
       "tail": [
-        -3.5304,
-        -0.0903,
-        1.4824
+        29.9297,
+        25.8379,
+        187.6962
       ]
     },
     {
-      "name": "mixamorig:LeftHandRing2",
-      "parent": "mixamorig:LeftHandRing1",
+      "name": "R_bagPackHandle.78",
+      "parent": "bagPack.76",
       "head": [
-        -0.8399,
-        -0.0903,
-        1.4824
+        -29.9297,
+        25.838,
+        154.1049
       ],
       "tail": [
-        -2.9744,
-        -0.0903,
-        1.4824
+        -29.9297,
+        25.838,
+        187.6963
       ]
     },
     {
-      "name": "mixamorig:LeftHandRing3",
-      "parent": "mixamorig:LeftHandRing2",
+      "name": "L_accessories.79",
+      "parent": "Spine_2.7",
       "head": [
-        -0.8613,
-        -0.0903,
-        1.4824
+        18.2677,
+        -15.9226,
+        155.5046
       ],
       "tail": [
-        -2.9957,
-        -0.0903,
-        1.4824
+        17.1542,
+        -14.414,
+        175.8751
       ]
     },
     {
-      "name": "mixamorig:LeftHandPinky1",
-      "parent": "mixamorig:LeftHand",
+      "name": "R_accessories.80",
+      "parent": "Spine_2.7",
       "head": [
-        -0.7972,
-        -0.1134,
-        1.474
+        -18.2677,
+        -15.9226,
+        155.505
       ],
       "tail": [
-        -2.3566,
-        -0.1134,
-        1.474
+        -17.1542,
+        -14.414,
+        175.8755
       ]
     },
     {
-      "name": "mixamorig:LeftHandPinky2",
-      "parent": "mixamorig:LeftHandPinky1",
+      "name": "Spine_3.8",
+      "parent": "Spine_2.7",
       "head": [
-        -0.8128,
-        -0.1134,
-        1.474
+        -0.0,
+        5.1103,
+        172.4847
       ],
       "tail": [
-        -2.3721,
-        -0.1134,
-        1.474
+        -0.0,
+        7.3784,
+        190.7445
       ]
     },
     {
-      "name": "mixamorig:RightShoulder",
-      "parent": "mixamorig:Spine2",
+      "name": "L_Clevicle.9",
+      "parent": "Spine_3.8",
       "head": [
-        0.068,
-        -0.0584,
-        1.511
+        8.8263,
+        4.6498,
+        188.6232
       ],
       "tail": [
-        14.4816,
-        -0.0584,
-        1.511
+        8.8263,
+        4.6498,
+        206.1961
       ]
     },
     {
-      "name": "mixamorig:RightArm",
-      "parent": "mixamorig:RightShoulder",
+      "name": "L_Arm.10",
+      "parent": "L_Clevicle.9",
       "head": [
-        0.2085,
-        -0.059,
-        1.4792
+        25.8746,
+        8.9118,
+        188.6231
       ],
       "tail": [
-        23.3687,
-        -0.059,
-        1.4792
+        24.836,
+        8.9495,
+        220.9519
       ]
     }
   ],
@@ -365,20 +365,6 @@
       ]
     },
     {
-      "name": "floating.001",
-      "frame_range": [
-        1.0,
-        30.0
-      ]
-    },
-    {
-      "name": "Idle",
-      "frame_range": [
-        0.0,
-        47.2
-      ]
-    },
-    {
       "name": "idle",
       "frame_range": [
         0.0,
@@ -386,52 +372,10 @@
       ]
     },
     {
-      "name": "idle.001",
-      "frame_range": [
-        0.0,
-        47.2
-      ]
-    },
-    {
       "name": "moon_walk",
       "frame_range": [
         0.0,
         111.0
-      ]
-    },
-    {
-      "name": "Run",
-      "frame_range": [
-        0.0,
-        16.8
-      ]
-    },
-    {
-      "name": "run",
-      "frame_range": [
-        0.0,
-        16.8
-      ]
-    },
-    {
-      "name": "TPose",
-      "frame_range": [
-        0.0,
-        0.8
-      ]
-    },
-    {
-      "name": "Walk",
-      "frame_range": [
-        0.0,
-        24.8
-      ]
-    },
-    {
-      "name": "walk",
-      "frame_range": [
-        0.0,
-        24.8
       ]
     },
     {
@@ -444,19 +388,19 @@
   ],
   "model_bounds": {
     "min": [
-      -1.0119,
-      -0.229,
-      -0.0009
+      -0.9511,
+      -1.0,
+      -1.0
     ],
     "max": [
-      1.0119,
-      0.3778,
-      1.832
+      0.9511,
+      1.0,
+      2.374
     ]
   },
-  "height_m": 1.83,
+  "height_m": 3.37,
   "ground_contact": {
-    "foot_min_z": -0.0009,
+    "foot_min_z": -1.0,
     "verdict": "pass: feet grounded at 0.00m with standard 1.90m suit height"
   }
 }
