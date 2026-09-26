@@ -914,7 +914,7 @@ export class GameView {
       this.jetTimer += dt;
       if (me.jetting && this.jetTimer > 0.045) {
         this.jetTimer = 0;
-        this.burst({ x: me.x, y: me.y + 0.35, z: me.z }, 3, 0x5dcfff, 2);
+        this.burst({ x: me.x, y: me.y - 0.25, z: me.z }, 3, 0x5dcfff, 2);
       }
       this.footTimer += dt;
       if (
@@ -1047,16 +1047,13 @@ export class GameView {
         a.add(lamp);
         a.position.set(p.x, p.y - 0.82, p.z);
         for (const side of [-1, 1]) {
-          const coneGeo = new THREE.ConeGeometry(0.045, 0.35, 12, 1, true);
-          coneGeo.rotateZ(Math.PI);
-          coneGeo.translate(0, -0.175, 0);
           const jet = new THREE.Mesh(
-            coneGeo,
-            glowMaterial(0x62dbff, 0.82),
+            new THREE.ConeGeometry(0.06, 0.9, 10, 1, true),
+            glowMaterial(0x81e6ff, 0.7),
           );
           jet.name = "jet-" + side;
-          jet.position.set(side * 0.22, 1.18, -0.26);
-          jet.rotation.x = 0.12;
+          jet.rotation.z = Math.PI;
+          jet.position.set(side * 0.18, 1.15, -0.28);
           a.add(jet);
         }
 
@@ -1068,10 +1065,7 @@ export class GameView {
 
         const actions: Record<string, THREE.AnimationAction> = {
           idle: mixer.clipAction(findClip("idle", 0)),
-          walk: mixer.clipAction(
-            THREE.AnimationClip.findByName(this.astronautAnimations, "walk") ||
-              findClip("moon_walk", 1),
-          ),
+          walk: mixer.clipAction(findClip("moon_walk", 1)),
           floating: mixer.clipAction(findClip("floating", 2)),
           wave: mixer.clipAction(findClip("wave", 3)),
         };
@@ -1104,13 +1098,6 @@ export class GameView {
           Math.cos(targetYaw - a.rotation.y),
         ) *
         (1 - Math.exp(-dt * 12));
-      const speed = Math.hypot(p.vx, p.vz);
-      const targetPitch = p.jetting
-        ? 0.44 + Math.min(0.12, speed * 0.015)
-        : p.grounded
-          ? 0
-          : Math.min(0.22, speed * 0.02);
-      a.rotation.x = THREE.MathUtils.damp(a.rotation.x, targetPitch, 8, dt);
       a.rotation.z = THREE.MathUtils.damp(
         a.rotation.z,
         p.grapple ? Math.sin(t * 3) * 0.08 : 0,
@@ -1120,12 +1107,13 @@ export class GameView {
 
       if (anim) {
         anim.mixer.update(dt);
+        const speed = Math.hypot(p.vx, p.vz);
         let target = "idle";
         if (p.jetting || !p.grounded) {
           target = "floating";
         } else if (speed > 0.35) {
           target = "walk";
-          anim.actions.walk.timeScale = Math.max(0.6, Math.min(2.8, speed * 0.22));
+          anim.actions.walk.timeScale = Math.max(0.65, Math.min(2.5, speed * 0.28));
         } else {
           target = "idle";
         }
@@ -1171,13 +1159,12 @@ export class GameView {
         const jet = a.getObjectByName("jet-" + side);
         if (jet) {
           jet.visible = p.jetting;
-          const flicker = 0.8 + Math.sin(t * 60 + side * 1.5) * 0.2;
-          jet.scale.set(1, flicker, 1);
+          jet.scale.y = 0.75 + Math.sin(t * 63) * 0.25;
         }
       }
 
       if (p.jetting && !own && hash(Math.floor(t * 30), p.color) > 0.4)
-        this.burst({ x: p.x, y: p.y + 0.35, z: p.z }, 2, COLORS[p.color], 1.5);
+        this.burst({ x: p.x, y: p.y - 0.3, z: p.z }, 2, COLORS[p.color], 1.5);
     }
     for (const [id, g] of this.markers)
       if (!s?.markers.some((m) => m.owner === id)) {
