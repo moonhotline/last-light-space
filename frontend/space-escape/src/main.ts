@@ -8,7 +8,11 @@ import {
 } from "../shared/adventure-data";
 import { missionObjective } from "../shared/objectives";
 import { distance3 } from "../shared/map";
-import { Client, type Room } from "@colyseus/sdk";
+import {
+  connectPartyRoom,
+  roomCode,
+  type MultiplayerRoom,
+} from "./party-room";
 import {
   createIcons,
   Orbit,
@@ -59,7 +63,7 @@ const canvas = $<HTMLCanvasElement>("world"),
 const colors = ["#b0edff", "#ffd397", "#ffa994", "#bbc5ff"];
 let mode: "practice" | "coop" = "practice",
   sim: Simulation | null = null,
-  room: Room | null = null,
+  room: MultiplayerRoom | null = null,
   state: Snapshot | null = null,
   me: Player | null = null,
   predicted: Player | null = null,
@@ -317,10 +321,11 @@ async function connect(create: boolean) {
   text("entryStatus", "正在建立通讯…");
   unlockAudio();
   try {
-    const client = new Client(endpoint);
-    const joined = create
-      ? await client.create("escape", { name: callsign() })
-      : await client.joinById(code, { name: callsign() });
+    const joined = await connectPartyRoom(
+      endpoint,
+      create ? roomCode() : code,
+      callsign(),
+    );
     room = joined;
     joined.onMessage("snapshot", receive);
     joined.onError(() => notice("通讯异常，请稍后重试"));
@@ -921,11 +926,15 @@ void Promise.all([
         ? `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}`
         : "") ||
       (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)
-        ? "ws://127.0.0.1:2567"
+        ? "http://127.0.0.1:1999"
         : "");
     try {
       const p = new URL(url);
-      if (["ws:", "wss:"].includes(p.protocol) && !p.username && !p.password)
+      if (
+        ["http:", "https:", "ws:", "wss:"].includes(p.protocol) &&
+        !p.username &&
+        !p.password
+      )
         endpoint = url;
     } catch {
       /* Solo stays available offline after assets load. */

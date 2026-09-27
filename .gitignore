@@ -10,3 +10,4 @@ test-results/
 playwright-report/
 *.webm
 *.mp4
+.partykit/

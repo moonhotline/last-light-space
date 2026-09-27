@@ -12,7 +12,8 @@ import {
 } from "./map";
 import { DT, type Input, type Player } from "./types";
 let ready: Promise<void> | undefined;
-export const initPhysics = () => (ready ??= RAPIER.init());
+export const initPhysics = (wasmModule?: unknown) =>
+  (ready ??= wasmModule ? (RAPIER as any).init(wasmModule) : RAPIER.init());
 export const fuelCapacity = (level: number) => (level >= 1 ? 150 : 100);
 export class MovementWorld {
   world = new RAPIER.World({ x: 0, y: -7.5, z: 0 });
