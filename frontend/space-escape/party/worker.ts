@@ -1,0 +1,161 @@
+import { routePartykitRequest, Server } from "partyserver";
+import type { Connection, ConnectionContext, WSMessage } from "partyserver";
+import { initPhysics } from "../shared/physics";
+import { Simulation } from "../shared/simulation";
+import { DT } from "../shared/types";
+
+// Polyfill Cloudflare Workers / workerd environment for Rapier wasm-bindgen
+if (typeof (globalThis as any).window === "undefined") {
+  (globalThis as any).window = globalThis;
+}
+if (typeof (globalThis as any).performance === "undefined") {
+  (globalThis as any).performance = { now: () => Date.now() };
+} else if (typeof (globalThis as any).performance.now !== "function") {
+  (globalThis as any).performance.now = () => Date.now();
+}
+
+async function loadWasmModule() {
+  try {
+    const mod = await import("./rapier.wasm");
+    return (mod as any).default || mod;
+  } catch {
+    return undefined;
+  }
+}
+
+type Message = { type?: string; data?: unknown };
+
+export class Main extends Server {
+  sim!: Simulation;
+  commands = new Map<string, number>();
+  timer: ReturnType<typeof setInterval> | undefined;
+
+  async onStart() {
+    const wasmModule = await loadWasmModule();
+    await initPhysics(wasmModule);
+    this.sim = new Simulation();
+  }
+
+  private startLoop() {
+    if (this.timer) return;
+    this.timer = setInterval(() => {
+      this.sim.tick();
+      if (this.sim.s.tick % 2 === 0) this.broadcastSnapshot();
+    }, DT * 1000);
+  }
+
+  private stopLoop() {
+    if (!this.timer) return;
+    clearInterval(this.timer);
+    this.timer = undefined;
+  }
+
+  onConnect(connection: Connection, context: ConnectionContext) {
+    if ([...this.getConnections()].length > 4) {
+      connection.close(4001, "room full");
+      return;
+    }
+    const name = new URL(context.request.url).searchParams.get("name") || undefined;
+    try {
+      this.sim.add(connection.id, name);
+    } catch {
+      connection.close(4001, "room full or expedition started");
+      return;
+    }
+    this.startLoop();
+    connection.send(JSON.stringify({ type: "snapshot", data: this.sim.snapshot() }));
+    this.broadcastSnapshot();
+  }
+
+  onMessage(connection: Connection, raw: WSMessage) {
+    if (typeof raw !== "string") return;
+    let message: Message;
+    try {
+      message = JSON.parse(raw) as Message;
+    } catch {
+      return;
+    }
+    if (message.type === "input") this.sim.input(connection.id, message.data);
+    if (message.type === "sync")
+      connection.send(JSON.stringify({ type: "snapshot", data: this.sim.snapshot() }));
+    if (message.type === "start" && this.sim.start(connection.id)) this.broadcastSnapshot();
+    if (message.type === "restart") this.restart(connection.id);
+    if (message.type === "action") {
+      if (message.data === "close-lore") {
+        this.sim.action(connection.id, message.data);
+        return;
+      }
+      const now = Date.now();
+      if (now - (this.commands.get(connection.id) || 0) < 100) return;
+      this.commands.set(connection.id, now);
+      this.sim.action(connection.id, message.data);
+    }
+  }
+
+  onClose(connection: Connection) {
+    if (!this.sim.player(connection.id)) return;
+    this.sim.remove(connection.id);
+    this.commands.delete(connection.id);
+    if (!this.sim.s.players.length) this.stopLoop();
+    this.broadcastSnapshot();
+  }
+
+  onError(connection: Connection) {
+    this.onClose(connection);
+  }
+
+  onRequest() {
+    return Response.json({
+      ok: true,
+      game: "last-light",
+      transport: "partykit",
+      version: "0.3.0",
+      room: this.name,
+      capacity: 4,
+    });
+  }
+
+  private restart(id: string) {
+    if (id !== this.sim.s.host || this.sim.s.phase !== "won") return;
+    const players = this.sim.s.players.map((player) => ({
+      id: player.id,
+      name: player.name,
+    }));
+    const seed = this.sim.s.seed + 1;
+    this.sim.dispose();
+    this.sim = new Simulation(seed);
+    players.forEach((player) => this.sim.add(player.id, player.name));
+    this.broadcastSnapshot();
+  }
+
+  private broadcastSnapshot() {
+    this.broadcast(
+      JSON.stringify({ type: "snapshot", data: this.sim.snapshot() }),
+    );
+  }
+}
+
+export default {
+  async fetch(request: Request, env: any): Promise<Response> {
+    const url = new URL(request.url);
+
+    if (url.pathname === "/_health" || url.pathname === "/healthz" || url.pathname === "/parties/main/_health") {
+      return Response.json({
+        ok: true,
+        game: "last-light",
+        transport: "partyserver",
+        version: "0.3.0",
+      }, {
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+        }
+      });
+    }
+
+    const partyResponse = await routePartykitRequest(request, env, { cors: true });
+    if (partyResponse) return partyResponse;
+
+    return new Response("Not Found", { status: 404 });
+  }
+};
