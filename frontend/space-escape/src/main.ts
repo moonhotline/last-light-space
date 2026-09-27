@@ -950,6 +950,7 @@ Object.assign(window, {
     position: () => (predicted ? { ...predicted } : me ? { ...me } : null),
     room: () => room?.roomId,
     endpoint: () => endpoint,
+    view: () => view,
     rendering: () => ({
       frames: view.frames,
       fps: Math.round(fps),
