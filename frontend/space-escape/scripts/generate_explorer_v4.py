@@ -37,6 +37,11 @@ arm = [o for o in bpy.data.objects if o.type == "ARMATURE"][0]
 vanguard = bpy.data.objects["vanguard_Mesh"]
 visor_van = bpy.data.objects["vanguard_visor"]
 
+# Rotate armature by 180 deg around Z to align forward walk/run direction with glTF +Z
+R180 = Euler((0, 0, math.pi)).to_matrix().to_4x4()
+arm.matrix_world = R180 @ arm.matrix_world
+bpy.context.view_layer.update()
+
 # Keep track of genuine mocap action objects from Soldier.glb
 mocap_actions = {act.name: act for act in bpy.data.actions if act.name in {"Idle", "Walk", "Run"}}
 
@@ -74,12 +79,12 @@ suit_pts = [v.co for v in mesh_suit.data.vertices]
 suit_h = max(p[2] for p in suit_pts) - min(p[2] for p in suit_pts)
 s = van_h / suit_h
 
-# Rot matrix -90 deg on X: (x, y, z) -> (s*x, -s*z, s*y)
+# Rot matrix mapping (x, y, z) -> (-s*x, -s*z, -s*y) to match vanguard local space and front orientation exactly
 M = Matrix((
-    (s,  0,  0, 0),
-    (0,  0, -s, 0),
-    (0,  s,  0, 0),
-    (0,  0,  0, 1)
+    (-s,  0,  0, 0),
+    ( 0,  0, -s, 0),
+    ( 0, -s,  0, 0),
+    ( 0,  0,  0, 1)
 ))
 
 for m in [mesh_backpack, mesh_visor, mesh_suit]:
@@ -236,23 +241,23 @@ print("Saved blend file to:", blend_path)
 cam_data = bpy.data.cameras.new("Cam")
 cam_obj = bpy.data.objects.new("Cam", cam_data)
 bpy.context.collection.objects.link(cam_obj)
-cam_obj.location = (0, 3.2, 1.1)
-cam_obj.rotation_euler = (1.5708, 0, 3.14159)
+cam_obj.location = (0, -3.2, 1.1)
+cam_obj.rotation_euler = (1.5708, 0, 0)
 bpy.context.scene.camera = cam_obj
 
 sun_data = bpy.data.lights.new(name="KeyLight", type="SUN")
 sun_data.energy = 4.0
 sun_obj = bpy.data.objects.new("KeyLight", object_data=sun_data)
 bpy.context.collection.objects.link(sun_obj)
-sun_obj.location = (2, 3, 3)
-sun_obj.rotation_euler = (0.6, -0.2, 2.7)
+sun_obj.location = (2, -3, 3)
+sun_obj.rotation_euler = (0.6, 0.2, -0.4)
 
 fill_data = bpy.data.lights.new(name="FillLight", type="SUN")
 fill_data.energy = 2.0
 fill_obj = bpy.data.objects.new("FillLight", object_data=fill_data)
 bpy.context.collection.objects.link(fill_obj)
-fill_obj.location = (-2, 3, 1.5)
-fill_obj.rotation_euler = (0.8, 0.4, 3.6)
+fill_obj.location = (-2, -3, 1.5)
+fill_obj.rotation_euler = (0.8, -0.4, 0.6)
 
 bpy.context.scene.render.resolution_x = 768
 bpy.context.scene.render.resolution_y = 1024
