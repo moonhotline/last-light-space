@@ -40,7 +40,7 @@ export class Main extends Server {
     if (this.timer) return;
     this.timer = setInterval(() => {
       this.sim.tick();
-      if (this.sim.s.tick % 2 === 0) this.broadcastSnapshot();
+      this.broadcastSnapshot();
     }, DT * 1000);
   }
 
@@ -59,7 +59,7 @@ export class Main extends Server {
     try {
       this.sim.add(connection.id, name);
     } catch {
-      connection.close(4001, "room full or expedition started");
+      connection.close(4001, "room full");
       return;
     }
     this.startLoop();
@@ -153,7 +153,10 @@ export default {
       });
     }
 
-    const partyResponse = await routePartykitRequest(request, env, { cors: true });
+    const partyResponse = await routePartykitRequest(request, env, {
+      cors: true,
+      locationHint: "apac",
+    });
     if (partyResponse) return partyResponse;
 
     return new Response("Not Found", { status: 404 });

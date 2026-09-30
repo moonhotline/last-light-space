@@ -49,6 +49,56 @@ interface Particle {
   size: number;
   color: THREE.Color;
 }
+function createNameplateSprite(name: string, colorHex: number): THREE.Sprite {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d")!;
+  ctx.clearRect(0, 0, 256, 64);
+
+  // Background rounded rect pill
+  ctx.fillStyle = "rgba(8, 14, 24, 0.78)";
+  const x = 12, y = 10, w = 232, h = 44, r = 16;
+  ctx.beginPath();
+  if (ctx.roundRect) {
+    ctx.roundRect(x, y, w, h, r);
+  } else {
+    ctx.rect(x, y, w, h);
+  }
+  ctx.fill();
+
+  // Team color border
+  const hex = "#" + colorHex.toString(16).padStart(6, "0");
+  ctx.lineWidth = 3.5;
+  ctx.strokeStyle = hex;
+  ctx.stroke();
+
+  // Small glowing indicator dot
+  ctx.fillStyle = hex;
+  ctx.beginPath();
+  ctx.arc(36, 32, 6, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Text
+  ctx.font = "bold 22px ui-sans-serif, system-ui, -apple-system, sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText((name || "探索员").slice(0, 10), 52, 33);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+  });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(1.4, 0.35, 1);
+  sprite.position.set(0, 2.15, 0);
+  sprite.name = "nameplate";
+  return sprite;
+}
 export class GameView {
   scene = new THREE.Scene();
   skyScene = new THREE.Scene();
@@ -1048,6 +1098,10 @@ export class GameView {
         );
         lamp.position.set(0, 1.76, 0.14);
         a.add(lamp);
+
+        const nameplate = createNameplateSprite(p.name, COLORS[p.color]);
+        a.add(nameplate);
+        a.userData.name = p.name;
         a.position.set(p.x, p.y - 0.82, p.z);
         for (const side of [-1, 1]) {
           const coneGeo = new THREE.ConeGeometry(0.045, 0.35, 12, 1, true);
@@ -1097,6 +1151,13 @@ export class GameView {
         this.avatarMixers.set(p.id, anim);
         this.avatars.set(p.id, a);
         this.scene.add(a);
+      }
+      if (a.userData.name !== p.name) {
+        const old = a.getObjectByName("nameplate");
+        if (old) a.remove(old);
+        const nameplate = createNameplateSprite(p.name, COLORS[p.color]);
+        a.add(nameplate);
+        a.userData.name = p.name;
       }
       a.visible =
         p.seat < 0 && !(own && (!this.thirdPerson || this.cameraRange < 0.4));

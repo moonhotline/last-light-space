@@ -41,7 +41,7 @@ export default class GameRoom implements Party.Server {
     if (this.timer) return;
     this.timer = setInterval(() => {
       this.sim.tick();
-      if (this.sim.s.tick % 2 === 0) this.broadcastSnapshot();
+      this.broadcastSnapshot();
     }, DT * 1000);
   }
 
@@ -60,7 +60,7 @@ export default class GameRoom implements Party.Server {
     try {
       this.sim.add(connection.id, name);
     } catch {
-      connection.close(4001, "room full or expedition started");
+      connection.close(4001, "room full");
       return;
     }
     this.startLoop();

@@ -207,8 +207,15 @@ function chooseMode(next: typeof mode) {
         : "联机频道未接通 · 仍可独自探索",
   );
 }
-const callsign = () =>
-  $<HTMLInputElement>("callsign").value.trim().slice(0, 16) || "探索员";
+const callsign = () => {
+  const val = $<HTMLInputElement>("callsign").value.trim().slice(0, 16);
+  if (val) {
+    try {
+      localStorage.setItem("last_light_callsign", val);
+    } catch {}
+  }
+  return val || "探索员";
+};
 function releaseSession() {
   const old = room;
   room = null;
@@ -269,6 +276,18 @@ function receive(next: Snapshot) {
           z: before.z - predicted.z,
         };
     }
+  }
+  if (mode === "coop" && room) {
+    text("linkState", `房间 ${room.roomId} · ${next.players.length}/4 人`);
+  }
+  if (reconnecting) {
+    reconnecting = false;
+    text("pauseTitle", "片刻，仰望星空");
+  }
+  if (next.phase === "active" && panel === "lobby") {
+    show(null);
+    lock();
+    unlockAudio();
   }
   if (next.phase !== previous) {
     if (next.phase === "lobby") {
@@ -629,9 +648,17 @@ function paintInventory() {
       return div;
     }),
   );
+  const crew =
+    mode === "coop" && state.players.length > 0
+      ? ` · 远征队 (${state.players.length}/4 人: ` +
+        state.players
+          .map((p) => (p.id === state?.host ? `[队长] ${p.name}` : p.name))
+          .join("，") +
+        ")"
+      : "";
   text(
     "inventorySubtitle",
-    `${entries.length} / 12 格 · 每类最多 99 · 本次远征结束后不保留`,
+    `${entries.length} / 12 格 · 随身物资${crew}`,
   );
   $("repairRecipe").replaceChildren(
     ...(Object.keys(REPAIR) as ItemId[]).map((k) => {
@@ -1065,6 +1092,18 @@ void Promise.all([
     loading = false;
     $<HTMLButtonElement>("launch").disabled = false;
     canvas.dataset.ready = "true";
+    try {
+      const savedCallsign = localStorage.getItem("last_light_callsign");
+      if (savedCallsign) $<HTMLInputElement>("callsign").value = savedCallsign;
+    } catch {}
+    $<HTMLInputElement>("callsign").addEventListener("input", (e) => {
+      try {
+        localStorage.setItem(
+          "last_light_callsign",
+          (e.target as HTMLInputElement).value,
+        );
+      } catch {}
+    });
     const code = new URLSearchParams(location.search).get("room");
     if (code) {
       $<HTMLInputElement>("roomCode").value = code.slice(0, 6).toUpperCase();

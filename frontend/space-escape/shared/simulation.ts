@@ -55,8 +55,17 @@ export class Simulation {
     };
   }
   add(id: string, name = "探索员") {
-    if (this.s.players.length >= 4 || this.s.phase !== "lobby")
-      throw new Error("房间已满或探索已开始");
+    const existing = this.player(id);
+    if (existing) {
+      existing.name =
+        name
+          .replace(/[<>\x00-\x1f]/g, "")
+          .trim()
+          .slice(0, 16) || existing.name;
+      return existing;
+    }
+    if (this.s.players.length >= 4)
+      throw new Error("房间已满");
     const slot = [0, 1, 2, 3].find(
       (n) => !this.s.players.some((p) => p.color === n),
     )!;
@@ -124,6 +133,10 @@ export class Simulation {
     this.latest.delete(id);
     this.s.markers = this.s.markers.filter((m) => m.owner !== id);
     if (this.s.host === id) this.s.host = this.s.players[0]?.id || "";
+    if (this.s.players.length === 0) {
+      this.s.phase = "lobby";
+      this.s.host = "";
+    }
   }
   player(id: string) {
     return this.s.players.find((p) => p.id === id);
