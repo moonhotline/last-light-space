@@ -673,6 +673,59 @@ kbd {
   opacity: 1;
   transform: none;
 }
+.combo.stunt {
+  color: #ffd08a;
+  text-shadow: 0 0 24px #ffd08a99, 0 0 10px #7cefff66;
+  font-weight: bold;
+  transform: scale(1.08);
+}
+.camera-flash {
+  position: fixed;
+  inset: 0;
+  background: #ffffff;
+  pointer-events: none;
+  z-index: 99999;
+  animation: flash-fade 0.4s ease-out forwards;
+}
+@keyframes flash-fade {
+  0% { opacity: 0.85; }
+  100% { opacity: 0; }
+}
+.special-props {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.prop-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: #0f1c26aa;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.prop-text b {
+  display: block;
+  font-size: 13px;
+  color: var(--text);
+}
+.prop-text small {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.prop-btns {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.prop-btns button {
+  font-size: 12px;
+  padding: 6px 12px;
+}
 #toast {
   position: fixed;
   z-index: 8;

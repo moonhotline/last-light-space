@@ -39,6 +39,7 @@ import {
   Camera,
   Navigation,
   Zap,
+  Download,
 } from "lucide";
 import {
   distance,
@@ -46,11 +47,12 @@ import {
   sector,
   BEACON_SITES,
   WORLD_SIZE,
+  type Vec,
 } from "../shared/map";
 import { DT, type Input, type Player, type Snapshot } from "../shared/types";
 import type { Simulation } from "../shared/simulation";
 import type { MovementWorld } from "../shared/physics";
-import { GameView } from "./scene";
+import { GameView, exportHoverboardGlb, takeSnapshot } from "./scene";
 const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id) as T;
 const text = (id: string, s: string) => {
@@ -68,6 +70,19 @@ let mode: "practice" | "coop" = "practice",
   me: Player | null = null,
   predicted: Player | null = null,
   prediction: MovementWorld | null = null;
+let isSkating = false;
+let stuntText = "";
+let stuntUntil = 0;
+let localTrickScore = 0;
+let lastGrapplePos: Vec | null = null;
+let swingMinY = Infinity;
+let swingMaxSpeed = 0;
+let gravitySwingAwarded = false;
+let apexVaultAwarded = false;
+let skateCruiseTimer = 0;
+let skateAirTime = 0;
+let skateCumulativeYaw = 0;
+let lastPlayerYaw = 0;
 let pending: Input[] = [],
   sequence = 0,
   yaw = 0,
@@ -133,6 +148,7 @@ function paintIcons() {
       Camera,
       Navigation,
       Zap,
+      Download,
     },
   });
 }
@@ -357,6 +373,95 @@ function command(action: string) {
   sim ? sim.action(me.id, action) : room?.send("action", action);
   if (action === "mark") view.sound("mark");
 }
+function toggleHoverboard() {
+  if (panel || !state || state.phase === "lobby" || !me) return;
+  isSkating = !isSkating;
+  view.sound(isSkating ? "jump" : "dash", 1.2);
+  notice(isSkating ? "🏄‍♂️ 反重力滑板已装备 (按 K 收起)" : "反重力滑板已收起");
+  const btn = $("toggleSkate");
+  if (btn) btn.textContent = isSkating ? "收起滑板 (K)" : "装备滑板 (K)";
+}
+function recordTrick(title: string, points: number) {
+  localTrickScore += points;
+  command(`trick:${points}`);
+  stuntText = `⚡ ${title} +${points}`;
+  stuntUntil = performance.now() + 2200;
+  view.sound("trick", 1.25);
+}
+function updateStunts(dt: number) {
+  const p = predicted || me;
+  if (!p || p.seat >= 0) return;
+  const speed = Math.hypot(p.vx, p.vy, p.vz);
+  const horizSpeed = Math.hypot(p.vx, p.vz);
+
+  // 1. Grapple Swing Stunts
+  if (p.grapple) {
+    if (!lastGrapplePos) {
+      swingMinY = p.y;
+      swingMaxSpeed = speed;
+      gravitySwingAwarded = false;
+      apexVaultAwarded = false;
+    }
+    swingMinY = Math.min(swingMinY, p.y);
+    swingMaxSpeed = Math.max(swingMaxSpeed, speed);
+
+    // Gravity Swing (+150): swing speed > 16m/s
+    if (speed > 16 && !gravitySwingAwarded) {
+      gravitySwingAwarded = true;
+      recordTrick("重力摆荡", 150);
+    }
+
+    // Apex Vault (+250): climbed > 6m from swing valley and vy slows down towards apex
+    if (!apexVaultAwarded && p.y - swingMinY > 6 && p.vy <= 1.5 && speed > 10) {
+      apexVaultAwarded = true;
+      recordTrick("弧光飞跃", 250);
+    }
+  } else if (lastGrapplePos) {
+    // Just detached grapple at high speed: Sling Catapult (+350)
+    if (swingMaxSpeed > 18 && p.vy > 3) {
+      recordTrick("超空弹射", 350);
+    }
+  }
+  lastGrapplePos = p.grapple ? { ...p.grapple } : null;
+
+  // 2. Skateboard Stunts
+  if (isSkating) {
+    // Mach Glide (+50/s): grounded and high horizontal speed (> 16m/s)
+    if (p.grounded && horizSpeed > 16) {
+      skateCruiseTimer += dt;
+      if (skateCruiseTimer >= 1.0) {
+        skateCruiseTimer -= 1.0;
+        recordTrick("极速巡航", 50);
+      }
+    } else {
+      skateCruiseTimer = Math.max(0, skateCruiseTimer - dt * 2);
+    }
+
+    // Airborne tricks: Ollie Air & Starlight Spin
+    if (!p.grounded) {
+      skateAirTime += dt;
+      const dYaw = Math.abs(
+        Math.atan2(Math.sin(yaw - lastPlayerYaw), Math.cos(yaw - lastPlayerYaw)),
+      );
+      skateCumulativeYaw += dYaw;
+      if (skateCumulativeYaw >= Math.PI * 1.75) {
+        skateCumulativeYaw = 0;
+        recordTrick("星芒转体 360°", 500);
+      }
+    } else {
+      if (skateAirTime > 0.75 && horizSpeed > 9) {
+        recordTrick("天际腾空", 200);
+      }
+      skateAirTime = 0;
+      skateCumulativeYaw = 0;
+    }
+  } else {
+    skateCruiseTimer = 0;
+    skateAirTime = 0;
+    skateCumulativeYaw = 0;
+  }
+  lastPlayerYaw = yaw;
+}
 function makeInput(): Input {
   const active = !panel && !reconnecting;
   const input: Input = {
@@ -380,6 +485,7 @@ function makeInput(): Input {
     fire: active && (keys.has("Mouse0") || keys.has("KeyT")),
     brake: active && keys.has("KeyX"),
     interact: active && (keys.has("KeyE") || pulses.has("KeyE")),
+    skate: active && isSkating,
   };
   pulses.clear();
   return input;
@@ -396,7 +502,7 @@ function step() {
       -1.3,
       Math.min(
         1.3,
-        pitch + (Number(keys.has("KeyI")) - Number(keys.has("KeyK"))) * DT,
+        pitch + (Number(keys.has("KeyI")) - Number(keys.has("ArrowDown") && !keys.has("KeyS"))) * DT,
       ),
     );
   }
@@ -417,6 +523,7 @@ function step() {
     if (predicted.seat < 0) prediction.move(predicted, i);
     prediction.step();
   }
+  updateStunts(DT);
 }
 function objective() {
   return state && me ? missionObjective(state, me) : null;
@@ -582,8 +689,11 @@ function renderResult() {
     "resultReason",
     "游隼号驶入回声林地。月球缓缓升起，而这片不该存在的森林，仍在呼吸。第一章完成，世界继续开放。",
   );
+  const totalTricks =
+    state.players.reduce((n, p) => n + (p.trickScore || 0), 0) +
+    (me?.trickScore || localTrickScore);
   $("resultStats").innerHTML =
-    `<div>探索用时<b>${clock(state.time)}</b></div><div>能源晶体<b>${state.players.reduce((n, p) => n + p.crystals, 0)}</b></div>`;
+    `<div>探索用时<b>${clock(state.time)}</b></div><div>能源晶体<b>${state.players.reduce((n, p) => n + p.crystals, 0)}</b></div><div>特技动作分<b>${totalTricks}</b></div>`;
   $<HTMLButtonElement>("again").disabled =
     mode === "coop" && state.host !== room?.sessionId;
 }
@@ -611,9 +721,16 @@ function hud() {
     "altitude",
     `${Math.round(Math.max(0, p.y - groundAt(p.x, p.z) - 0.85))} m`,
   );
-  text("cargo", `${me.crystals.toString().padStart(2, "0")} 晶体`);
-  text("combo", me.combo >= 2 ? `×${me.combo} 连续收集` : "");
-  $("combo").classList.toggle("visible", me.combo >= 2);
+  text("cargo", `${me.crystals.toString().padStart(2, "0")} 晶体 · 特技 ${me.trickScore || localTrickScore}`);
+  const now = performance.now();
+  if (stuntUntil > now) {
+    text("combo", stuntText);
+    $("combo").classList.add("visible", "stunt");
+  } else {
+    $("combo").classList.remove("stunt");
+    text("combo", me.combo >= 2 ? `×${me.combo} 连续收集` : "");
+    $("combo").classList.toggle("visible", me.combo >= 2);
+  }
   text("dashStatus", p.grapple ? "牵引中 · Q 松开" : "瞄准岩壁");
   const anchor = p.seat < 0 ? (sim?.physics || prediction)?.aim(p, 85) : null;
   document
@@ -826,6 +943,8 @@ addEventListener("keydown", (e) => {
   keyDown(e.code);
   if (e.repeat) return;
   if (e.code === "KeyV") camera();
+  if (e.code === "KeyP") takeSnapshot(view);
+  if (e.code === "KeyK") toggleHoverboard();
   if (e.code === "KeyR") command("mark");
   if (e.code === "KeyB") command("respawn");
   if (e.code === "KeyG") command("heal");
@@ -890,6 +1009,10 @@ $("closeLore").onclick = resumeGame;
 $("heal").onclick = () => {
   sim ? sim.action(me!.id, "heal") : room?.send("action", "heal");
 };
+$("snapshot") && ($("snapshot").onclick = () => takeSnapshot(view));
+$("snapPhoto") && ($("snapPhoto").onclick = () => takeSnapshot(view));
+$("toggleSkate") && ($("toggleSkate").onclick = toggleHoverboard);
+$("downloadBoard") && ($("downloadBoard").onclick = exportHoverboardGlb);
 let touch: { id: number; x: number; y: number } | null = null;
 canvas.onpointerdown = (e) => {
   if (e.pointerType !== "mouse" && !panel) {

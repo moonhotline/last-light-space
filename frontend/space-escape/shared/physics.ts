@@ -154,8 +154,9 @@ export class MovementWorld {
       p.fuel -= 16;
     }
     p.dashHeld = i.dash;
-    const speed = p.dashTime > 0 ? 43 : i.sprint ? 23 : 15;
-    const factor = 1 - Math.exp(-(p.grounded && !p.grapple ? 10 : 0.75) * DT);
+    p.skate = !!i.skate;
+    const speed = p.dashTime > 0 ? 43 : p.skate ? (i.sprint ? 32 : 23) : i.sprint ? 23 : 15;
+    const factor = 1 - Math.exp(-(p.grounded && !p.grapple ? (p.skate ? 3.5 : 10) : 0.75) * DT);
     const dashForward =
       p.dashTime > 0 && len === 1 && i.forward === 0 && i.side === 0;
     p.vx += ((dashForward ? -Math.sin(i.yaw) : dx) * speed - p.vx) * factor;

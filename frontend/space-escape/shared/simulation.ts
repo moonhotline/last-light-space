@@ -92,6 +92,8 @@ export class Simulation {
       travel: 0,
       checkpoint: 0,
       respawns: 0,
+      skate: false,
+      trickScore: 0,
       ...adventurePlayer(),
     };
     p.y = groundAt(p.x, p.z) + 0.85;
@@ -177,6 +179,12 @@ export class Simulation {
       this.emit("修复凝胶已使用 · 护盾恢复");
     }
     if (command === "close-lore") p.lore = -1;
+    if (typeof command === "string" && command.startsWith("trick:")) {
+      const pts = parseInt(command.slice(6), 10);
+      if (Number.isFinite(pts) && pts > 0 && pts <= 1000) {
+        p.trickScore = (p.trickScore || 0) + pts;
+      }
+    }
     if (command === "mark") {
       const x = p.x - Math.sin(p.yaw) * 65,
         z = p.z - Math.cos(p.yaw) * 65;

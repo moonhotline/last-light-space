@@ -29,12 +29,19 @@
           物品栏 <kbd>Tab</kbd></button
         ><span id="linkState">KEPLER / 07</span
         ><button
+          id="snapshot"
+          class="icon"
+          title="拍照快照下载 P"
+          aria-label="拍照快照下载"
+        >
+          <i data-lucide="camera"></i></button
+        ><button
           id="camera"
           class="icon"
           title="切换视角 V"
           aria-label="切换视角"
         >
-          <i data-lucide="camera"></i></button
+          <i data-lucide="navigation"></i></button
         ><button id="sound" class="icon" title="静音" aria-label="静音">
           <i data-lucide="volume-2"></i></button
         ><button id="pause" class="icon" title="探索菜单" aria-label="探索菜单">
@@ -118,6 +125,8 @@
           ><span>G <b>修复护盾</b></span
           ><span>X / Shift <b>飞船下降 / 刹车</b></span
           ><span>V <b>切换视角</b></span
+          ><span>K <b>反重力滑板</b></span
+          ><span>P <b>拍照快照</b></span
           ><span>E <b>阅读 / 修复 / 登船</b></span
           ><span>R <b>标记路线</b></span
           ><span>H <b>隐藏界面</b></span>
@@ -168,6 +177,28 @@
             <div id="inventoryGrid" class="inventory-grid"></div>
             <p id="inventoryHealth"></p>
             <button id="heal" class="secondary">使用修复凝胶 +55 护盾</button>
+            <div class="special-props">
+              <p class="overline">SPECIAL PROPS / 探索与拍照道具</p>
+              <div class="prop-item">
+                <div class="prop-text">
+                  <b>反重力滑板 · ION HOVERBOARD</b>
+                  <small>极速冲浪 · 减小摩擦阻力 · 动作特技计分</small>
+                </div>
+                <div class="prop-btns">
+                  <button id="toggleSkate" class="secondary">装备 / 收起 <kbd>K</kbd></button>
+                  <button id="downloadBoard" class="secondary"><i data-lucide="download"></i>下载 3D 模型 (.glb)</button>
+                </div>
+              </div>
+              <div class="prop-item">
+                <div class="prop-text">
+                  <b>远征全息相机 · SURVEY CAMERA</b>
+                  <small>全高清星球实景 · 原生画质保存到本地相册</small>
+                </div>
+                <div class="prop-btns">
+                  <button id="snapPhoto" class="secondary"><i data-lucide="camera"></i>立即拍照下载 <kbd>P</kbd></button>
+                </div>
+              </div>
+            </div>
             <p class="helper">
               瞄准矿脉 / 物资箱，长按左键或 T。任务部件全队协作；靠近飞船长按 E
               存入材料。

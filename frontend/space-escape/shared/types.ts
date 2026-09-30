@@ -16,6 +16,7 @@ export interface Input {
   grapple: boolean;
   fire: boolean;
   brake: boolean;
+  skate?: boolean;
 }
 export interface Player extends Vec {
   id: string;
@@ -57,6 +58,8 @@ export interface Player extends Vec {
   lore: number;
   seat: number;
   invulnerable: number;
+  skate?: boolean;
+  trickScore?: number;
 }
 export interface Beacon extends Vec {
   id: number;
@@ -137,6 +140,7 @@ export const idleInput = (seq = 0): Input => ({
   grapple: false,
   fire: false,
   brake: false,
+  skate: false,
 });
 export function parseInput(raw: unknown): Input | null {
   if (!raw || typeof raw !== "object") return null;
@@ -162,5 +166,6 @@ export function parseInput(raw: unknown): Input | null {
     grapple: v.grapple === true,
     fire: v.fire === true,
     brake: v.brake === true,
+    skate: v.skate === true,
   };
 }

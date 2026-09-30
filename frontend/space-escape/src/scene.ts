@@ -755,10 +755,12 @@ export class GameView {
       kill: [160, 32, 0.65],
       hurt: [110, 42, 0.35],
       enemy: [340, 70, 0.22],
+      shutter: [1600, 380, 0.09],
+      trick: [440 * pitch, 880 * pitch, 0.22],
     };
     const [a, b, d] = sounds[name] || sounds.mark;
     o.type =
-      name === "land" || name === "dash" || name === "step"
+      name === "land" || name === "dash" || name === "step" || name === "shutter"
         ? "triangle"
         : "sine";
     o.frequency.setValueAtTime(a, now);
@@ -1061,6 +1063,12 @@ export class GameView {
           a.add(jet);
         }
 
+        const board = buildHoverboardMesh();
+        board.position.set(0, 0.04, 0);
+        board.name = "hoverboard";
+        board.visible = false;
+        a.add(board);
+
         const mixer = new THREE.AnimationMixer(cloned);
         const findClip = (name: string, fallbackIdx = 0) =>
           THREE.AnimationClip.findByName(this.astronautAnimations, name) ||
@@ -1107,10 +1115,10 @@ export class GameView {
         (1 - Math.exp(-dt * 12));
       const speed = Math.hypot(p.vx, p.vz);
       const targetPitch = p.jetting
-        ? 0.38 + Math.min(0.12, speed * 0.015)
+        ? 0
         : p.grounded
           ? 0
-          : Math.min(0.20, speed * 0.02);
+          : Math.min(0.12, speed * 0.01);
       a.rotation.x = THREE.MathUtils.damp(a.rotation.x, targetPitch, 8, dt);
       a.rotation.z = THREE.MathUtils.damp(
         a.rotation.z,
@@ -1119,6 +1127,19 @@ export class GameView {
         dt,
       );
 
+      if (p.skate) {
+        const turnDelta = Math.atan2(
+          Math.sin(targetYaw - a.rotation.y),
+          Math.cos(targetYaw - a.rotation.y),
+        );
+        a.rotation.z = THREE.MathUtils.damp(
+          a.rotation.z,
+          Math.max(-0.25, Math.min(0.25, -turnDelta * 0.35)),
+          8,
+          dt,
+        );
+      }
+
       if (anim) {
         anim.mixer.update(dt);
         let target = "idle";
@@ -1126,10 +1147,10 @@ export class GameView {
           target = "floating";
         } else if (speed > 5.0) {
           target = "run";
-          anim.actions.run.timeScale = Math.max(0.8, Math.min(2.0, speed * 0.16));
+          anim.actions.run.timeScale = Math.max(0.75, Math.min(1.25, speed * 0.085));
         } else if (speed > 0.35) {
           target = "walk";
-          anim.actions.walk.timeScale = Math.max(0.6, Math.min(2.5, speed * 0.32));
+          anim.actions.walk.timeScale = Math.max(0.6, Math.min(1.15, speed * 0.22));
         } else {
           target = "idle";
         }
@@ -1164,6 +1185,11 @@ export class GameView {
           const flicker = 0.8 + Math.sin(t * 60 + side * 1.5) * 0.2;
           jet.scale.set(1, flicker, 1);
         }
+      }
+
+      const board = a.getObjectByName("hoverboard");
+      if (board) {
+        board.visible = !!p.skate;
       }
 
       if (p.jetting && !own && hash(Math.floor(t * 30), p.color) > 0.4)
@@ -1277,5 +1303,118 @@ export class GameView {
       pz(me.z) - Math.cos(me.yaw) * 11,
     );
     ctx.stroke();
+  }
+}
+
+export function buildHoverboardMesh(): THREE.Group {
+  const g = new THREE.Group();
+  g.name = "hoverboard";
+
+  // Streamlined main deck (1.22m long, 0.34m wide)
+  const deckGeo = new THREE.BoxGeometry(0.34, 0.032, 1.22);
+  const deckMat = new THREE.MeshStandardMaterial({
+    color: 0x16222e,
+    metalness: 0.85,
+    roughness: 0.22,
+  });
+  const deck = new THREE.Mesh(deckGeo, deckMat);
+  deck.castShadow = true;
+  deck.receiveShadow = true;
+  g.add(deck);
+
+  // Carbon grip surface
+  const gripGeo = new THREE.BoxGeometry(0.24, 0.005, 0.96);
+  const gripMat = new THREE.MeshStandardMaterial({
+    color: 0x0c131a,
+    roughness: 0.9,
+  });
+  const grip = new THREE.Mesh(gripGeo, gripMat);
+  grip.position.y = 0.018;
+  g.add(grip);
+
+  // Glowing Ion Plasma Rails (两侧青蓝等离子光翼)
+  for (const side of [-1, 1]) {
+    const railGeo = new THREE.BoxGeometry(0.024, 0.026, 1.18);
+    const railMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+    const rail = new THREE.Mesh(railGeo, railMat);
+    rail.position.set(side * 0.175, 0.002, 0);
+    g.add(rail);
+
+    const glowGeo = new THREE.BoxGeometry(0.036, 0.038, 1.2);
+    const glowMat = glowMaterial(0x00f0ff, 0.35);
+    const glow = new THREE.Mesh(glowGeo, glowMat);
+    glow.position.set(side * 0.175, 0.002, 0);
+    g.add(glow);
+  }
+
+  // Underside Dual Anti-Gravity Repulsor Rings
+  for (const z of [-0.38, 0.38]) {
+    const emitterGeo = new THREE.CylinderGeometry(0.08, 0.09, 0.02, 16);
+    const emitterMat = new THREE.MeshStandardMaterial({
+      color: 0x243242,
+      metalness: 0.9,
+      roughness: 0.2,
+    });
+    const emitter = new THREE.Mesh(emitterGeo, emitterMat);
+    emitter.position.set(0, -0.02, z);
+    g.add(emitter);
+
+    const coreGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.022, 16);
+    const coreMat = new THREE.MeshBasicMaterial({ color: 0x67e8f9 });
+    const core = new THREE.Mesh(coreGeo, coreMat);
+    core.position.set(0, -0.022, z);
+    g.add(core);
+  }
+
+  // Aerodynamic nose tip
+  const tipGeo = new THREE.ConeGeometry(0.16, 0.16, 4);
+  tipGeo.rotateX(-Math.PI / 2);
+  tipGeo.rotateY(Math.PI / 4);
+  const tip = new THREE.Mesh(tipGeo, deckMat);
+  tip.scale.set(1, 0.2, 1);
+  tip.position.set(0, 0, -0.65);
+  g.add(tip);
+
+  return g;
+}
+
+export async function exportHoverboardGlb(): Promise<void> {
+  const { GLTFExporter } = await import(
+    "three/addons/exporters/GLTFExporter.js"
+  );
+  const board = buildHoverboardMesh();
+  const exporter = new GLTFExporter();
+  exporter.parse(
+    board,
+    (gltf) => {
+      const blob = new Blob([gltf as ArrayBuffer], {
+        type: "model/gltf-binary",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `kepler-hoverboard-${Date.now()}.glb`;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+    (err) => console.error("Hoverboard export error:", err),
+    { binary: true },
+  );
+}
+
+export function takeSnapshot(view: GameView): void {
+  view.sound("shutter");
+  const flash = document.createElement("div");
+  flash.className = "camera-flash";
+  document.body.appendChild(flash);
+  setTimeout(() => flash.remove(), 450);
+  try {
+    const url = view.canvas.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.download = `last-light-snapshot-${Date.now()}.png`;
+    a.href = url;
+    a.click();
+  } catch (err) {
+    console.error("Camera snapshot error:", err);
   }
 }
