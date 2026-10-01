@@ -90,6 +90,28 @@ export class Main extends Server {
       this.commands.set(connection.id, now);
       this.sim.action(connection.id, message.data);
     }
+    if (message.type === "chat") {
+      const p = this.sim.player(connection.id);
+      const rawText =
+        typeof message.data === "string"
+          ? message.data
+          : (message.data as any)?.text;
+      const text = String(rawText || "").trim().slice(0, 150);
+      if (text && p) {
+        this.broadcast(
+          JSON.stringify({
+            type: "chat",
+            data: {
+              id: p.id,
+              name: p.name,
+              color: p.color,
+              text,
+              time: Date.now(),
+            },
+          }),
+        );
+      }
+    }
   }
 
   onClose(connection: Connection) {

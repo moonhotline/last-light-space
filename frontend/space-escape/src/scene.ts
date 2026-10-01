@@ -134,6 +134,7 @@ export class GameView {
       head?: THREE.Object3D;
       torso?: THREE.Object3D;
       armL?: THREE.Object3D;
+      armR?: THREE.Object3D;
     }
   >();
   toolModel = new THREE.Group();
@@ -657,11 +658,10 @@ export class GameView {
     this.astronautAnimations = explorer.animations;
     weatherMaterials(this.astronaut);
     await this.adventure.load();
-    const tool = await loader.loadAsync("/assets/tool.glb");
-    optimizeModel(tool.scene);
-    this.toolModel.add(tool.scene);
-    this.toolModel.rotation.y = Math.PI;
-    this.toolModel.position.set(0.32, -0.3, -0.58);
+    const rifleFP = buildTechRifleMesh();
+    rifleFP.rotation.y = Math.PI;
+    rifleFP.position.set(0.28, -0.26, -0.52);
+    this.toolModel.add(rifleFP);
     this.camera.add(this.toolModel);
     this.toolModel.visible = false;
     this.astronaut.traverse((o) => {
@@ -1123,6 +1123,42 @@ export class GameView {
         board.visible = false;
         a.add(board);
 
+        const rightHand =
+          cloned.getObjectByName("mixamorig:RightHand") ||
+          cloned.getObjectByName("RightHand") ||
+          cloned.getObjectByName("mixamorig:RightForeArm");
+        const rifle = buildTechRifleMesh();
+        rifle.name = "techRifle";
+        if (rightHand) {
+          rifle.scale.setScalar(0.7);
+          rifle.position.set(0.04, -0.04, 0.1);
+          rifle.rotation.set(-Math.PI / 2, 0, Math.PI);
+          rightHand.add(rifle);
+        } else {
+          rifle.scale.setScalar(0.72);
+          rifle.position.set(0.32, 0.94, -0.15);
+          rifle.rotation.set(-0.2, Math.PI, 0.1);
+          a.add(rifle);
+        }
+
+        const leftForeArm =
+          cloned.getObjectByName("mixamorig:LeftForeArm") ||
+          cloned.getObjectByName("LeftForeArm") ||
+          cloned.getObjectByName("mixamorig:LeftArm");
+        const grapple = buildGrappleLauncherMesh();
+        grapple.name = "grappleLauncher";
+        if (leftForeArm) {
+          grapple.scale.setScalar(0.68);
+          grapple.position.set(0.02, 0.1, 0.02);
+          grapple.rotation.set(0, 0, 0);
+          leftForeArm.add(grapple);
+        } else {
+          grapple.scale.setScalar(0.75);
+          grapple.position.set(-0.35, 0.96, -0.05);
+          grapple.rotation.set(-0.2, 0, -0.1);
+          a.add(grapple);
+        }
+
         const mixer = new THREE.AnimationMixer(cloned);
         const findClip = (name: string, fallbackIdx = 0) =>
           THREE.AnimationClip.findByName(this.astronautAnimations, name) ||
@@ -1144,9 +1180,10 @@ export class GameView {
           mixer,
           actions,
           currentAction: "idle",
-          head: cloned.getObjectByName("Head") || cloned.getObjectByName("head"),
-          torso: cloned.getObjectByName("Spine1") || cloned.getObjectByName("Spine"),
-          armL: cloned.getObjectByName("LeftArm") || cloned.getObjectByName("arm_L"),
+          head: cloned.getObjectByName("mixamorig:Head") || cloned.getObjectByName("Head") || cloned.getObjectByName("head"),
+          torso: cloned.getObjectByName("mixamorig:Spine1") || cloned.getObjectByName("Spine1") || cloned.getObjectByName("Spine"),
+          armL: cloned.getObjectByName("mixamorig:LeftArm") || cloned.getObjectByName("LeftArm") || cloned.getObjectByName("arm_L"),
+          armR: cloned.getObjectByName("mixamorig:RightArm") || cloned.getObjectByName("RightArm"),
         };
         this.avatarMixers.set(p.id, anim);
         this.avatars.set(p.id, a);
@@ -1206,6 +1243,9 @@ export class GameView {
         let target = "idle";
         if (p.jetting || !p.grounded) {
           target = "floating";
+        } else if (p.skate) {
+          // On skateboard: NEVER play run/walk! Maintain aerodynamic surfing posture
+          target = "floating";
         } else if (speed > 5.0) {
           target = "run";
           anim.actions.run.timeScale = Math.max(0.75, Math.min(1.25, speed * 0.085));
@@ -1234,6 +1274,24 @@ export class GameView {
             dt,
           );
         }
+        if (p.skate) {
+          // Surfing stance: angled torso and balance arms
+          if (anim.torso) {
+            anim.torso.rotation.y = THREE.MathUtils.damp(anim.torso.rotation.y, 0.42, 8, dt);
+          }
+          if (anim.armL && !p.grapple) {
+            anim.armL.rotation.z = THREE.MathUtils.damp(anim.armL.rotation.z, -0.45, 8, dt);
+            anim.armL.rotation.x = THREE.MathUtils.damp(anim.armL.rotation.x, 0.2, 8, dt);
+          }
+          if (anim.armR) {
+            anim.armR.rotation.z = THREE.MathUtils.damp(anim.armR.rotation.z, 0.45, 8, dt);
+            anim.armR.rotation.x = THREE.MathUtils.damp(anim.armR.rotation.x, -0.2, 8, dt);
+          }
+        } else {
+          if (anim.torso) {
+            anim.torso.rotation.y = THREE.MathUtils.damp(anim.torso.rotation.y, 0, 8, dt);
+          }
+        }
         if (anim.armL && p.grapple) {
           anim.armL.rotation.x = -1.2;
         }
@@ -1251,6 +1309,15 @@ export class GameView {
       const board = a.getObjectByName("hoverboard");
       if (board) {
         board.visible = !!p.skate;
+        if (p.skate) {
+          const isOllie = !!(p.ollieUntil && p.ollieUntil > worldTime);
+          if (isOllie) {
+            board.rotation.x += dt * Math.PI * 4;
+          } else {
+            board.rotation.x = THREE.MathUtils.damp(board.rotation.x, 0, 10, dt);
+          }
+          board.position.y = 0.04 + Math.sin(t * 8) * 0.015;
+        }
       }
 
       if (p.jetting && !own && hash(Math.floor(t * 30), p.color) > 0.4)
@@ -1478,4 +1545,264 @@ export function takeSnapshot(view: GameView): void {
   } catch (err) {
     console.error("Camera snapshot error:", err);
   }
+}
+
+export function buildTechRifleMesh(): THREE.Group {
+  const g = new THREE.Group();
+  g.name = "techRifle";
+
+  const titanium = new THREE.MeshStandardMaterial({
+    color: 0x1b2834,
+    metalness: 0.9,
+    roughness: 0.22,
+  });
+  const carbon = new THREE.MeshStandardMaterial({
+    color: 0x0f151c,
+    metalness: 0.2,
+    roughness: 0.8,
+  });
+  const gold = new THREE.MeshStandardMaterial({
+    color: 0xd97706,
+    metalness: 0.85,
+    roughness: 0.3,
+  });
+  const plasmaCoreMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+
+  // Main chassis receiver
+  const chassis = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.12, 0.32), titanium);
+  chassis.castShadow = true;
+  g.add(chassis);
+
+  // Upper Gauss Rail Barrel
+  const barrelUpperGeo = new THREE.CylinderGeometry(0.016, 0.016, 0.36, 12);
+  barrelUpperGeo.rotateX(Math.PI / 2);
+  const barrelUpper = new THREE.Mesh(barrelUpperGeo, titanium);
+  barrelUpper.position.set(0, 0.04, -0.28);
+  g.add(barrelUpper);
+
+  // Lower Magnetic Accelerator Guide
+  const barrelLowerGeo = new THREE.CylinderGeometry(0.014, 0.014, 0.32, 12);
+  barrelLowerGeo.rotateX(Math.PI / 2);
+  const barrelLower = new THREE.Mesh(barrelLowerGeo, carbon);
+  barrelLower.position.set(0, -0.01, -0.26);
+  g.add(barrelLower);
+
+  // Plasma Energy Battery Cylinder
+  const cellGeo = new THREE.CylinderGeometry(0.024, 0.024, 0.14, 16);
+  cellGeo.rotateZ(Math.PI / 2);
+  const cell = new THREE.Mesh(cellGeo, plasmaCoreMat);
+  cell.position.set(0, 0.01, -0.02);
+  g.add(cell);
+
+  const cellGlow = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.15, 16), glowMaterial(0x00f0ff, 0.4));
+  cellGlow.rotation.z = Math.PI / 2;
+  cellGlow.position.copy(cell.position);
+  g.add(cellGlow);
+
+  // Muzzle Brake / Plasma Aperture
+  const muzzleGeo = new THREE.CylinderGeometry(0.024, 0.024, 0.06, 12);
+  muzzleGeo.rotateX(Math.PI / 2);
+  const muzzle = new THREE.Mesh(muzzleGeo, gold);
+  muzzle.position.set(0, 0.04, -0.48);
+  g.add(muzzle);
+
+  // Holographic Optical Sight on Top
+  const scopeGeo = new THREE.BoxGeometry(0.04, 0.035, 0.1);
+  const scope = new THREE.Mesh(scopeGeo, carbon);
+  scope.position.set(0, 0.08, -0.05);
+  g.add(scope);
+
+  const sightLens = new THREE.Mesh(new THREE.PlaneGeometry(0.03, 0.025), glowMaterial(0x38bdf8, 0.8));
+  sightLens.position.set(0, 0.08, -0.101);
+  g.add(sightLens);
+
+  // Tactical Grip
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.14, 0.06), carbon);
+  grip.rotation.x = 0.28;
+  grip.position.set(0, -0.11, 0.04);
+  g.add(grip);
+
+  // Stock
+  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.09, 0.16), carbon);
+  stock.position.set(0, -0.01, 0.22);
+  g.add(stock);
+
+  return g;
+}
+
+export function buildSurveyCameraMesh(): THREE.Group {
+  const g = new THREE.Group();
+  g.name = "surveyCamera";
+
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: 0x1e293b,
+    metalness: 0.85,
+    roughness: 0.25,
+  });
+  const lensGlassMat = new THREE.MeshStandardMaterial({
+    color: 0x051b2c,
+    roughness: 0.05,
+    metalness: 0.95,
+  });
+  const copperMat = new THREE.MeshStandardMaterial({
+    color: 0xd97706,
+    metalness: 0.8,
+    roughness: 0.3,
+  });
+  const screenMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+
+  // Camera Body
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.12, 0.09), bodyMat);
+  body.castShadow = true;
+  g.add(body);
+
+  // Front Lens Cylinder
+  const lensGeo = new THREE.CylinderGeometry(0.046, 0.052, 0.08, 24);
+  lensGeo.rotateX(Math.PI / 2);
+  const lens = new THREE.Mesh(lensGeo, bodyMat);
+  lens.position.set(0, 0, -0.08);
+  g.add(lens);
+
+  // Lens Front Element Glass
+  const glassGeo = new THREE.CylinderGeometry(0.038, 0.038, 0.01, 24);
+  glassGeo.rotateX(Math.PI / 2);
+  const glass = new THREE.Mesh(glassGeo, lensGlassMat);
+  glass.position.set(0, 0, -0.122);
+  g.add(glass);
+
+  // Copper Aperture Accent Ring
+  const ringGeo = new THREE.TorusGeometry(0.046, 0.005, 8, 24);
+  const ring = new THREE.Mesh(ringGeo, copperMat);
+  ring.position.set(0, 0, -0.115);
+  g.add(ring);
+
+  // Holographic Screen on Back
+  const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.13, 0.085), screenMat);
+  screen.rotation.y = Math.PI;
+  screen.position.set(0, 0, 0.046);
+  g.add(screen);
+
+  // Top Optical Sensor & Shutter Button
+  const sensor = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.025, 0.04), bodyMat);
+  sensor.position.set(-0.04, 0.07, 0);
+  g.add(sensor);
+
+  const btn = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.015, 12), copperMat);
+  btn.position.set(0.06, 0.068, -0.01);
+  g.add(btn);
+
+  return g;
+}
+
+export function buildGrappleLauncherMesh(): THREE.Group {
+  const g = new THREE.Group();
+  g.name = "grappleLauncher";
+
+  const alloyMat = new THREE.MeshStandardMaterial({
+    color: 0x1f2937,
+    metalness: 0.9,
+    roughness: 0.22,
+  });
+  const copperMat = new THREE.MeshStandardMaterial({
+    color: 0xd97706,
+    metalness: 0.9,
+    roughness: 0.3,
+  });
+  const cyanCoreMat = new THREE.MeshBasicMaterial({ color: 0x67e8f9 });
+
+  // Gauntlet forearm bracket
+  const bracket = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.09, 0.22), alloyMat);
+  bracket.castShadow = true;
+  g.add(bracket);
+
+  // Barrel tube
+  const barrelGeo = new THREE.CylinderGeometry(0.03, 0.034, 0.22, 16);
+  barrelGeo.rotateX(Math.PI / 2);
+  const barrel = new THREE.Mesh(barrelGeo, alloyMat);
+  barrel.position.set(0, 0.035, -0.08);
+  g.add(barrel);
+
+  // Magnetic Wire Spool
+  const spoolGeo = new THREE.CylinderGeometry(0.036, 0.036, 0.07, 16);
+  spoolGeo.rotateZ(Math.PI / 2);
+  const spool = new THREE.Mesh(spoolGeo, copperMat);
+  spool.position.set(0, -0.01, 0.05);
+  g.add(spool);
+
+  // Ion Core Indicator
+  const indicator = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.015, 0.1), cyanCoreMat);
+  indicator.position.set(0, 0.07, -0.06);
+  g.add(indicator);
+
+  // 3 Deployable Alloy Claws / Prongs
+  for (let i = 0; i < 3; i++) {
+    const angle = (i / 3) * Math.PI * 2;
+    const claw = new THREE.Mesh(new THREE.ConeGeometry(0.015, 0.07, 4), alloyMat);
+    claw.position.set(Math.cos(angle) * 0.038, 0.035 + Math.sin(angle) * 0.038, -0.21);
+    claw.rotation.x = Math.PI / 2 + 0.35;
+    claw.rotation.z = angle;
+    g.add(claw);
+  }
+
+  return g;
+}
+
+export async function exportTechRifleGlb(): Promise<void> {
+  const { GLTFExporter } = await import("three/addons/exporters/GLTFExporter.js");
+  const model = buildTechRifleMesh();
+  const exporter = new GLTFExporter();
+  exporter.parse(
+    model,
+    (gltf) => {
+      const blob = new Blob([gltf as ArrayBuffer], { type: "model/gltf-binary" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `kepler-tech-rifle-${Date.now()}.glb`;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+    (err) => console.error("Export error:", err),
+    { binary: true },
+  );
+}
+
+export async function exportSurveyCameraGlb(): Promise<void> {
+  const { GLTFExporter } = await import("three/addons/exporters/GLTFExporter.js");
+  const model = buildSurveyCameraMesh();
+  const exporter = new GLTFExporter();
+  exporter.parse(
+    model,
+    (gltf) => {
+      const blob = new Blob([gltf as ArrayBuffer], { type: "model/gltf-binary" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `kepler-survey-camera-${Date.now()}.glb`;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+    (err) => console.error("Export error:", err),
+    { binary: true },
+  );
+}
+
+export async function exportGrappleLauncherGlb(): Promise<void> {
+  const { GLTFExporter } = await import("three/addons/exporters/GLTFExporter.js");
+  const model = buildGrappleLauncherMesh();
+  const exporter = new GLTFExporter();
+  exporter.parse(
+    model,
+    (gltf) => {
+      const blob = new Blob([gltf as ArrayBuffer], { type: "model/gltf-binary" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `kepler-grapple-launcher-${Date.now()}.glb`;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+    (err) => console.error("Export error:", err),
+    { binary: true },
+  );
 }

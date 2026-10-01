@@ -42,6 +42,13 @@
           aria-label="切换视角"
         >
           <i data-lucide="navigation"></i></button
+        ><button
+          id="feedbackBtn"
+          class="icon"
+          title="联系我们与公开建议"
+          aria-label="联系我们与公开建议"
+        >
+          <i data-lucide="message-square"></i></button
         ><button id="sound" class="icon" title="静音" aria-label="静音">
           <i data-lucide="volume-2"></i></button
         ><button id="pause" class="icon" title="探索菜单" aria-label="探索菜单">
@@ -178,15 +185,24 @@
             <p id="inventoryHealth"></p>
             <button id="heal" class="secondary">使用修复凝胶 +55 护盾</button>
             <div class="special-props">
-              <p class="overline">SPECIAL PROPS / 探索与拍照道具</p>
+              <p class="overline">SPECIAL PROPS / 独立模型装备与下载</p>
               <div class="prop-item">
                 <div class="prop-text">
                   <b>反重力滑板 · ION HOVERBOARD</b>
-                  <small>极速冲浪 · 减小摩擦阻力 · 动作特技计分</small>
+                  <small>极速冲浪 · 减小摩擦阻力 · 双击空格 Ollie 360 翻板特技</small>
                 </div>
                 <div class="prop-btns">
                   <button id="toggleSkate" class="secondary">装备 / 收起 <kbd>K</kbd></button>
-                  <button id="downloadBoard" class="secondary"><i data-lucide="download"></i>下载 3D 模型 (.glb)</button>
+                  <button id="downloadBoard" class="secondary"><i data-lucide="download"></i>下载滑板 GLB</button>
+                </div>
+              </div>
+              <div class="prop-item">
+                <div class="prop-text">
+                  <b>科技脉冲步枪 · SCI-FI PLASMA RIFLE</b>
+                  <small>高斯加速导轨 · 3D 体积发光等离子能量光束</small>
+                </div>
+                <div class="prop-btns">
+                  <button id="downloadRifle" class="secondary"><i data-lucide="download"></i>下载科技枪 GLB</button>
                 </div>
               </div>
               <div class="prop-item">
@@ -195,7 +211,17 @@
                   <small>全高清星球实景 · 原生画质保存到本地相册</small>
                 </div>
                 <div class="prop-btns">
-                  <button id="snapPhoto" class="secondary"><i data-lucide="camera"></i>立即拍照下载 <kbd>P</kbd></button>
+                  <button id="snapPhoto" class="secondary"><i data-lucide="camera"></i>拍照下载快照 <kbd>P</kbd></button>
+                  <button id="downloadCamera" class="secondary"><i data-lucide="download"></i>下载相机 GLB</button>
+                </div>
+              </div>
+              <div class="prop-item">
+                <div class="prop-text">
+                  <b>重力钩索发射器 · GRAPPLE GAUNTLET</b>
+                  <small>腕载合金三爪 · 磁力高频卷盘 · 实时摆荡计分</small>
+                </div>
+                <div class="prop-btns">
+                  <button id="downloadGrapple" class="secondary"><i data-lucide="download"></i>下载钩索 GLB</button>
                 </div>
               </div>
             </div>
@@ -238,6 +264,58 @@
         ><button id="again" class="secondary">重新远征</button
         ><button id="home" class="secondary">返回着陆页</button>
       </section>
+      <section
+        id="feedbackSheet"
+        class="sheet feedback-sheet"
+        hidden
+        aria-labelledby="feedbackTitle"
+      >
+        <p class="overline">ECHOES & COMMUNITY / 联系与公开建议</p>
+        <h2 id="feedbackTitle">来自开普勒的回声</h2>
+        <div class="feedback-contact-box">
+          <div class="feedback-email-row">
+            <span>官方联络邮箱：</span>
+            <code id="contactEmail">oodaleek@gmail.com</code>
+            <button id="copyEmail" class="secondary icon-btn" title="复制邮箱">
+              <i data-lucide="copy"></i> 复制
+            </button>
+          </div>
+          <p class="helper">
+            任何 Bug 汇报、玩法奇思妙想或跨星际合作建议，我们都会认真阅读并回复。
+          </p>
+        </div>
+        <div class="feedback-form">
+          <label class="field">
+            <span>公开建议 / 探索反馈</span>
+            <textarea
+              id="feedbackContent"
+              rows="3"
+              placeholder="写下你对开普勒星球的探索感受或功能建议..."
+            ></textarea>
+          </label>
+          <div class="feedback-actions">
+            <label class="attach-img-btn secondary">
+              <i data-lucide="image"></i> 附带本地图片
+              <input type="file" id="feedbackFile" accept="image/*" hidden />
+            </label>
+            <button id="feedbackSnap" class="secondary">
+              <i data-lucide="camera"></i> 截取当前画面附带
+            </button>
+            <button id="submitFeedback" class="primary">
+              <i data-lucide="send"></i> 发送建议
+            </button>
+          </div>
+          <div id="feedbackPreviewContainer" class="feedback-preview-box" hidden>
+            <img id="feedbackPreviewImg" alt="反馈截图预览" />
+            <button id="removeFeedbackImg" class="icon-btn-danger" title="移除截图">×</button>
+          </div>
+        </div>
+        <div class="feedback-echoes">
+          <p class="overline">PUBLIC ECHOES / 公开建议展板</p>
+          <div id="echoesList" class="echoes-list"></div>
+        </div>
+        <button id="closeFeedback" class="primary">关闭面板</button>
+      </section>
     </main>
     <div class="landing-caption">
       <span>07 / THE SILENT FRONTIER</span><b>一颗陌生星球，一次共同的发现。</b
@@ -262,6 +340,19 @@
         ><progress id="interactionProgress" max="1" value="0"></progress>
       </div>
       <div id="combo" class="combo"></div>
+      <div id="chatBox" class="chat-box">
+        <div id="chatMessages" class="chat-messages"></div>
+        <form id="chatForm" class="chat-form" hidden>
+          <input
+            id="chatInput"
+            type="text"
+            maxlength="64"
+            placeholder="按 Enter 发送全队广播..."
+            autocomplete="off"
+          />
+          <button type="submit" class="secondary">发送</button>
+        </form>
+      </div>
       <div class="bottom-hud">
         <div class="vitals">
           <div class="health-line">

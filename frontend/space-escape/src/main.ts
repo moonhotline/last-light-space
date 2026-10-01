@@ -40,6 +40,9 @@ import {
   Navigation,
   Zap,
   Download,
+  MessageSquare,
+  Send,
+  Image,
 } from "lucide";
 import {
   distance,
@@ -52,7 +55,14 @@ import {
 import { DT, type Input, type Player, type Snapshot } from "../shared/types";
 import type { Simulation } from "../shared/simulation";
 import type { MovementWorld } from "../shared/physics";
-import { GameView, exportHoverboardGlb, takeSnapshot } from "./scene";
+import {
+  GameView,
+  exportHoverboardGlb,
+  exportTechRifleGlb,
+  exportSurveyCameraGlb,
+  exportGrappleLauncherGlb,
+  takeSnapshot,
+} from "./scene";
 const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id) as T;
 const text = (id: string, s: string) => {
@@ -77,12 +87,16 @@ let localTrickScore = 0;
 let lastGrapplePos: Vec | null = null;
 let swingMinY = Infinity;
 let swingMaxSpeed = 0;
+let swingAirTime = 0;
+let swingTickScore = 0;
 let gravitySwingAwarded = false;
 let apexVaultAwarded = false;
 let skateCruiseTimer = 0;
 let skateAirTime = 0;
 let skateCumulativeYaw = 0;
 let lastPlayerYaw = 0;
+let lastSpaceTime = 0;
+let attachedFeedbackImg = "";
 let pending: Input[] = [],
   sequence = 0,
   yaw = 0,
@@ -97,6 +111,7 @@ let panel:
     | "result"
     | "inventory"
     | "archive"
+    | "feedback"
     | null = "landing",
   endpoint = "",
   muted = false,
@@ -149,6 +164,9 @@ function paintIcons() {
       Navigation,
       Zap,
       Download,
+      MessageSquare,
+      Send,
+      Image,
     },
   });
 }
@@ -169,8 +187,9 @@ function show(next: typeof panel) {
     "result",
     "inventory",
     "archive",
+    "feedbackSheet",
   ])
-    $(id).hidden = next !== id;
+    $(id).hidden = (next === "feedback" ? "feedbackSheet" : next) !== id;
   $("overlay").hidden = !next;
   $("hud").hidden = !state || state.phase === "lobby";
   document.body.dataset.paused = String(!!next);
@@ -363,6 +382,7 @@ async function connect(create: boolean) {
     );
     room = joined;
     joined.onMessage("snapshot", receive);
+    joined.onMessage("chat", (data: any) => addChatMessage(data));
     joined.onError(() => notice("通讯异常，请稍后重试"));
     joined.onLeave(() => {
       if (room === joined && state?.phase !== "lobby") {
@@ -418,11 +438,24 @@ function updateStunts(dt: number) {
     if (!lastGrapplePos) {
       swingMinY = p.y;
       swingMaxSpeed = speed;
+      swingAirTime = 0;
+      swingTickScore = 0;
       gravitySwingAwarded = false;
       apexVaultAwarded = false;
     }
     swingMinY = Math.min(swingMinY, p.y);
     swingMaxSpeed = Math.max(swingMaxSpeed, speed);
+
+    // Real-time ticking calculation for grapple swing
+    if (!p.grounded) {
+      swingAirTime += dt;
+      const comboMult = 1.0 + Math.min(4.0, Math.floor(swingAirTime * 1.5) * 0.5);
+      const tick = speed * 3.5 * dt * comboMult;
+      swingTickScore += tick;
+      localTrickScore += tick;
+      stuntText = `⚡ 摆荡滞空 ${swingAirTime.toFixed(1)}s · 连击 ×${comboMult.toFixed(1)} · 实时 +${Math.floor(swingTickScore)}`;
+      stuntUntil = performance.now() + 600;
+    }
 
     // Gravity Swing (+150): swing speed > 16m/s
     if (speed > 16 && !gravitySwingAwarded) {
@@ -436,8 +469,13 @@ function updateStunts(dt: number) {
       recordTrick("弧光飞跃", 250);
     }
   } else if (lastGrapplePos) {
-    // Just detached grapple at high speed: Sling Catapult (+350)
-    if (swingMaxSpeed > 18 && p.vy > 3) {
+    // Just detached grapple: sync final swing score to simulation
+    if (swingAirTime > 0.4 && swingTickScore > 10) {
+      const finalScore = Math.min(1000, Math.round(swingTickScore));
+      command(`trick:${finalScore}`);
+    }
+    // High speed apex ejection: Sling Catapult (+350)
+    if (swingMaxSpeed > 17 && p.vy > 3) {
       recordTrick("超空弹射", 350);
     }
   }
@@ -942,13 +980,42 @@ $("recall").onclick = () => {
 function keyDown(key: string) {
   if (!keys.has(key) && ["KeyE", "KeyQ", "KeyC", "Space"].includes(key))
     pulses.add(key);
-  if (key === "Space" && !keys.has(key)) spaceAt = performance.now();
+  if (key === "Space" && !keys.has(key)) {
+    const now = performance.now();
+    if (isSkating && now - lastSpaceTime < 350) {
+      command("ollie");
+      recordTrick("OLLIE 360°", 300);
+      view.sound("jet", 1.4);
+    }
+    lastSpaceTime = now;
+    spaceAt = now;
+  }
   keys.add(key);
 }
 addEventListener("keydown", (e) => {
-  if ((e.target as HTMLElement)?.matches("input")) return;
+  if ((e.target as HTMLElement)?.matches("input, textarea")) {
+    if (e.code === "Escape") {
+      (e.target as HTMLElement).blur();
+      $("chatForm").hidden = true;
+      lock();
+    }
+    return;
+  }
+  if (e.code === "Enter" && !panel && state && state.phase !== "lobby") {
+    e.preventDefault();
+    const chatForm = $("chatForm");
+    const chatInput = $<HTMLInputElement>("chatInput");
+    if (chatForm.hidden) {
+      chatForm.hidden = false;
+      chatInput.focus();
+      document.exitPointerLock();
+    } else {
+      chatForm.dispatchEvent(new Event("submit"));
+    }
+    return;
+  }
   if (e.code === "Escape" && state && state.phase !== "lobby") {
-    if (panel === "inventory" || panel === "archive") {
+    if (panel === "inventory" || panel === "archive" || panel === "feedback") {
       resumeGame();
       return;
     }
@@ -1039,7 +1106,161 @@ $("heal").onclick = () => {
 $("snapshot") && ($("snapshot").onclick = () => takeSnapshot(view));
 $("snapPhoto") && ($("snapPhoto").onclick = () => takeSnapshot(view));
 $("toggleSkate") && ($("toggleSkate").onclick = toggleHoverboard);
+
+// 4 Standalone Prop GLB Exports
 $("downloadBoard") && ($("downloadBoard").onclick = exportHoverboardGlb);
+$("downloadRifle") && ($("downloadRifle").onclick = exportTechRifleGlb);
+$("downloadCamera") && ($("downloadCamera").onclick = exportSurveyCameraGlb);
+$("downloadGrapple") && ($("downloadGrapple").onclick = exportGrappleLauncherGlb);
+
+// Contact & Feedback Sheet Handlers
+$("copyEmail") && ($("copyEmail").onclick = () => {
+  navigator.clipboard.writeText("oodaleek@gmail.com").then(() => {
+    notice("已复制官方邮箱: oodaleek@gmail.com");
+  }).catch(() => {
+    notice("官方邮箱: oodaleek@gmail.com");
+  });
+});
+
+$("feedbackSnap") && ($("feedbackSnap").onclick = () => {
+  try {
+    attachedFeedbackImg = canvas.toDataURL("image/jpeg", 0.85);
+    $<HTMLImageElement>("feedbackPreviewImg").src = attachedFeedbackImg;
+    $("feedbackPreviewContainer").hidden = false;
+    notice("已截取当前游戏画面作为建议附件 📸");
+  } catch {
+    notice("截取画面失败");
+  }
+});
+
+$("feedbackFile") && ($("feedbackFile").onchange = (e) => {
+  const file = (e.target as HTMLInputElement).files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    attachedFeedbackImg = String(ev.target?.result || "");
+    $<HTMLImageElement>("feedbackPreviewImg").src = attachedFeedbackImg;
+    $("feedbackPreviewContainer").hidden = false;
+  };
+  reader.readAsDataURL(file);
+});
+
+$("removeFeedbackImg") && ($("removeFeedbackImg").onclick = () => {
+  attachedFeedbackImg = "";
+  $<HTMLImageElement>("feedbackPreviewImg").src = "";
+  $("feedbackPreviewContainer").hidden = true;
+  ($("feedbackFile") as HTMLInputElement).value = "";
+});
+
+interface EchoEntry {
+  author: string;
+  text: string;
+  time: number | string;
+  img?: string;
+}
+
+const DEFAULT_ECHOES: EchoEntry[] = [
+  { author: "探索员·零", text: "低重力滑板手感太棒了！双击空格 Ollie 翻板很有节奏感。", time: "2026-09-30" },
+  { author: "开普勒先锋", text: "希望能有更多的能量晶体滑翔路线和隐藏遗迹。", time: "2026-09-29" },
+  { author: "回声通信站", text: "已收到多份星际航行反馈，游隼号推进器维护正常。", time: "2026-09-28" }
+];
+
+function renderEchoes() {
+  const container = $("echoesList");
+  if (!container) return;
+  let saved: EchoEntry[] = [];
+  try {
+    saved = JSON.parse(localStorage.getItem("kepler_echoes") || "[]");
+  } catch {}
+  const all: EchoEntry[] = [...saved, ...DEFAULT_ECHOES];
+  container.innerHTML = all.map(e => `
+    <div class="echo-card">
+      <div class="echo-meta">
+        <b>${e.author}</b>
+        <span>${typeof e.time === "number" ? new Date(e.time).toLocaleDateString() : e.time}</span>
+      </div>
+      <div class="echo-content">${e.text}</div>
+      ${e.img ? `<img src="${e.img}" style="max-width:140px;margin-top:6px;border-radius:3px;border:1px solid var(--border);" />` : ""}
+    </div>
+  `).join("");
+}
+
+$("submitFeedback") && ($("submitFeedback").onclick = () => {
+  const content = ($<HTMLTextAreaElement>("feedbackContent").value || "").trim();
+  if (!content) {
+    notice("请输入您的建议或反馈");
+    return;
+  }
+  const entry = {
+    author: me?.name || "探索员",
+    text: content,
+    img: attachedFeedbackImg,
+    time: Date.now(),
+  };
+  try {
+    const existing = JSON.parse(localStorage.getItem("kepler_echoes") || "[]");
+    existing.unshift(entry);
+    localStorage.setItem("kepler_echoes", JSON.stringify(existing.slice(0, 30)));
+  } catch {}
+  $<HTMLTextAreaElement>("feedbackContent").value = "";
+  attachedFeedbackImg = "";
+  $("feedbackPreviewContainer").hidden = true;
+  renderEchoes();
+  notice("建议已发射至开普勒基站，感谢探索员！✨");
+});
+
+$("feedbackBtn") && ($("feedbackBtn").onclick = () => {
+  if (panel === "feedback") {
+    show(null);
+    lock();
+  } else {
+    renderEchoes();
+    show("feedback");
+  }
+});
+
+$("closeFeedback") && ($("closeFeedback").onclick = () => {
+  show(null);
+  lock();
+});
+
+// Chat Log & Form
+function addChatMessage(data: { name: string; color?: number; text: string }) {
+  const list = $("chatMessages");
+  if (!list) return;
+  const item = document.createElement("div");
+  item.className = "chat-item";
+  const color = colors[data.color ?? 0] || "var(--mint)";
+  item.innerHTML = `<span class="chat-author" style="color: ${color}">[${data.name}]:</span><span>${data.text}</span>`;
+  list.appendChild(item);
+  list.scrollTop = list.scrollHeight;
+  setTimeout(() => item.classList.add("fading"), 6000);
+  setTimeout(() => item.remove(), 7000);
+}
+
+function sendChatMessage(text: string) {
+  const trimmed = text.trim().slice(0, 100);
+  if (!trimmed) return;
+  if (room) {
+    room.send("chat", { text: trimmed });
+  } else {
+    addChatMessage({
+      name: me?.name || "探索员",
+      color: me?.color ?? 0,
+      text: trimmed,
+    });
+  }
+}
+
+$("chatForm") && ($("chatForm").onsubmit = (e) => {
+  e.preventDefault();
+  const input = $<HTMLInputElement>("chatInput");
+  sendChatMessage(input.value);
+  input.value = "";
+  $("chatForm").hidden = true;
+  canvas.focus();
+  lock();
+});
 let touch: { id: number; x: number; y: number } | null = null;
 canvas.onpointerdown = (e) => {
   if (e.pointerType !== "mouse" && !panel) {

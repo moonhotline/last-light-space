@@ -63,8 +63,8 @@ export class AdventureView {
   clues: THREE.Group[] = [];
   drones: THREE.Group[] = [];
   ropes = new Map<string, THREE.Line>();
-  lasers = new Map<string, THREE.Line>();
-  enemyLasers: THREE.Line[] = [];
+  lasers = new Map<string, THREE.Group>();
+  enemyLasers: THREE.Group[] = [];
   effects = new Map<string, number>();
   constructor(
     public scene: THREE.Scene,
@@ -237,11 +237,78 @@ export class AdventureView {
       g.scale.setScalar(2.3);
       this.drones.push(g);
       this.scene.add(g);
-      const line = this.line(0xff6950);
-      this.enemyLasers.push(line);
+      const bolt = this.plasmaBolt(0xff5533);
+      this.enemyLasers.push(bolt);
     }
     this.buildGrove();
     this.buildOutpost();
+  }
+  plasmaBolt(color: number) {
+    const g = new THREE.Group();
+    const coreMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+    });
+    const coreGeo = new THREE.CylinderGeometry(0.045, 0.045, 1, 8);
+    coreGeo.translate(0, 0.5, 0);
+    const core = new THREE.Mesh(coreGeo, coreMat);
+    core.name = "core";
+    g.add(core);
+
+    const auraMat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.7,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const auraGeo = new THREE.CylinderGeometry(0.14, 0.14, 1, 8);
+    auraGeo.translate(0, 0.5, 0);
+    const aura = new THREE.Mesh(auraGeo, auraMat);
+    aura.name = "aura";
+    g.add(aura);
+
+    const tipMat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 8), tipMat);
+    tip.name = "tip";
+    tip.position.set(0, 1, 0);
+    g.add(tip);
+
+    g.visible = false;
+    this.scene.add(g);
+    return g;
+  }
+  setPlasmaBolt(bolt: THREE.Group, a: Vec, b: Vec, opacity = 1) {
+    const vA = new THREE.Vector3(a.x, a.y, a.z);
+    const vB = new THREE.Vector3(b.x, b.y, b.z);
+    const dir = new THREE.Vector3().subVectors(vB, vA);
+    const len = dir.length();
+    if (len < 0.05) {
+      bolt.visible = false;
+      return;
+    }
+    bolt.position.copy(vA);
+    const up = new THREE.Vector3(0, 1, 0);
+    const quat = new THREE.Quaternion().setFromUnitVectors(up, dir.clone().normalize());
+    bolt.quaternion.copy(quat);
+    bolt.scale.set(1, len, 1);
+    const tip = bolt.getObjectByName("tip");
+    if (tip) {
+      tip.scale.set(1, 1 / Math.max(0.01, len), 1);
+    }
+    const aura = bolt.getObjectByName("aura") as THREE.Mesh | undefined;
+    if (aura && aura.material instanceof THREE.MeshBasicMaterial) {
+      aura.material.opacity = 0.7 * opacity;
+    }
+    bolt.visible = true;
   }
   line(color: number) {
     const g = new THREE.BufferGeometry().setFromPoints([
@@ -419,12 +486,11 @@ export class AdventureView {
         d.yaw + Math.PI,
         d.mode === "stunned" ? Math.sin(t * 45) * 0.2 : 0,
       );
-      const line = this.enemyLasers[id];
-      line.visible = false;
+      const bolt = this.enemyLasers[id];
+      bolt.visible = false;
       if (d.mode === "charge" || d.mode === "fire") {
-        this.setLine(line, d, d.aim);
-        (line.material as THREE.LineBasicMaterial).opacity =
-          d.mode === "fire" ? 1 : 0.25 + 0.35 * (1 - d.timer / 1.15);
+        const op = d.mode === "fire" ? 1 : 0.25 + 0.35 * (1 - d.timer / 1.15);
+        this.setPlasmaBolt(bolt, d, d.aim, op);
       }
       if (this.changed("enemyShot" + id, d.shotId)) {
         this.burst(d.aim, 16, 0xff6851, 5);
@@ -448,12 +514,12 @@ export class AdventureView {
         );
       let shot = this.lasers.get(p.id);
       if (!shot) {
-        shot = this.line(0xa9edff);
+        shot = this.plasmaBolt(0x00f0ff);
         this.lasers.set(p.id, shot);
       }
       shot.visible = p.toolCooldown > 0.2 && p.seat < 0;
       if (shot.visible)
-        this.setLine(
+        this.setPlasmaBolt(
           shot,
           { x: data.x, y: data.y + 0.3, z: data.z },
           p.shotEnd,
@@ -500,8 +566,13 @@ export class AdventureView {
         const shot = this.lasers.get(id);
         if (shot) {
           this.scene.remove(shot);
-          shot.geometry.dispose();
-          (shot.material as THREE.Material).dispose();
+          shot.traverse((o) => {
+            if (o instanceof THREE.Mesh) {
+              o.geometry.dispose();
+              if (Array.isArray(o.material)) o.material.forEach((m) => m.dispose());
+              else o.material.dispose();
+            }
+          });
           this.lasers.delete(id);
         }
       }

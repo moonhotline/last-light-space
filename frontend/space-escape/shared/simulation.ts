@@ -103,6 +103,7 @@ export class Simulation {
       respawns: 0,
       skate: false,
       trickScore: 0,
+      ollieUntil: 0,
       ...adventurePlayer(),
     };
     p.y = groundAt(p.x, p.z) + 0.85;
@@ -192,6 +193,14 @@ export class Simulation {
       this.emit("修复凝胶已使用 · 护盾恢复");
     }
     if (command === "close-lore") p.lore = -1;
+    if (command === "ollie") {
+      p.vy = Math.max(p.vy + 8.5, 14);
+      p.grounded = false;
+      p.ollieUntil = this.s.time + 0.8;
+      p.trickScore = (p.trickScore || 0) + 300;
+      this.emit(`${p.name} 完成了 🛹 OLLIE 360 特技 (+300)`);
+      this.physics.reset(p.id, p);
+    }
     if (typeof command === "string" && command.startsWith("trick:")) {
       const pts = parseInt(command.slice(6), 10);
       if (Number.isFinite(pts) && pts > 0 && pts <= 1000) {

@@ -60,6 +60,7 @@ export interface Player extends Vec {
   invulnerable: number;
   skate?: boolean;
   trickScore?: number;
+  ollieUntil?: number;
 }
 export interface Beacon extends Vec {
   id: number;

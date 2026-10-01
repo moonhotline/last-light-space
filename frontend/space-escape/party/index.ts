@@ -91,6 +91,28 @@ export default class GameRoom implements Party.Server {
       this.commands.set(sender.id, now);
       this.sim.action(sender.id, message.data);
     }
+    if (message.type === "chat") {
+      const p = this.sim.player(sender.id);
+      const rawText =
+        typeof message.data === "string"
+          ? message.data
+          : (message.data as any)?.text;
+      const text = String(rawText || "").trim().slice(0, 150);
+      if (text && p) {
+        this.room.broadcast(
+          JSON.stringify({
+            type: "chat",
+            data: {
+              id: p.id,
+              name: p.name,
+              color: p.color,
+              text,
+              time: Date.now(),
+            },
+          }),
+        );
+      }
+    }
   }
 
   onClose(connection: Party.Connection) {
