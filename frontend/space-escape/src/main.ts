@@ -992,6 +992,19 @@ function keyDown(key: string) {
   }
   keys.add(key);
 }
+function selectWeapon(w: "rifle" | "grapple" | "camera") {
+  view.setWeapon(w);
+  const slots: Record<"rifle" | "grapple" | "camera", string> = {
+    rifle: "wepRifle",
+    grapple: "wepGrapple",
+    camera: "wepCamera",
+  };
+  for (const [key, id] of Object.entries(slots)) {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle("active", key === w);
+  }
+}
+
 addEventListener("keydown", (e) => {
   if ((e.target as HTMLElement)?.matches("input, textarea")) {
     if (e.code === "Escape") {
@@ -1036,8 +1049,16 @@ addEventListener("keydown", (e) => {
     e.preventDefault();
   keyDown(e.code);
   if (e.repeat) return;
+  if (e.code === "Digit1") selectWeapon("rifle");
+  if (e.code === "Digit2") selectWeapon("grapple");
+  if (e.code === "Digit3") selectWeapon("camera");
+  if (e.code === "KeyQ") selectWeapon("grapple");
+  if (e.code === "KeyT" && view.activeWeapon !== "rifle") selectWeapon("rifle");
   if (e.code === "KeyV") camera();
-  if (e.code === "KeyP") takeSnapshot(view);
+  if (e.code === "KeyP") {
+    selectWeapon("camera");
+    takeSnapshot(view);
+  }
   if (e.code === "KeyK") toggleHoverboard();
   if (e.code === "KeyR") command("mark");
   if (e.code === "KeyB") command("respawn");
@@ -1051,6 +1072,26 @@ addEventListener("blur", () => {
   keys.clear();
   if (sim && state?.phase === "active") show("paused");
 });
+addEventListener(
+  "wheel",
+  (e) => {
+    if (document.pointerLockElement !== canvas || panel) return;
+    const weapons: ("rifle" | "grapple" | "camera")[] = [
+      "rifle",
+      "grapple",
+      "camera",
+    ];
+    const idx = weapons.indexOf(view.activeWeapon);
+    if (idx !== -1) {
+      const nextIdx =
+        e.deltaY > 0
+          ? (idx + 1) % weapons.length
+          : (idx - 1 + weapons.length) % weapons.length;
+      selectWeapon(weapons[nextIdx]);
+    }
+  },
+  { passive: true },
+);
 document.addEventListener("mousemove", (e) => {
   if (document.pointerLockElement !== canvas || panel) return;
   const s = Number($<HTMLInputElement>("sensitivity").value) * 0.0022;
@@ -1058,8 +1099,13 @@ document.addEventListener("mousemove", (e) => {
   pitch = Math.max(-1.35, Math.min(1.35, pitch - e.movementY * s));
 });
 canvas.addEventListener("mousedown", (e) => {
-  if (e.button === 0 && !panel && document.pointerLockElement === canvas)
-    keys.add("Mouse0");
+  if (e.button === 0 && !panel && document.pointerLockElement === canvas) {
+    if (view.activeWeapon === "camera") {
+      takeSnapshot(view);
+    } else {
+      keys.add("Mouse0");
+    }
+  }
   if (
     e.button === 0 &&
     !panel &&
@@ -1106,6 +1152,9 @@ $("heal").onclick = () => {
 $("snapshot") && ($("snapshot").onclick = () => takeSnapshot(view));
 $("snapPhoto") && ($("snapPhoto").onclick = () => takeSnapshot(view));
 $("toggleSkate") && ($("toggleSkate").onclick = toggleHoverboard);
+$("wepRifle") && ($("wepRifle").onclick = () => selectWeapon("rifle"));
+$("wepGrapple") && ($("wepGrapple").onclick = () => selectWeapon("grapple"));
+$("wepCamera") && ($("wepCamera").onclick = () => selectWeapon("camera"));
 
 // 4 Standalone Prop GLB Exports
 $("downloadBoard") && ($("downloadBoard").onclick = exportHoverboardGlb);

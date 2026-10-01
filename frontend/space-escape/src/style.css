@@ -614,13 +614,49 @@ body[data-phase] .landing-caption {
   gap: 22px;
   justify-content: center;
 }
+.weapon-hud {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 10px;
+}
+.wep-slot {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: rgba(16, 26, 36, 0.7);
+  border: 1px solid rgba(80, 120, 150, 0.3);
+  border-radius: 4px;
+  color: #8da4b4;
+  font: 10px ui-monospace, monospace;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.wep-slot:hover {
+  background: rgba(24, 38, 52, 0.85);
+  border-color: rgba(56, 189, 248, 0.5);
+  color: #e0f2fe;
+}
+.wep-slot.active {
+  background: rgba(14, 116, 144, 0.4);
+  border-color: #38bdf8;
+  color: #38bdf8;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.35);
+}
+.wep-slot kbd {
+  margin-right: 2px;
+  padding: 1px 4px;
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.2);
+}
 .control-row b {
   font-weight: 400;
   color: var(--muted);
   font-size: 9px;
 }
 #controlsHint {
-  margin-bottom: 18px;
+  margin-bottom: 12px;
   color: #d7e5ec;
 }
 kbd {

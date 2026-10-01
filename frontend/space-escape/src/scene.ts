@@ -142,7 +142,19 @@ export class GameView {
   grappleAsset: THREE.Group | null = null;
   cameraAsset: THREE.Group | null = null;
   obeliskAsset: THREE.Group | null = null;
+  activeWeapon: "rifle" | "grapple" | "camera" = "rifle";
+  weaponSwitchTime = 0;
+  fpRifle: THREE.Group | null = null;
+  fpGrapple: THREE.Group | null = null;
+  fpCamera: THREE.Group | null = null;
   toolModel = new THREE.Group();
+
+  setWeapon(w: "rifle" | "grapple" | "camera") {
+    if (this.activeWeapon === w) return;
+    this.activeWeapon = w;
+    this.weaponSwitchTime = 0.25;
+    this.sound("tool", 1.35);
+  }
   avatars = new Map<string, THREE.Group>();
   beacons: THREE.Group[] = [];
   beaconBeams: THREE.Mesh[] = [];
@@ -655,13 +667,29 @@ export class GameView {
     }
 
     await this.adventure.load();
-    const rifleFP = this.rifleAsset
-      ? this.rifleAsset.clone(true)
-      : buildTechRifleMesh();
-    rifleFP.scale.setScalar(0.42);
-    rifleFP.position.set(0.24, -0.22, -0.42);
-    rifleFP.rotation.set(0.05, 0, 0);
-    this.toolModel.add(rifleFP);
+    if (this.rifleAsset) {
+      this.fpRifle = this.rifleAsset.clone(true);
+      this.fpRifle.scale.setScalar(0.42);
+      this.fpRifle.position.set(0.24, -0.22, -0.42);
+      this.fpRifle.rotation.set(0.05, 0, 0);
+      this.toolModel.add(this.fpRifle);
+    }
+    if (this.grappleAsset) {
+      this.fpGrapple = this.grappleAsset.clone(true);
+      this.fpGrapple.scale.setScalar(0.48);
+      this.fpGrapple.position.set(-0.22, -0.24, -0.45);
+      this.fpGrapple.rotation.set(0.05, 0, 0);
+      this.fpGrapple.visible = false;
+      this.toolModel.add(this.fpGrapple);
+    }
+    if (this.cameraAsset) {
+      this.fpCamera = this.cameraAsset.clone(true);
+      this.fpCamera.scale.setScalar(0.9);
+      this.fpCamera.position.set(0, -0.16, -0.38);
+      this.fpCamera.rotation.set(0, Math.PI, 0);
+      this.fpCamera.visible = false;
+      this.toolModel.add(this.fpCamera);
+    }
     this.camera.add(this.toolModel);
     this.toolModel.visible = false;
     this.astronaut.traverse((o) => {
@@ -868,11 +896,18 @@ export class GameView {
     this.adventure.update(s, me, dt, t);
     this.toolModel.visible = !!me && !this.thirdPerson && me.seat < 0;
     if (me) {
+      if (this.weaponSwitchTime > 0) this.weaponSwitchTime -= dt;
+      const switchDrop = Math.sin(Math.max(0, this.weaponSwitchTime) / 0.25 * Math.PI) * 0.14;
+      const recoilKick = Math.max(0, me.toolCooldown - 0.12) * 0.22;
       this.toolModel.position.y =
-        -0.3 +
+        -0.3 -
+        switchDrop +
         Math.sin(t * 7) * Math.min(0.012, Math.hypot(me.vx, me.vz) * 0.001);
-      this.toolModel.position.z =
-        -0.58 + Math.max(0, me.toolCooldown - 0.15) * 0.45;
+      this.toolModel.position.z = -0.58 + recoilKick;
+
+      if (this.fpRifle) this.fpRifle.visible = this.activeWeapon === "rifle";
+      if (this.fpGrapple) this.fpGrapple.visible = this.activeWeapon === "grapple";
+      if (this.fpCamera) this.fpCamera.visible = this.activeWeapon === "camera";
     }
     const worldTime = s ? s.time : t * 0.4 + 80,
       level = s?.beacons.filter((b) => b.active).length || 0;
@@ -1119,8 +1154,8 @@ export class GameView {
 
         const board = this.hoverboardAsset
           ? this.hoverboardAsset.clone(true)
-          : buildHoverboardMesh();
-        board.position.set(0, 0.02, 0);
+          : new THREE.Group();
+        board.position.set(0, 0.015, 0.0);
         board.name = "hoverboard";
         board.visible = false;
         a.add(board);
@@ -1129,52 +1164,58 @@ export class GameView {
           cloned.getObjectByName("mixamorig:RightHand") ||
           cloned.getObjectByName("RightHand") ||
           cloned.getObjectByName("mixamorig:RightForeArm");
-        const rifle = this.rifleAsset
-          ? this.rifleAsset.clone(true)
-          : buildTechRifleMesh();
-        rifle.name = "techRifle";
-        if (rightHand) {
-          rifle.scale.setScalar(0.38);
-          rifle.position.set(0.02, -0.05, 0.06);
-          rifle.rotation.set(-Math.PI / 2, 0, Math.PI);
-          rightHand.add(rifle);
-        } else {
-          rifle.scale.setScalar(0.4);
-          rifle.position.set(0.32, 0.94, -0.15);
-          rifle.rotation.set(-0.2, Math.PI, 0.1);
-          a.add(rifle);
-        }
-
+        const upperBack =
+          cloned.getObjectByName("mixamorig:Spine2") ||
+          cloned.getObjectByName("mixamorig:Spine1");
         const leftForeArm =
           cloned.getObjectByName("mixamorig:LeftForeArm") ||
           cloned.getObjectByName("LeftForeArm") ||
           cloned.getObjectByName("mixamorig:LeftArm");
-        const grapple = this.grappleAsset
-          ? this.grappleAsset.clone(true)
-          : buildGrappleLauncherMesh();
-        grapple.name = "grappleLauncher";
-        if (leftForeArm) {
-          grapple.scale.setScalar(0.48);
-          grapple.position.set(0.02, 0.12, 0.02);
-          grapple.rotation.set(0, 0, 0);
-          leftForeArm.add(grapple);
-        } else {
-          grapple.scale.setScalar(0.5);
-          grapple.position.set(-0.35, 0.96, -0.05);
-          grapple.rotation.set(-0.2, 0, -0.1);
-          a.add(grapple);
-        }
-
         const hips =
           cloned.getObjectByName("mixamorig:Hips") ||
           cloned.getObjectByName("Hips");
-        if (hips && this.cameraAsset) {
-          const cam = this.cameraAsset.clone(true);
-          cam.name = "surveyCamera";
-          cam.scale.setScalar(0.85);
-          cam.position.set(0.18, -0.06, 0.08);
-          cam.rotation.set(0.2, -0.3, 0.1);
-          hips.add(cam);
+
+        if (this.rifleAsset) {
+          const heldRifle = this.rifleAsset.clone(true);
+          heldRifle.name = "heldRifle";
+          heldRifle.scale.setScalar(0.38);
+          heldRifle.position.set(0.02, -0.05, 0.06);
+          heldRifle.rotation.set(-Math.PI / 2, 0, Math.PI);
+          if (rightHand) rightHand.add(heldRifle);
+
+          const backRifle = this.rifleAsset.clone(true);
+          backRifle.name = "backRifle";
+          backRifle.scale.setScalar(0.38);
+          backRifle.position.set(0.12, 0.15, -0.22);
+          backRifle.rotation.set(0.2, 0.1, 2.35);
+          backRifle.visible = false;
+          if (upperBack) upperBack.add(backRifle);
+        }
+
+        if (this.grappleAsset) {
+          const grapple = this.grappleAsset.clone(true);
+          grapple.name = "grappleLauncher";
+          grapple.scale.setScalar(0.48);
+          grapple.position.set(0.02, 0.12, 0.02);
+          grapple.rotation.set(0, 0, 0);
+          if (leftForeArm) leftForeArm.add(grapple);
+        }
+
+        if (this.cameraAsset) {
+          const hipCamera = this.cameraAsset.clone(true);
+          hipCamera.name = "hipCamera";
+          hipCamera.scale.setScalar(0.85);
+          hipCamera.position.set(0.18, -0.06, 0.08);
+          hipCamera.rotation.set(0.2, -0.3, 0.1);
+          if (hips) hips.add(hipCamera);
+
+          const heldCamera = this.cameraAsset.clone(true);
+          heldCamera.name = "heldCamera";
+          heldCamera.scale.setScalar(0.85);
+          heldCamera.position.set(0.05, -0.04, 0.08);
+          heldCamera.rotation.set(-Math.PI / 2, 0, 0);
+          heldCamera.visible = false;
+          if (rightHand) rightHand.add(heldCamera);
         }
 
         const mixer = new THREE.AnimationMixer(cloned);
@@ -1259,11 +1300,13 @@ export class GameView {
       if (anim) {
         anim.mixer.update(dt);
         let target = "idle";
-        if (p.jetting || !p.grounded) {
+        if (p.jetting || (!p.grounded && !p.skate)) {
           target = "floating";
         } else if (p.skate) {
-          // On skateboard: NEVER play run/walk! Maintain aerodynamic surfing posture
-          target = "floating";
+          // On skateboard:
+          // In air (Ollie / high jump): floating pose
+          // On ground: solid stance with feet firmly planted in the middle of the deck!
+          target = p.grounded ? "idle" : "floating";
         } else if (speed > 5.0) {
           target = "run";
           anim.actions.run.timeScale = Math.max(0.75, Math.min(1.25, speed * 0.085));
@@ -1292,26 +1335,70 @@ export class GameView {
             dt,
           );
         }
+
+        const activeWep = own ? this.activeWeapon : (p.grapple ? "grapple" : "rifle");
+        const heldRifle = a.getObjectByName("heldRifle");
+        const backRifle = a.getObjectByName("backRifle");
+        const heldCamera = a.getObjectByName("heldCamera");
+        const hipCamera = a.getObjectByName("hipCamera");
+
+        if (heldRifle && backRifle) {
+          heldRifle.visible = activeWep === "rifle";
+          backRifle.visible = activeWep !== "rifle";
+        }
+        if (heldCamera && hipCamera) {
+          heldCamera.visible = activeWep === "camera";
+          hipCamera.visible = activeWep !== "camera";
+        }
+
         if (p.skate) {
-          // Surfing stance: angled torso and balance arms
+          // Surfing stance on skateboard: torso turned slightly, balanced stance
           if (anim.torso) {
-            anim.torso.rotation.y = THREE.MathUtils.damp(anim.torso.rotation.y, 0.42, 8, dt);
+            anim.torso.rotation.y = THREE.MathUtils.damp(anim.torso.rotation.y, 0.38, 8, dt);
           }
           if (anim.armL && !p.grapple) {
-            anim.armL.rotation.z = THREE.MathUtils.damp(anim.armL.rotation.z, -0.45, 8, dt);
+            anim.armL.rotation.z = THREE.MathUtils.damp(anim.armL.rotation.z, -0.4, 8, dt);
             anim.armL.rotation.x = THREE.MathUtils.damp(anim.armL.rotation.x, 0.2, 8, dt);
           }
           if (anim.armR) {
-            anim.armR.rotation.z = THREE.MathUtils.damp(anim.armR.rotation.z, 0.45, 8, dt);
+            anim.armR.rotation.z = THREE.MathUtils.damp(anim.armR.rotation.z, 0.4, 8, dt);
             anim.armR.rotation.x = THREE.MathUtils.damp(anim.armR.rotation.x, -0.2, 8, dt);
+          }
+        } else if (activeWep === "rifle") {
+          // Two-handed tactical rifle aiming posture
+          if (anim.armR) {
+            anim.armR.rotation.x = THREE.MathUtils.damp(anim.armR.rotation.x, -1.05 - p.pitch * 0.4, 12, dt);
+            anim.armR.rotation.y = THREE.MathUtils.damp(anim.armR.rotation.y, -0.15, 12, dt);
+            anim.armR.rotation.z = THREE.MathUtils.damp(anim.armR.rotation.z, 0.1, 12, dt);
+          }
+          if (anim.armL && !p.grapple) {
+            anim.armL.rotation.x = THREE.MathUtils.damp(anim.armL.rotation.x, -0.95 - p.pitch * 0.4, 12, dt);
+            anim.armL.rotation.y = THREE.MathUtils.damp(anim.armL.rotation.y, 0.35, 12, dt);
+            anim.armL.rotation.z = THREE.MathUtils.damp(anim.armL.rotation.z, 0.42, 12, dt);
+          }
+          if (anim.torso) {
+            anim.torso.rotation.y = THREE.MathUtils.damp(anim.torso.rotation.y, -0.15, 8, dt);
+          }
+        } else if (activeWep === "camera") {
+          // Two-handed camera inspection/shooting posture
+          if (anim.armR) {
+            anim.armR.rotation.x = THREE.MathUtils.damp(anim.armR.rotation.x, -0.85 - p.pitch * 0.4, 12, dt);
+            anim.armR.rotation.y = THREE.MathUtils.damp(anim.armR.rotation.y, -0.25, 12, dt);
+          }
+          if (anim.armL) {
+            anim.armL.rotation.x = THREE.MathUtils.damp(anim.armL.rotation.x, -0.85 - p.pitch * 0.4, 12, dt);
+            anim.armL.rotation.y = THREE.MathUtils.damp(anim.armL.rotation.y, 0.25, 12, dt);
+          }
+          if (anim.torso) {
+            anim.torso.rotation.y = THREE.MathUtils.damp(anim.torso.rotation.y, 0, 8, dt);
           }
         } else {
           if (anim.torso) {
             anim.torso.rotation.y = THREE.MathUtils.damp(anim.torso.rotation.y, 0, 8, dt);
           }
         }
-        if (anim.armL && p.grapple) {
-          anim.armL.rotation.x = -1.2;
+        if (p.grapple && anim.armL) {
+          anim.armL.rotation.x = -1.35 - p.pitch * 0.5;
         }
       }
 
@@ -1340,12 +1427,12 @@ export class GameView {
             board.rotation.y = THREE.MathUtils.damp(board.rotation.y, 0, 10, dt);
             // Downward clearance: board drops 12-22cm below feet during the flip to guarantee zero body clipping
             const clearance = -0.10 - Math.sin(progress * Math.PI) * 0.12;
-            board.position.y = clearance;
+            board.position.set(0, clearance, 0.0);
           } else {
             board.rotation.x = THREE.MathUtils.damp(board.rotation.x, 0, 12, dt);
             board.rotation.z = THREE.MathUtils.damp(board.rotation.z, 0, 12, dt);
             board.rotation.y = THREE.MathUtils.damp(board.rotation.y, 0, 12, dt);
-            board.position.y = 0.02 + Math.sin(t * 8) * 0.015;
+            board.position.set(0, 0.015 + Math.sin(t * 8) * 0.008, 0.0);
           }
         }
       }
@@ -1464,77 +1551,6 @@ export class GameView {
   }
 }
 
-export function buildHoverboardMesh(): THREE.Group {
-  const g = new THREE.Group();
-  g.name = "hoverboard";
-
-  // Streamlined main deck (1.22m long, 0.34m wide)
-  const deckGeo = new THREE.BoxGeometry(0.34, 0.032, 1.22);
-  const deckMat = new THREE.MeshStandardMaterial({
-    color: 0x16222e,
-    metalness: 0.85,
-    roughness: 0.22,
-  });
-  const deck = new THREE.Mesh(deckGeo, deckMat);
-  deck.castShadow = true;
-  deck.receiveShadow = true;
-  g.add(deck);
-
-  // Carbon grip surface
-  const gripGeo = new THREE.BoxGeometry(0.24, 0.005, 0.96);
-  const gripMat = new THREE.MeshStandardMaterial({
-    color: 0x0c131a,
-    roughness: 0.9,
-  });
-  const grip = new THREE.Mesh(gripGeo, gripMat);
-  grip.position.y = 0.018;
-  g.add(grip);
-
-  // Glowing Ion Plasma Rails (两侧青蓝等离子光翼)
-  for (const side of [-1, 1]) {
-    const railGeo = new THREE.BoxGeometry(0.024, 0.026, 1.18);
-    const railMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
-    const rail = new THREE.Mesh(railGeo, railMat);
-    rail.position.set(side * 0.175, 0.002, 0);
-    g.add(rail);
-
-    const glowGeo = new THREE.BoxGeometry(0.036, 0.038, 1.2);
-    const glowMat = glowMaterial(0x00f0ff, 0.35);
-    const glow = new THREE.Mesh(glowGeo, glowMat);
-    glow.position.set(side * 0.175, 0.002, 0);
-    g.add(glow);
-  }
-
-  // Underside Dual Anti-Gravity Repulsor Rings
-  for (const z of [-0.38, 0.38]) {
-    const emitterGeo = new THREE.CylinderGeometry(0.08, 0.09, 0.02, 16);
-    const emitterMat = new THREE.MeshStandardMaterial({
-      color: 0x243242,
-      metalness: 0.9,
-      roughness: 0.2,
-    });
-    const emitter = new THREE.Mesh(emitterGeo, emitterMat);
-    emitter.position.set(0, -0.02, z);
-    g.add(emitter);
-
-    const coreGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.022, 16);
-    const coreMat = new THREE.MeshBasicMaterial({ color: 0x67e8f9 });
-    const core = new THREE.Mesh(coreGeo, coreMat);
-    core.position.set(0, -0.022, z);
-    g.add(core);
-  }
-
-  // Aerodynamic nose tip
-  const tipGeo = new THREE.ConeGeometry(0.16, 0.16, 4);
-  tipGeo.rotateX(-Math.PI / 2);
-  tipGeo.rotateY(Math.PI / 4);
-  const tip = new THREE.Mesh(tipGeo, deckMat);
-  tip.scale.set(1, 0.2, 1);
-  tip.position.set(0, 0, -0.65);
-  g.add(tip);
-
-  return g;
-}
 
 export function downloadAsset(url: string, filename: string): void {
   const a = document.createElement("a");
@@ -1564,206 +1580,6 @@ export function takeSnapshot(view: GameView): void {
   } catch (err) {
     console.error("Camera snapshot error:", err);
   }
-}
-
-export function buildTechRifleMesh(): THREE.Group {
-  const g = new THREE.Group();
-  g.name = "techRifle";
-
-  const titanium = new THREE.MeshStandardMaterial({
-    color: 0x1b2834,
-    metalness: 0.9,
-    roughness: 0.22,
-  });
-  const carbon = new THREE.MeshStandardMaterial({
-    color: 0x0f151c,
-    metalness: 0.2,
-    roughness: 0.8,
-  });
-  const gold = new THREE.MeshStandardMaterial({
-    color: 0xd97706,
-    metalness: 0.85,
-    roughness: 0.3,
-  });
-  const plasmaCoreMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
-
-  // Main chassis receiver
-  const chassis = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.12, 0.32), titanium);
-  chassis.castShadow = true;
-  g.add(chassis);
-
-  // Upper Gauss Rail Barrel
-  const barrelUpperGeo = new THREE.CylinderGeometry(0.016, 0.016, 0.36, 12);
-  barrelUpperGeo.rotateX(Math.PI / 2);
-  const barrelUpper = new THREE.Mesh(barrelUpperGeo, titanium);
-  barrelUpper.position.set(0, 0.04, -0.28);
-  g.add(barrelUpper);
-
-  // Lower Magnetic Accelerator Guide
-  const barrelLowerGeo = new THREE.CylinderGeometry(0.014, 0.014, 0.32, 12);
-  barrelLowerGeo.rotateX(Math.PI / 2);
-  const barrelLower = new THREE.Mesh(barrelLowerGeo, carbon);
-  barrelLower.position.set(0, -0.01, -0.26);
-  g.add(barrelLower);
-
-  // Plasma Energy Battery Cylinder
-  const cellGeo = new THREE.CylinderGeometry(0.024, 0.024, 0.14, 16);
-  cellGeo.rotateZ(Math.PI / 2);
-  const cell = new THREE.Mesh(cellGeo, plasmaCoreMat);
-  cell.position.set(0, 0.01, -0.02);
-  g.add(cell);
-
-  const cellGlow = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.15, 16), glowMaterial(0x00f0ff, 0.4));
-  cellGlow.rotation.z = Math.PI / 2;
-  cellGlow.position.copy(cell.position);
-  g.add(cellGlow);
-
-  // Muzzle Brake / Plasma Aperture
-  const muzzleGeo = new THREE.CylinderGeometry(0.024, 0.024, 0.06, 12);
-  muzzleGeo.rotateX(Math.PI / 2);
-  const muzzle = new THREE.Mesh(muzzleGeo, gold);
-  muzzle.position.set(0, 0.04, -0.48);
-  g.add(muzzle);
-
-  // Holographic Optical Sight on Top
-  const scopeGeo = new THREE.BoxGeometry(0.04, 0.035, 0.1);
-  const scope = new THREE.Mesh(scopeGeo, carbon);
-  scope.position.set(0, 0.08, -0.05);
-  g.add(scope);
-
-  const sightLens = new THREE.Mesh(new THREE.PlaneGeometry(0.03, 0.025), glowMaterial(0x38bdf8, 0.8));
-  sightLens.position.set(0, 0.08, -0.101);
-  g.add(sightLens);
-
-  // Tactical Grip
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.14, 0.06), carbon);
-  grip.rotation.x = 0.28;
-  grip.position.set(0, -0.11, 0.04);
-  g.add(grip);
-
-  // Stock
-  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.09, 0.16), carbon);
-  stock.position.set(0, -0.01, 0.22);
-  g.add(stock);
-
-  return g;
-}
-
-export function buildSurveyCameraMesh(): THREE.Group {
-  const g = new THREE.Group();
-  g.name = "surveyCamera";
-
-  const bodyMat = new THREE.MeshStandardMaterial({
-    color: 0x1e293b,
-    metalness: 0.85,
-    roughness: 0.25,
-  });
-  const lensGlassMat = new THREE.MeshStandardMaterial({
-    color: 0x051b2c,
-    roughness: 0.05,
-    metalness: 0.95,
-  });
-  const copperMat = new THREE.MeshStandardMaterial({
-    color: 0xd97706,
-    metalness: 0.8,
-    roughness: 0.3,
-  });
-  const screenMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
-
-  // Camera Body
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.12, 0.09), bodyMat);
-  body.castShadow = true;
-  g.add(body);
-
-  // Front Lens Cylinder
-  const lensGeo = new THREE.CylinderGeometry(0.046, 0.052, 0.08, 24);
-  lensGeo.rotateX(Math.PI / 2);
-  const lens = new THREE.Mesh(lensGeo, bodyMat);
-  lens.position.set(0, 0, -0.08);
-  g.add(lens);
-
-  // Lens Front Element Glass
-  const glassGeo = new THREE.CylinderGeometry(0.038, 0.038, 0.01, 24);
-  glassGeo.rotateX(Math.PI / 2);
-  const glass = new THREE.Mesh(glassGeo, lensGlassMat);
-  glass.position.set(0, 0, -0.122);
-  g.add(glass);
-
-  // Copper Aperture Accent Ring
-  const ringGeo = new THREE.TorusGeometry(0.046, 0.005, 8, 24);
-  const ring = new THREE.Mesh(ringGeo, copperMat);
-  ring.position.set(0, 0, -0.115);
-  g.add(ring);
-
-  // Holographic Screen on Back
-  const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.13, 0.085), screenMat);
-  screen.rotation.y = Math.PI;
-  screen.position.set(0, 0, 0.046);
-  g.add(screen);
-
-  // Top Optical Sensor & Shutter Button
-  const sensor = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.025, 0.04), bodyMat);
-  sensor.position.set(-0.04, 0.07, 0);
-  g.add(sensor);
-
-  const btn = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.015, 12), copperMat);
-  btn.position.set(0.06, 0.068, -0.01);
-  g.add(btn);
-
-  return g;
-}
-
-export function buildGrappleLauncherMesh(): THREE.Group {
-  const g = new THREE.Group();
-  g.name = "grappleLauncher";
-
-  const alloyMat = new THREE.MeshStandardMaterial({
-    color: 0x1f2937,
-    metalness: 0.9,
-    roughness: 0.22,
-  });
-  const copperMat = new THREE.MeshStandardMaterial({
-    color: 0xd97706,
-    metalness: 0.9,
-    roughness: 0.3,
-  });
-  const cyanCoreMat = new THREE.MeshBasicMaterial({ color: 0x67e8f9 });
-
-  // Gauntlet forearm bracket
-  const bracket = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.09, 0.22), alloyMat);
-  bracket.castShadow = true;
-  g.add(bracket);
-
-  // Barrel tube
-  const barrelGeo = new THREE.CylinderGeometry(0.03, 0.034, 0.22, 16);
-  barrelGeo.rotateX(Math.PI / 2);
-  const barrel = new THREE.Mesh(barrelGeo, alloyMat);
-  barrel.position.set(0, 0.035, -0.08);
-  g.add(barrel);
-
-  // Magnetic Wire Spool
-  const spoolGeo = new THREE.CylinderGeometry(0.036, 0.036, 0.07, 16);
-  spoolGeo.rotateZ(Math.PI / 2);
-  const spool = new THREE.Mesh(spoolGeo, copperMat);
-  spool.position.set(0, -0.01, 0.05);
-  g.add(spool);
-
-  // Ion Core Indicator
-  const indicator = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.015, 0.1), cyanCoreMat);
-  indicator.position.set(0, 0.07, -0.06);
-  g.add(indicator);
-
-  // 3 Deployable Alloy Claws / Prongs
-  for (let i = 0; i < 3; i++) {
-    const angle = (i / 3) * Math.PI * 2;
-    const claw = new THREE.Mesh(new THREE.ConeGeometry(0.015, 0.07, 4), alloyMat);
-    claw.position.set(Math.cos(angle) * 0.038, 0.035 + Math.sin(angle) * 0.038, -0.21);
-    claw.rotation.x = Math.PI / 2 + 0.35;
-    claw.rotation.z = angle;
-    g.add(claw);
-  }
-
-  return g;
 }
 
 export async function exportTechRifleGlb(): Promise<void> {
