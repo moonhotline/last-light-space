@@ -137,6 +137,11 @@ export class GameView {
       armR?: THREE.Object3D;
     }
   >();
+  hoverboardAsset: THREE.Group | null = null;
+  rifleAsset: THREE.Group | null = null;
+  grappleAsset: THREE.Group | null = null;
+  cameraAsset: THREE.Group | null = null;
+  obeliskAsset: THREE.Group | null = null;
   toolModel = new THREE.Group();
   avatars = new Map<string, THREE.Group>();
   beacons: THREE.Group[] = [];
@@ -420,68 +425,6 @@ export class GameView {
     rangeGeometry.computeVertexNormals();
     far.add(new THREE.Mesh(rangeGeometry, farMat));
     this.scene.add(far);
-    const scenic = new THREE.Group();
-    const towerMat = new THREE.MeshStandardMaterial({
-      color: 0x354b56,
-      roughness: 0.72,
-      metalness: 0.52,
-      emissive: 0x0d3441,
-      emissiveIntensity: 0.28,
-    });
-    const redMat = new THREE.MeshStandardMaterial({
-      color: 0x7d3e32,
-      roughness: 0.9,
-      metalness: 0.08,
-    });
-    for (const site of SCENIC_SITES) {
-      const g = new THREE.Group();
-      g.position.set(site.x, site.y, site.z);
-      g.scale.setScalar(site.scale);
-      if (site.kind === "tower") {
-        const shaft = new THREE.Mesh(
-          new THREE.CylinderGeometry(5.5, 13, 86, 6),
-          towerMat,
-        );
-        shaft.position.y = 43;
-        shaft.castShadow = true;
-        g.add(shaft);
-        const cap = new THREE.Mesh(
-          new THREE.ConeGeometry(12, 28, 6),
-          towerMat,
-        );
-        cap.position.y = 100;
-        cap.castShadow = true;
-        g.add(cap);
-        const light = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.9, 1.8, 36, 12),
-          glowMaterial(0x65dcff, 0.82),
-        );
-        light.position.y = 112;
-        g.add(light);
-      } else if (site.kind === "spire") {
-        for (let j = 0; j < 5; j++) {
-          const rock = new THREE.Mesh(
-            new THREE.ConeGeometry(7 - j * 0.8, 34 + j * 10, 5),
-            redMat,
-          );
-          rock.position.set((j - 2) * 8, (34 + j * 10) / 2, (j % 2) * 8 - 4);
-          rock.rotation.z = (j - 2) * 0.08;
-          rock.castShadow = true;
-          g.add(rock);
-        }
-      } else {
-        const arch = new THREE.Mesh(
-          new THREE.TorusGeometry(18, 4, 10, 6, Math.PI),
-          towerMat,
-        );
-        arch.rotation.z = Math.PI / 2;
-        arch.position.y = 18;
-        arch.castShadow = true;
-        g.add(arch);
-      }
-      scenic.add(g);
-    }
-    this.scene.add(scenic);
   }
   buildSky() {
     this.skyScene.add(this.sky);
@@ -647,20 +590,77 @@ export class GameView {
   async load() {
     const loader = new GLTFLoader(),
       textureLoader = new THREE.TextureLoader();
-    const [explorer, beacon, observatory, earth, moon] = await Promise.all([
+    const [
+      explorer,
+      beacon,
+      observatory,
+      hoverboardGltf,
+      rifleGltf,
+      grappleGltf,
+      cameraGltf,
+      obeliskGltf,
+      earth,
+      moon,
+    ] = await Promise.all([
       loader.loadAsync("/assets/explorer-v4.glb"),
       loader.loadAsync("/assets/beacon.glb"),
       loader.loadAsync("/assets/observatory.glb"),
+      loader.loadAsync("/assets/hoverboard.glb"),
+      loader.loadAsync("/assets/kinetic-rifle.glb"),
+      loader.loadAsync("/assets/echo-grapple.glb"),
+      loader.loadAsync("/assets/survey-camera.glb"),
+      loader.loadAsync("/assets/obelisk.glb"),
       textureLoader.loadAsync("/assets/earth.jpg"),
       textureLoader.loadAsync("/assets/moon.jpg"),
     ]);
     this.astronaut = explorer.scene;
     this.astronautAnimations = explorer.animations;
     weatherMaterials(this.astronaut);
+    this.hoverboardAsset = hoverboardGltf.scene;
+    this.rifleAsset = rifleGltf.scene;
+    this.grappleAsset = grappleGltf.scene;
+    this.cameraAsset = cameraGltf.scene;
+    this.obeliskAsset = obeliskGltf.scene;
+
+    for (const m of [
+      this.hoverboardAsset,
+      this.rifleAsset,
+      this.grappleAsset,
+      this.cameraAsset,
+      this.obeliskAsset,
+    ]) {
+      if (m) {
+        m.traverse((o) => {
+          if (o instanceof THREE.Mesh) {
+            o.castShadow = true;
+            o.receiveShadow = true;
+            o.frustumCulled = false;
+          }
+        });
+        weatherMaterials(m);
+      }
+    }
+
+    if (this.obeliskAsset) {
+      const scenic = new THREE.Group();
+      for (const site of SCENIC_SITES) {
+        const m = this.obeliskAsset.clone(true);
+        m.position.set(site.x, site.y, site.z);
+        const s = site.scale * 0.18;
+        m.scale.set(s, s, s);
+        m.rotation.y = hash(site.x, site.z) * Math.PI * 2;
+        scenic.add(m);
+      }
+      this.scene.add(scenic);
+    }
+
     await this.adventure.load();
-    const rifleFP = buildTechRifleMesh();
-    rifleFP.rotation.y = Math.PI;
-    rifleFP.position.set(0.28, -0.26, -0.52);
+    const rifleFP = this.rifleAsset
+      ? this.rifleAsset.clone(true)
+      : buildTechRifleMesh();
+    rifleFP.scale.setScalar(0.42);
+    rifleFP.position.set(0.24, -0.22, -0.42);
+    rifleFP.rotation.set(0.05, 0, 0);
     this.toolModel.add(rifleFP);
     this.camera.add(this.toolModel);
     this.toolModel.visible = false;
@@ -1117,8 +1117,10 @@ export class GameView {
           a.add(jet);
         }
 
-        const board = buildHoverboardMesh();
-        board.position.set(0, 0.04, 0);
+        const board = this.hoverboardAsset
+          ? this.hoverboardAsset.clone(true)
+          : buildHoverboardMesh();
+        board.position.set(0, 0.02, 0);
         board.name = "hoverboard";
         board.visible = false;
         a.add(board);
@@ -1127,15 +1129,17 @@ export class GameView {
           cloned.getObjectByName("mixamorig:RightHand") ||
           cloned.getObjectByName("RightHand") ||
           cloned.getObjectByName("mixamorig:RightForeArm");
-        const rifle = buildTechRifleMesh();
+        const rifle = this.rifleAsset
+          ? this.rifleAsset.clone(true)
+          : buildTechRifleMesh();
         rifle.name = "techRifle";
         if (rightHand) {
-          rifle.scale.setScalar(0.7);
-          rifle.position.set(0.04, -0.04, 0.1);
+          rifle.scale.setScalar(0.38);
+          rifle.position.set(0.02, -0.05, 0.06);
           rifle.rotation.set(-Math.PI / 2, 0, Math.PI);
           rightHand.add(rifle);
         } else {
-          rifle.scale.setScalar(0.72);
+          rifle.scale.setScalar(0.4);
           rifle.position.set(0.32, 0.94, -0.15);
           rifle.rotation.set(-0.2, Math.PI, 0.1);
           a.add(rifle);
@@ -1145,18 +1149,32 @@ export class GameView {
           cloned.getObjectByName("mixamorig:LeftForeArm") ||
           cloned.getObjectByName("LeftForeArm") ||
           cloned.getObjectByName("mixamorig:LeftArm");
-        const grapple = buildGrappleLauncherMesh();
+        const grapple = this.grappleAsset
+          ? this.grappleAsset.clone(true)
+          : buildGrappleLauncherMesh();
         grapple.name = "grappleLauncher";
         if (leftForeArm) {
-          grapple.scale.setScalar(0.68);
-          grapple.position.set(0.02, 0.1, 0.02);
+          grapple.scale.setScalar(0.48);
+          grapple.position.set(0.02, 0.12, 0.02);
           grapple.rotation.set(0, 0, 0);
           leftForeArm.add(grapple);
         } else {
-          grapple.scale.setScalar(0.75);
+          grapple.scale.setScalar(0.5);
           grapple.position.set(-0.35, 0.96, -0.05);
           grapple.rotation.set(-0.2, 0, -0.1);
           a.add(grapple);
+        }
+
+        const hips =
+          cloned.getObjectByName("mixamorig:Hips") ||
+          cloned.getObjectByName("Hips");
+        if (hips && this.cameraAsset) {
+          const cam = this.cameraAsset.clone(true);
+          cam.name = "surveyCamera";
+          cam.scale.setScalar(0.85);
+          cam.position.set(0.18, -0.06, 0.08);
+          cam.rotation.set(0.2, -0.3, 0.1);
+          hips.add(cam);
         }
 
         const mixer = new THREE.AnimationMixer(cloned);
@@ -1312,11 +1330,23 @@ export class GameView {
         if (p.skate) {
           const isOllie = !!(p.ollieUntil && p.ollieUntil > worldTime);
           if (isOllie) {
-            board.rotation.x += dt * Math.PI * 4;
+            const remain = Math.max(0, (p.ollieUntil ?? 0) - worldTime);
+            const progress = Math.max(0, Math.min(1, 1 - remain / 0.8));
+            // 360 Kickflip longitudinal roll along Z-axis (parallel to stance, stays flat beneath feet)
+            board.rotation.z = progress < 1 ? progress * Math.PI * 2 : 0;
+            // Aerodynamic pop pitch along X-axis: nose rises during takeoff, levels out cleanly for landing
+            const popPitch = -Math.sin(progress * Math.PI) * 0.22;
+            board.rotation.x = THREE.MathUtils.damp(board.rotation.x, popPitch, 12, dt);
+            board.rotation.y = THREE.MathUtils.damp(board.rotation.y, 0, 10, dt);
+            // Downward clearance: board drops 12-22cm below feet during the flip to guarantee zero body clipping
+            const clearance = -0.10 - Math.sin(progress * Math.PI) * 0.12;
+            board.position.y = clearance;
           } else {
-            board.rotation.x = THREE.MathUtils.damp(board.rotation.x, 0, 10, dt);
+            board.rotation.x = THREE.MathUtils.damp(board.rotation.x, 0, 12, dt);
+            board.rotation.z = THREE.MathUtils.damp(board.rotation.z, 0, 12, dt);
+            board.rotation.y = THREE.MathUtils.damp(board.rotation.y, 0, 12, dt);
+            board.position.y = 0.02 + Math.sin(t * 8) * 0.015;
           }
-          board.position.y = 0.04 + Math.sin(t * 8) * 0.015;
         }
       }
 
@@ -1506,28 +1536,17 @@ export function buildHoverboardMesh(): THREE.Group {
   return g;
 }
 
+export function downloadAsset(url: string, filename: string): void {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 export async function exportHoverboardGlb(): Promise<void> {
-  const { GLTFExporter } = await import(
-    "three/addons/exporters/GLTFExporter.js"
-  );
-  const board = buildHoverboardMesh();
-  const exporter = new GLTFExporter();
-  exporter.parse(
-    board,
-    (gltf) => {
-      const blob = new Blob([gltf as ArrayBuffer], {
-        type: "model/gltf-binary",
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `kepler-hoverboard-${Date.now()}.glb`;
-      a.click();
-      URL.revokeObjectURL(url);
-    },
-    (err) => console.error("Hoverboard export error:", err),
-    { binary: true },
-  );
+  downloadAsset("/assets/hoverboard.glb", `kepler-hoverboard-${Date.now()}.glb`);
 }
 
 export function takeSnapshot(view: GameView): void {
@@ -1748,61 +1767,13 @@ export function buildGrappleLauncherMesh(): THREE.Group {
 }
 
 export async function exportTechRifleGlb(): Promise<void> {
-  const { GLTFExporter } = await import("three/addons/exporters/GLTFExporter.js");
-  const model = buildTechRifleMesh();
-  const exporter = new GLTFExporter();
-  exporter.parse(
-    model,
-    (gltf) => {
-      const blob = new Blob([gltf as ArrayBuffer], { type: "model/gltf-binary" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `kepler-tech-rifle-${Date.now()}.glb`;
-      a.click();
-      URL.revokeObjectURL(url);
-    },
-    (err) => console.error("Export error:", err),
-    { binary: true },
-  );
+  downloadAsset("/assets/kinetic-rifle.glb", `kepler-kinetic-rifle-${Date.now()}.glb`);
 }
 
 export async function exportSurveyCameraGlb(): Promise<void> {
-  const { GLTFExporter } = await import("three/addons/exporters/GLTFExporter.js");
-  const model = buildSurveyCameraMesh();
-  const exporter = new GLTFExporter();
-  exporter.parse(
-    model,
-    (gltf) => {
-      const blob = new Blob([gltf as ArrayBuffer], { type: "model/gltf-binary" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `kepler-survey-camera-${Date.now()}.glb`;
-      a.click();
-      URL.revokeObjectURL(url);
-    },
-    (err) => console.error("Export error:", err),
-    { binary: true },
-  );
+  downloadAsset("/assets/survey-camera.glb", `kepler-survey-camera-${Date.now()}.glb`);
 }
 
 export async function exportGrappleLauncherGlb(): Promise<void> {
-  const { GLTFExporter } = await import("three/addons/exporters/GLTFExporter.js");
-  const model = buildGrappleLauncherMesh();
-  const exporter = new GLTFExporter();
-  exporter.parse(
-    model,
-    (gltf) => {
-      const blob = new Blob([gltf as ArrayBuffer], { type: "model/gltf-binary" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `kepler-grapple-launcher-${Date.now()}.glb`;
-      a.click();
-      URL.revokeObjectURL(url);
-    },
-    (err) => console.error("Export error:", err),
-    { binary: true },
-  );
+  downloadAsset("/assets/echo-grapple.glb", `kepler-echo-grapple-${Date.now()}.glb`);
 }
