@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sketchfab 14 3D 模型高精渲染展厅</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body, html { width: 100%; height: 100%; overflow: hidden; background: #070b12; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; color: #e2e8f0; }
+    #canvas { width: 1280px; height: 720px; display: block; margin: 0 auto; background: radial-gradient(circle at center, #111a2e 0%, #060911 100%); }
+    #hud {
+      position: absolute;
+      top: 24px;
+      left: 24px;
+      background: rgba(13, 20, 36, 0.85);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      backdrop-filter: blur(8px);
+      border-radius: 8px;
+      padding: 16px 22px;
+      min-width: 340px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    }
+    #hud h1 { font-size: 18px; font-weight: 700; color: #38bdf8; letter-spacing: 0.5px; margin-bottom: 6px; }
+    #hud .subtitle { font-size: 13px; color: #94a3b8; margin-bottom: 12px; }
+    #hud .stats { font-size: 12px; line-height: 1.7; color: #cbd5e1; font-family: monospace; }
+    #hud .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      background: rgba(34, 197, 94, 0.2);
+      color: #4ade80;
+      border: 1px solid rgba(34, 197, 94, 0.4);
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <h1 id="title">模型加载中...</h1>
+    <div id="subtitle" class="subtitle">正在初始化 3D 渲染器</div>
+    <div id="stats" class="stats">--</div>
+    <div id="badge" class="badge">INITIALIZING</div>
+  </div>
+  <canvas id="canvas" width="1280" height="720"></canvas>
+  <script type="module" src="/src/model-viewer.ts"></script>
+</body>
+</html>

@@ -116,13 +116,17 @@
         "KHR_materials_unlit": {}
       },
       "name": "Material__25__background_JPG_002",
+      "doubleSided": true,
       "pbrMetallicRoughness": {
         "baseColorFactor": [
-          0.4704,
-          0.4704,
-          0.4704,
+          1.0,
+          1.0,
+          1.0,
           1.0
         ],
+        "baseColorTexture": {
+          "index": 0
+        },
         "metallicFactor": 0.0
       }
     }
