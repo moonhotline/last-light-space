@@ -669,24 +669,24 @@ export class GameView {
     await this.adventure.load();
     if (this.rifleAsset) {
       this.fpRifle = this.rifleAsset.clone(true);
-      this.fpRifle.scale.setScalar(0.42);
-      this.fpRifle.position.set(0.24, -0.22, -0.42);
-      this.fpRifle.rotation.set(0.05, 0, 0);
+      this.fpRifle.scale.setScalar(0.55);
+      this.fpRifle.position.set(0.22, -0.24, -0.44);
+      this.fpRifle.rotation.set(0.05, Math.PI, 0);
       this.toolModel.add(this.fpRifle);
     }
     if (this.grappleAsset) {
       this.fpGrapple = this.grappleAsset.clone(true);
-      this.fpGrapple.scale.setScalar(0.48);
-      this.fpGrapple.position.set(-0.22, -0.24, -0.45);
-      this.fpGrapple.rotation.set(0.05, 0, 0);
+      this.fpGrapple.scale.setScalar(0.75);
+      this.fpGrapple.position.set(-0.20, -0.22, -0.42);
+      this.fpGrapple.rotation.set(0.05, Math.PI, 0);
       this.fpGrapple.visible = false;
       this.toolModel.add(this.fpGrapple);
     }
     if (this.cameraAsset) {
       this.fpCamera = this.cameraAsset.clone(true);
-      this.fpCamera.scale.setScalar(0.9);
-      this.fpCamera.position.set(0, -0.16, -0.38);
-      this.fpCamera.rotation.set(0, Math.PI, 0);
+      this.fpCamera.scale.setScalar(1.1);
+      this.fpCamera.position.set(0, -0.16, -0.36);
+      this.fpCamera.rotation.set(0, 0, 0);
       this.fpCamera.visible = false;
       this.toolModel.add(this.fpCamera);
     }
@@ -1178,14 +1178,14 @@ export class GameView {
         if (this.rifleAsset) {
           const heldRifle = this.rifleAsset.clone(true);
           heldRifle.name = "heldRifle";
-          heldRifle.scale.setScalar(0.38);
-          heldRifle.position.set(0.02, -0.05, 0.06);
+          heldRifle.scale.setScalar(0.52);
+          heldRifle.position.set(0.02, -0.05, 0.08);
           heldRifle.rotation.set(-Math.PI / 2, 0, Math.PI);
           if (rightHand) rightHand.add(heldRifle);
 
           const backRifle = this.rifleAsset.clone(true);
           backRifle.name = "backRifle";
-          backRifle.scale.setScalar(0.38);
+          backRifle.scale.setScalar(0.52);
           backRifle.position.set(0.12, 0.15, -0.22);
           backRifle.rotation.set(0.2, 0.1, 2.35);
           backRifle.visible = false;
@@ -1195,7 +1195,7 @@ export class GameView {
         if (this.grappleAsset) {
           const grapple = this.grappleAsset.clone(true);
           grapple.name = "grappleLauncher";
-          grapple.scale.setScalar(0.48);
+          grapple.scale.setScalar(0.65);
           grapple.position.set(0.02, 0.12, 0.02);
           grapple.rotation.set(0, 0, 0);
           if (leftForeArm) leftForeArm.add(grapple);
@@ -1204,14 +1204,14 @@ export class GameView {
         if (this.cameraAsset) {
           const hipCamera = this.cameraAsset.clone(true);
           hipCamera.name = "hipCamera";
-          hipCamera.scale.setScalar(0.85);
+          hipCamera.scale.setScalar(1.0);
           hipCamera.position.set(0.18, -0.06, 0.08);
           hipCamera.rotation.set(0.2, -0.3, 0.1);
           if (hips) hips.add(hipCamera);
 
           const heldCamera = this.cameraAsset.clone(true);
           heldCamera.name = "heldCamera";
-          heldCamera.scale.setScalar(0.85);
+          heldCamera.scale.setScalar(1.0);
           heldCamera.position.set(0.05, -0.04, 0.08);
           heldCamera.rotation.set(-Math.PI / 2, 0, 0);
           heldCamera.visible = false;
@@ -1271,11 +1271,13 @@ export class GameView {
         ) *
         (1 - Math.exp(-dt * 12));
       const speed = Math.hypot(p.vx, p.vz);
-      const targetPitch = p.jetting
+      const targetPitch = p.skate
         ? 0
-        : p.grounded
+        : p.jetting
           ? 0
-          : Math.min(0.12, speed * 0.01);
+          : p.grounded
+            ? 0
+            : Math.min(0.12, speed * 0.01);
       a.rotation.x = THREE.MathUtils.damp(a.rotation.x, targetPitch, 8, dt);
       a.rotation.z = THREE.MathUtils.damp(
         a.rotation.z,
@@ -1300,13 +1302,12 @@ export class GameView {
       if (anim) {
         anim.mixer.update(dt);
         let target = "idle";
-        if (p.jetting || (!p.grounded && !p.skate)) {
+        if (p.skate) {
+          // Skateboard strictly overrides jetting and airborne animations!
+          // Solid surfing stance with feet firmly planted in the middle of the deck, even when boosting/airborne!
+          target = "idle";
+        } else if (p.jetting || !p.grounded) {
           target = "floating";
-        } else if (p.skate) {
-          // On skateboard:
-          // In air (Ollie / high jump): floating pose
-          // On ground: solid stance with feet firmly planted in the middle of the deck!
-          target = p.grounded ? "idle" : "floating";
         } else if (speed > 5.0) {
           target = "run";
           anim.actions.run.timeScale = Math.max(0.75, Math.min(1.25, speed * 0.085));
@@ -1405,7 +1406,7 @@ export class GameView {
       for (const side of [-1, 1]) {
         const jet = a.getObjectByName("jet-" + side);
         if (jet) {
-          jet.visible = p.jetting;
+          jet.visible = p.jetting && !p.skate;
           const flicker = 0.8 + Math.sin(t * 60 + side * 1.5) * 0.2;
           jet.scale.set(1, flicker, 1);
         }
@@ -1437,7 +1438,10 @@ export class GameView {
         }
       }
 
-      if (p.jetting && !own && hash(Math.floor(t * 30), p.color) > 0.4)
+      if (p.skate && p.jetting && hash(Math.floor(t * 30), p.color) > 0.25) {
+        this.burst({ x: p.x, y: p.y - 0.78, z: p.z }, 3, 0x00f0ff, 2.4);
+      }
+      if (p.jetting && !p.skate && !own && hash(Math.floor(t * 30), p.color) > 0.4)
         this.burst({ x: p.x, y: p.y + 0.35, z: p.z }, 2, COLORS[p.color], 1.5);
     }
     for (const [id, g] of this.markers)
