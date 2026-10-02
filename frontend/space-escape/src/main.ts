@@ -1084,6 +1084,8 @@ addEventListener("keydown", (e) => {
     takeSnapshot(view);
   }
   if (e.code === "KeyK") toggleHoverboard();
+  if (e.code === "KeyF") toggleCorridorView();
+  if (e.code === "KeyU") switchSpacecraft();
   if (e.code === "KeyR") command("mark");
   if (e.code === "KeyB") command("respawn");
   if (e.code === "KeyG") command("heal");
@@ -1178,9 +1180,24 @@ $("closeLore").onclick = resumeGame;
 $("heal").onclick = () => {
   sim ? sim.action(me!.id, "heal") : room?.send("action", "heal");
 };
+function toggleCorridorView() {
+  const inside = view.interplanetary.toggleCorridor();
+  const el = $("btnCorridor");
+  if (el) el.classList.toggle("active", inside);
+  recordTrick(inside ? "进入战术飞船走廊" : "返回母星地表", 120);
+}
+function switchSpacecraft() {
+  const current = view.interplanetary.activeShip;
+  const next = current === "light_fighter" ? "cruiser" : "light_fighter";
+  view.interplanetary.switchShip(next);
+  recordTrick(next === "cruiser" ? "跃迁旗舰: 重型星舰" : "穿梭战机: 轻型战机", 150);
+}
+
 $("snapshot") && ($("snapshot").onclick = () => takeSnapshot(view));
 $("snapPhoto") && ($("snapPhoto").onclick = () => takeSnapshot(view));
 $("toggleSkate") && ($("toggleSkate").onclick = toggleHoverboard);
+$("btnCorridor") && ($("btnCorridor").onclick = toggleCorridorView);
+$("btnSwitchShip") && ($("btnSwitchShip").onclick = switchSpacecraft);
 $("wepRifle") && ($("wepRifle").onclick = () => selectWeapon("rifle"));
 $("wepGrapple") && ($("wepGrapple").onclick = () => selectWeapon("grapple"));
 $("wepCamera") && ($("wepCamera").onclick = () => selectWeapon("camera"));

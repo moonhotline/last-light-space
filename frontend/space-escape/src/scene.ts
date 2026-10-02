@@ -1,6 +1,7 @@
 import { weatherMaterials } from "./weathering";
 import { AdventureView, optimizeModel } from "./adventure-view";
 import { missionObjective } from "../shared/objectives";
+import { InterplanetarySystem } from "./interplanetary";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
@@ -149,6 +150,7 @@ export class GameView {
   fpGrapple: THREE.Group | null = null;
   fpCamera: THREE.Group | null = null;
   toolModel = new THREE.Group();
+  interplanetary: InterplanetarySystem;
 
   setWeapon(w: "rifle" | "grapple" | "camera") {
     if (this.activeWeapon === w) return;
@@ -243,6 +245,7 @@ export class GameView {
       (p, n, c, s) => this.burst(p, n, c, s),
       (n, p) => this.sound(n, p),
     );
+    this.interplanetary = new InterplanetarySystem(this.scene, this.camera);
     const pg = new THREE.BufferGeometry();
     pg.setAttribute(
       "position",
@@ -895,6 +898,7 @@ export class GameView {
     physics?: MovementWorld | null,
   ) {
     this.adventure.update(s, me, dt, t);
+    this.interplanetary.step(dt, me || { x: 0, y: 0, z: 0 });
     this.toolModel.visible = !!me && !this.thirdPerson && me.seat < 0;
     if (me) {
       if (this.weaponSwitchTime > 0) this.weaponSwitchTime -= dt;

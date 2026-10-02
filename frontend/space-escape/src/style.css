@@ -620,6 +620,25 @@ body[data-phase] .landing-caption {
   justify-content: center;
   margin-bottom: 10px;
 }
+.starflight-hud {
+  margin-top: -4px;
+  margin-bottom: 8px;
+}
+.starflight-hud .wep-slot {
+  background: rgba(15, 23, 42, 0.75);
+  border-color: rgba(99, 102, 241, 0.35);
+  color: #c7d2fe;
+}
+.starflight-hud .wep-slot:hover {
+  border-color: #818cf8;
+  color: #e0e7ff;
+}
+.starflight-hud .wep-slot.active {
+  background: rgba(79, 70, 229, 0.35);
+  border-color: #818cf8;
+  color: #a5b4fc;
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.4);
+}
 .wep-slot {
   display: inline-flex;
   align-items: center;
