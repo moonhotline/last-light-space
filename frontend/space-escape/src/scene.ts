@@ -144,6 +144,7 @@ export class GameView {
   obeliskAsset: THREE.Group | null = null;
   activeWeapon: "rifle" | "grapple" | "camera" = "rifle";
   weaponSwitchTime = 0;
+  cameraZoom = 1.0;
   fpRifle: THREE.Group | null = null;
   fpGrapple: THREE.Group | null = null;
   fpCamera: THREE.Group | null = null;
@@ -923,9 +924,12 @@ export class GameView {
         this.lastLevel = me.level;
         this.lastMe = me.id;
       }
-      const speed = Math.hypot(me.vx, me.vz),
-        fov = 66 + clamp(speed / 43) * 8 * this.effects;
-      this.camera.fov = THREE.MathUtils.damp(this.camera.fov, fov, 5, dt);
+      const speed = Math.hypot(me.vx, me.vz);
+      let fov = 66 + clamp(speed / 43) * 8 * this.effects;
+      if (this.activeWeapon === "camera") {
+        fov = fov / Math.max(1, this.cameraZoom);
+      }
+      this.camera.fov = THREE.MathUtils.damp(this.camera.fov, fov, 10, dt);
       this.camera.updateProjectionMatrix();
       const target = new THREE.Vector3(me.x, me.y + 0.9, me.z),
         rotation = new THREE.Euler(me.pitch, me.yaw, 0, "YXZ");

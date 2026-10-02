@@ -342,6 +342,36 @@
         ><progress id="interactionProgress" max="1" value="0"></progress>
       </div>
       <div id="combo" class="combo"></div>
+      <!-- 摄影相机取景器 (Through-The-Lens Viewfinder) -->
+      <div id="cameraViewfinder" class="camera-viewfinder" hidden aria-hidden="true">
+        <div class="vf-frame">
+          <div class="vf-corner tl"></div>
+          <div class="vf-corner tr"></div>
+          <div class="vf-corner bl"></div>
+          <div class="vf-corner br"></div>
+          <div class="vf-grid">
+            <div class="vf-grid-line h1"></div>
+            <div class="vf-grid-line h2"></div>
+            <div class="vf-grid-line v1"></div>
+            <div class="vf-grid-line v2"></div>
+          </div>
+          <div class="vf-focus-box">
+            <div class="vf-focus-reticle"></div>
+          </div>
+          <div class="vf-telemetry-top">
+            <span class="vf-rec"><b class="vf-rec-dot"></b>REC [RAW 4K 60FPS]</span>
+            <span id="vfZoomLabel">50mm · 1.0x OPTICAL</span>
+            <span id="vfHeading">HDG 000°</span>
+          </div>
+          <div class="vf-telemetry-bottom">
+            <span>1/500s</span>
+            <span>f/2.8</span>
+            <span>ISO 400</span>
+            <span class="vf-af">AF-C [LOCK]</span>
+            <span class="vf-hint">滚轮: 光学变焦 · 左键: 拍摄快照 · V: 视角</span>
+          </div>
+        </div>
+      </div>
       <div id="chatBox" class="chat-box">
         <div id="chatMessages" class="chat-messages"></div>
         <form id="chatForm" class="chat-form" hidden>

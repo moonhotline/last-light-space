@@ -842,6 +842,19 @@ function hud() {
   view.minimap($<HTMLCanvasElement>("map"), state, { ...me, ...p });
   $("controlsHint").hidden = state.time > 90;
   document.body.dataset.camera = view.thirdPerson ? "third" : "first";
+  if (view.activeWeapon === "camera") {
+    const vfZoom = document.getElementById("vfZoomLabel");
+    if (vfZoom) {
+      const focalMm = Math.round(50 * view.cameraZoom);
+      vfZoom.textContent = `${focalMm}mm · ${view.cameraZoom.toFixed(1)}x OPTICAL`;
+    }
+    const vfHeading = document.getElementById("vfHeading");
+    if (vfHeading) {
+      let deg = Math.round(((-yaw * 180) / Math.PI) % 360);
+      if (deg < 0) deg += 360;
+      vfHeading.textContent = `HDG ${deg.toString().padStart(3, "0")}°`;
+    }
+  }
 }
 let measured = 0,
   measureSeconds = 0,
@@ -967,9 +980,16 @@ $("sound").onclick = () => {
   $("sound").setAttribute("aria-label", muted ? "开启声音" : "静音");
   paintIcons();
 };
+function updateViewfinderVisibility() {
+  const vf = document.getElementById("cameraViewfinder");
+  if (vf) {
+    vf.hidden = view.activeWeapon !== "camera" || view.thirdPerson;
+  }
+}
 function camera() {
   view.toggleCamera();
   text("viewMode", view.thirdPerson ? "第三人称" : "第一人称");
+  updateViewfinderVisibility();
 }
 $("camera").onclick = camera;
 $("recall").onclick = () => {
@@ -1003,6 +1023,10 @@ function selectWeapon(w: "rifle" | "grapple" | "camera") {
     const el = document.getElementById(id);
     if (el) el.classList.toggle("active", key === w);
   }
+  if (w === "camera") {
+    view.thirdPerson = false;
+  }
+  updateViewfinderVisibility();
 }
 
 addEventListener("keydown", (e) => {
@@ -1076,6 +1100,11 @@ addEventListener(
   "wheel",
   (e) => {
     if (document.pointerLockElement !== canvas || panel) return;
+    if (view.activeWeapon === "camera") {
+      const delta = e.deltaY > 0 ? -0.2 : 0.2;
+      view.cameraZoom = Math.max(1.0, Math.min(4.5, view.cameraZoom + delta));
+      return;
+    }
     const weapons: ("rifle" | "grapple" | "camera")[] = [
       "rifle",
       "grapple",
