@@ -1,0 +1,8 @@
+Model Information:
+* title:	Simple Solar System (Background)
+* source:	https://sketchfab.com/3d-models/simple-solar-system-background-e1448a9bebb449dea6c11f7e42021594
+* author:	trashbinkr (https://sketchfab.com/ChristopherKR)
+
+Model License:
+* license type:	SKETCHFAB Standard (https://sketchfab.com/licenses)
+* requirements:	Under basic restrictions, use worldwide, on all types of media, commercially or not, and in all types of derivative works
