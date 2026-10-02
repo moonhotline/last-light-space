@@ -1,0 +1,11 @@
+Model Information:
+* title:	Blerk the Alien
+* source:	https://sketchfab.com/3d-models/blerk-the-alien-86aebb842059480697a6eaaa87425a4a
+* author:	2ply (https://sketchfab.com/2ply)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Blerk the Alien" (https://sketchfab.com/3d-models/blerk-the-alien-86aebb842059480697a6eaaa87425a4a) by 2ply (https://sketchfab.com/2ply) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

@@ -1,0 +1,11 @@
+Model Information:
+* title:	Mineral Samples - Prirodoslovni muzej Slovenije
+* source:	https://sketchfab.com/3d-models/mineral-samples-prirodoslovni-muzej-slovenije-f3da55f7fedb41adb3c57bd70c6ada76
+* author:	Thomas Flynn (https://sketchfab.com/nebulousflynn)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Mineral Samples - Prirodoslovni muzej Slovenije" (https://sketchfab.com/3d-models/mineral-samples-prirodoslovni-muzej-slovenije-f3da55f7fedb41adb3c57bd70c6ada76) by Thomas Flynn (https://sketchfab.com/nebulousflynn) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
