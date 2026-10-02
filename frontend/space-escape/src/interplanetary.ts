@@ -347,6 +347,7 @@ export class InterplanetarySystem {
 
   /**
    * Asynchronously load real downloaded Sketchfab models with anti-clipping normalization.
+   * Runs progressively in background so game boot is instantaneous and never blocked.
    */
   async loadAssets(loader: GLTFLoader) {
     const loadSafe = async (url: string) => {
@@ -357,102 +358,108 @@ export class InterplanetarySystem {
       }
     };
 
-    const [
-      stylizedGltf,
-      mercuryGltf,
-      earthGltf,
-      corridorGltf,
-      fighterGltf,
-      intergalacticGltf,
-      blerkGltf,
-      alien1Gltf,
-      alien2Gltf,
-      mineralsGltf,
-    ] = await Promise.all([
-      loadSafe("/assets/models/stylized_planet/scene.gltf"),
-      loadSafe("/assets/models/mercury/scene.gltf"),
-      loadSafe("/assets/models/earth/scene.gltf"),
-      loadSafe("/assets/models/corridor/scene.gltf"),
-      loadSafe("/assets/models/fighter/scene.gltf"),
-      loadSafe("/assets/models/intergalactic/scene.gltf"),
-      loadSafe("/assets/models/blerk/scene.gltf"),
-      loadSafe("/assets/models/alien1/scene.gltf"),
-      loadSafe("/assets/models/alien2/scene.gltf"),
-      loadSafe("/assets/models/minerals/scene.gltf"),
-    ]);
-
-    // Replace Stylized Planet if available
-    if (stylizedGltf) {
-      const entry = this.planets.get("stylized");
-      if (entry) {
-        const norm = normalizeModelContainer(stylizedGltf.scene, entry.body.radius * 2);
-        entry.group.remove(entry.surfaceMesh);
-        entry.group.add(norm);
+    // 1. Stylized Planet
+    try {
+      const stylizedGltf = await loadSafe("/assets/models/stylized_planet/scene.gltf");
+      if (stylizedGltf) {
+        const entry = this.planets.get("stylized");
+        if (entry) {
+          const norm = normalizeModelContainer(stylizedGltf.scene, entry.body.radius * 2);
+          entry.group.remove(entry.surfaceMesh);
+          entry.group.add(norm);
+        }
       }
-    }
+    } catch {}
 
-    // Replace Mercury if available
-    if (mercuryGltf) {
-      const entry = this.planets.get("mercury");
-      if (entry) {
-        const norm = normalizeModelContainer(mercuryGltf.scene, entry.body.radius * 2);
-        entry.group.remove(entry.surfaceMesh);
-        entry.group.add(norm);
+    // 2. Mercury
+    try {
+      const mercuryGltf = await loadSafe("/assets/models/mercury/scene.gltf");
+      if (mercuryGltf) {
+        const entry = this.planets.get("mercury");
+        if (entry) {
+          const norm = normalizeModelContainer(mercuryGltf.scene, entry.body.radius * 2);
+          entry.group.remove(entry.surfaceMesh);
+          entry.group.add(norm);
+        }
       }
-    }
+    } catch {}
 
-    // Replace Earth if available
-    if (earthGltf) {
-      const entry = this.planets.get("earth");
-      if (entry) {
-        const norm = normalizeModelContainer(earthGltf.scene, entry.body.radius * 2);
-        entry.group.remove(entry.surfaceMesh);
-        entry.group.add(norm);
+    // 3. Earth
+    try {
+      const earthGltf = await loadSafe("/assets/models/earth/scene.gltf");
+      if (earthGltf) {
+        const entry = this.planets.get("earth");
+        if (entry) {
+          const norm = normalizeModelContainer(earthGltf.scene, entry.body.radius * 2);
+          entry.group.remove(entry.surfaceMesh);
+          entry.group.add(norm);
+        }
       }
-    }
+    } catch {}
 
-    // Replace Spaceship Corridor if available
-    if (corridorGltf) {
-      this.corridorGroup.clear();
-      const norm = normalizeModelContainer(corridorGltf.scene, 38.0);
-      norm.position.set(0, 15000, 0);
-      this.corridorGroup.add(norm);
-    }
+    // 4. Spaceship Corridor
+    try {
+      const corridorGltf = await loadSafe("/assets/models/corridor/scene.gltf");
+      if (corridorGltf) {
+        this.corridorGroup.clear();
+        const norm = normalizeModelContainer(corridorGltf.scene, 38.0);
+        norm.position.set(0, 15000, 0);
+        this.corridorGroup.add(norm);
+      }
+    } catch {}
 
-    // Load Spaceships
-    if (fighterGltf) {
-      const norm = normalizeModelContainer(fighterGltf.scene, 12.0);
-      this.shipMeshes.set("light_fighter", norm);
-    }
-    if (intergalacticGltf) {
-      const norm = normalizeModelContainer(intergalacticGltf.scene, 34.0);
-      this.shipMeshes.set("cruiser", norm);
-    }
+    // 5. Light Fighter Spaceship
+    try {
+      const fighterGltf = await loadSafe("/assets/models/fighter/scene.gltf");
+      if (fighterGltf) {
+        const norm = normalizeModelContainer(fighterGltf.scene, 12.0);
+        this.shipMeshes.set("light_fighter", norm);
+      }
+    } catch {}
 
-    // Load Blerk NPC Guide on ground outside starting canyon
-    if (blerkGltf) {
-      const norm = normalizeModelContainer(blerkGltf.scene, 2.2);
-      norm.position.set(8, 22.8, 335);
-      this.scene.add(norm);
-    }
+    // 6. Cruiser Spaceship
+    try {
+      const intergalacticGltf = await loadSafe("/assets/models/intergalactic/scene.gltf");
+      if (intergalacticGltf) {
+        const norm = normalizeModelContainer(intergalacticGltf.scene, 34.0);
+        this.shipMeshes.set("cruiser", norm);
+      }
+    } catch {}
 
-    // Load New Hostile Aliens in Wild Outposts
-    if (alien1Gltf) {
-      const norm = normalizeModelContainer(alien1Gltf.scene, 2.0);
-      norm.position.set(165, 82, -85);
-      this.scene.add(norm);
-    }
-    if (alien2Gltf) {
-      const norm = normalizeModelContainer(alien2Gltf.scene, 2.4);
-      norm.position.set(-170, 78, -150);
-      this.scene.add(norm);
-    }
+    // 7. Blerk NPC Guide
+    try {
+      const blerkGltf = await loadSafe("/assets/models/blerk/scene.gltf");
+      if (blerkGltf) {
+        const norm = normalizeModelContainer(blerkGltf.scene, 2.2);
+        norm.position.set(8, 22.8, 335);
+        this.scene.add(norm);
+      }
+    } catch {}
 
-    // Load Real Geological Mineral Samples
-    if (mineralsGltf) {
-      const norm = normalizeModelContainer(mineralsGltf.scene, 2.4);
-      norm.position.set(-30, 21.5, 115);
-      this.mineralNodes.add(norm);
-    }
+    // 8. Hostile Aliens
+    try {
+      const alien1Gltf = await loadSafe("/assets/models/alien1/scene.gltf");
+      if (alien1Gltf) {
+        const norm = normalizeModelContainer(alien1Gltf.scene, 2.0);
+        norm.position.set(165, 82, -85);
+        this.scene.add(norm);
+      }
+      const alien2Gltf = await loadSafe("/assets/models/alien2/scene.gltf");
+      if (alien2Gltf) {
+        const norm = normalizeModelContainer(alien2Gltf.scene, 2.4);
+        norm.position.set(-170, 78, -150);
+        this.scene.add(norm);
+      }
+    } catch {}
+
+    // 9. Real Geological Mineral Samples
+    try {
+      const mineralsGltf = await loadSafe("/assets/models/minerals/scene.gltf");
+      if (mineralsGltf) {
+        const norm = normalizeModelContainer(mineralsGltf.scene, 2.4);
+        norm.position.set(-30, 21.5, 115);
+        this.mineralNodes.add(norm);
+      }
+    } catch {}
   }
 }

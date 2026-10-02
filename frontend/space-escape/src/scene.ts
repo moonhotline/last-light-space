@@ -622,13 +622,7 @@ export class GameView {
       loader.loadAsync("/assets/beacon.glb"),
       loader.loadAsync("/assets/observatory.glb"),
       loader.loadAsync("/assets/hoverboard.glb"),
-      (async () => {
-        try {
-          return await loader.loadAsync("/assets/models/hmg-379/scene.gltf");
-        } catch {
-          return await loader.loadAsync("/assets/kinetic-rifle.glb");
-        }
-      })(),
+      loader.loadAsync("/assets/kinetic-rifle.glb"),
       loader.loadAsync("/assets/echo-grapple.glb"),
       loader.loadAsync("/assets/survey-camera.glb"),
       loader.loadAsync("/assets/obelisk.glb"),
@@ -677,7 +671,37 @@ export class GameView {
     }
 
     await this.adventure.load();
-    await this.interplanetary.loadAssets(loader);
+
+    // Background progressive hydration: never block initial launch
+    void this.interplanetary.loadAssets(loader).catch((err) => {
+      console.warn("Background planetary hydration:", err);
+    });
+
+    // Background upgrade to high-fidelity HMG-379 rifle model
+    void loader
+      .loadAsync("/assets/models/hmg-379/scene.gltf")
+      .then((hmgGltf) => {
+        if (hmgGltf && hmgGltf.scene) {
+          weatherMaterials(hmgGltf.scene);
+          this.rifleAsset = hmgGltf.scene;
+          if (this.fpRifle) {
+            this.toolModel.remove(this.fpRifle);
+          }
+          this.fpRifle = hmgGltf.scene.clone(true);
+          const box = new THREE.Box3().setFromObject(this.fpRifle);
+          const size = new THREE.Vector3();
+          box.getSize(size);
+          const maxDim = Math.max(size.x, size.y, size.z);
+          if (maxDim > 0.01) {
+            this.fpRifle.scale.setScalar(0.82 / maxDim);
+          }
+          this.fpRifle.position.set(0.18, -0.22, -0.42);
+          this.fpRifle.rotation.set(0.04, Math.PI, 0);
+          this.fpRifle.visible = this.activeWeapon === "rifle";
+          this.toolModel.add(this.fpRifle);
+        }
+      })
+      .catch(() => {});
     if (this.rifleAsset) {
       this.fpRifle = this.rifleAsset.clone(true);
       const box = new THREE.Box3().setFromObject(this.fpRifle);
@@ -785,8 +809,8 @@ export class GameView {
     );
     this.ready = true;
     this.canvas.dataset.assetsLoaded = "4";
-    await this.renderer.compileAsync(this.scene, this.camera);
-    await this.renderer.compileAsync(this.skyScene, this.skyCamera);
+    void this.renderer.compileAsync(this.scene, this.camera).catch(() => {});
+    void this.renderer.compileAsync(this.skyScene, this.skyCamera).catch(() => {});
   }
   async audio() {
     if (this.listener) {
