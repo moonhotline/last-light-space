@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import {
   SOLAR_SYSTEM,
   MINERAL_SAMPLES,
@@ -7,6 +8,35 @@ import {
   type SpaceshipKind,
   type FlightFlightMode,
 } from "../shared/celestial";
+
+export function normalizeModelContainer(
+  obj: THREE.Object3D,
+  targetSize: number,
+): THREE.Group {
+  const container = new THREE.Group();
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const scale = maxDim > 0.001 ? targetSize / maxDim : 1;
+  obj.scale.setScalar(scale);
+
+  const scaledBox = new THREE.Box3().setFromObject(obj);
+  const center = new THREE.Vector3();
+  scaledBox.getCenter(center);
+  obj.position.sub(center);
+
+  obj.traverse((child) => {
+    if (child instanceof THREE.Mesh) {
+      child.castShadow = true;
+      child.receiveShadow = true;
+      child.frustumCulled = false;
+    }
+  });
+
+  container.add(obj);
+  return container;
+}
 
 export interface PlanetMeshEntry {
   body: CelestialBody;
@@ -312,6 +342,117 @@ export class InterplanetarySystem {
       this.flightMode = "cruise";
     } else if (this.flightAltitude <= 300 && this.flightMode === "cruise") {
       this.flightMode = "surface";
+    }
+  }
+
+  /**
+   * Asynchronously load real downloaded Sketchfab models with anti-clipping normalization.
+   */
+  async loadAssets(loader: GLTFLoader) {
+    const loadSafe = async (url: string) => {
+      try {
+        return await loader.loadAsync(url);
+      } catch {
+        return null;
+      }
+    };
+
+    const [
+      stylizedGltf,
+      mercuryGltf,
+      earthGltf,
+      corridorGltf,
+      fighterGltf,
+      intergalacticGltf,
+      blerkGltf,
+      alien1Gltf,
+      alien2Gltf,
+      mineralsGltf,
+    ] = await Promise.all([
+      loadSafe("/assets/models/stylized_planet/scene.gltf"),
+      loadSafe("/assets/models/mercury/scene.gltf"),
+      loadSafe("/assets/models/earth/scene.gltf"),
+      loadSafe("/assets/models/corridor/scene.gltf"),
+      loadSafe("/assets/models/fighter/scene.gltf"),
+      loadSafe("/assets/models/intergalactic/scene.gltf"),
+      loadSafe("/assets/models/blerk/scene.gltf"),
+      loadSafe("/assets/models/alien1/scene.gltf"),
+      loadSafe("/assets/models/alien2/scene.gltf"),
+      loadSafe("/assets/models/minerals/scene.gltf"),
+    ]);
+
+    // Replace Stylized Planet if available
+    if (stylizedGltf) {
+      const entry = this.planets.get("stylized");
+      if (entry) {
+        const norm = normalizeModelContainer(stylizedGltf.scene, entry.body.radius * 2);
+        entry.group.remove(entry.surfaceMesh);
+        entry.group.add(norm);
+      }
+    }
+
+    // Replace Mercury if available
+    if (mercuryGltf) {
+      const entry = this.planets.get("mercury");
+      if (entry) {
+        const norm = normalizeModelContainer(mercuryGltf.scene, entry.body.radius * 2);
+        entry.group.remove(entry.surfaceMesh);
+        entry.group.add(norm);
+      }
+    }
+
+    // Replace Earth if available
+    if (earthGltf) {
+      const entry = this.planets.get("earth");
+      if (entry) {
+        const norm = normalizeModelContainer(earthGltf.scene, entry.body.radius * 2);
+        entry.group.remove(entry.surfaceMesh);
+        entry.group.add(norm);
+      }
+    }
+
+    // Replace Spaceship Corridor if available
+    if (corridorGltf) {
+      this.corridorGroup.clear();
+      const norm = normalizeModelContainer(corridorGltf.scene, 38.0);
+      norm.position.set(0, 15000, 0);
+      this.corridorGroup.add(norm);
+    }
+
+    // Load Spaceships
+    if (fighterGltf) {
+      const norm = normalizeModelContainer(fighterGltf.scene, 12.0);
+      this.shipMeshes.set("light_fighter", norm);
+    }
+    if (intergalacticGltf) {
+      const norm = normalizeModelContainer(intergalacticGltf.scene, 34.0);
+      this.shipMeshes.set("cruiser", norm);
+    }
+
+    // Load Blerk NPC Guide on ground outside starting canyon
+    if (blerkGltf) {
+      const norm = normalizeModelContainer(blerkGltf.scene, 2.2);
+      norm.position.set(8, 22.8, 335);
+      this.scene.add(norm);
+    }
+
+    // Load New Hostile Aliens in Wild Outposts
+    if (alien1Gltf) {
+      const norm = normalizeModelContainer(alien1Gltf.scene, 2.0);
+      norm.position.set(165, 82, -85);
+      this.scene.add(norm);
+    }
+    if (alien2Gltf) {
+      const norm = normalizeModelContainer(alien2Gltf.scene, 2.4);
+      norm.position.set(-170, 78, -150);
+      this.scene.add(norm);
+    }
+
+    // Load Real Geological Mineral Samples
+    if (mineralsGltf) {
+      const norm = normalizeModelContainer(mineralsGltf.scene, 2.4);
+      norm.position.set(-30, 21.5, 115);
+      this.mineralNodes.add(norm);
     }
   }
 }

@@ -11,3 +11,5 @@ playwright-report/
 *.webm
 *.mp4
 .partykit/
+*.zip
+

@@ -53,6 +53,27 @@ def main():
     for item in MODELS:
         uid = item["uid"]
         name = item["name"]
+        tag = item["tag"]
+        model_dir = os.path.join(out_dir, "models", tag)
+        gltf_file = os.path.join(model_dir, "scene.gltf")
+        zip_path = os.path.join(out_dir, f"{tag}.zip")
+
+        if os.path.exists(gltf_file):
+            print(f"\n[已存在] {name} -> {model_dir}")
+            continue
+
+        if os.path.exists(zip_path) and not os.path.exists(gltf_file):
+            try:
+                print(f"\n[解压中] {name} 从 {zip_path}...")
+                os.makedirs(model_dir, exist_ok=True)
+                with zipfile.ZipFile(zip_path, "r") as z:
+                    z.extractall(model_dir)
+                print(f"  [解压完成] -> {model_dir}")
+                continue
+            except zipfile.BadZipFile:
+                print(f"  [发现不完整压缩包，重新下载] {zip_path}")
+                os.remove(zip_path)
+
         print(f"\n正在查询: {name} (UID: {uid})...")
         download_url = f"https://api.sketchfab.com/v3/models/{uid}/download"
         req = urllib.request.Request(download_url, headers=headers)
@@ -67,9 +88,14 @@ def main():
                 size_mb = gltf_info.get("size", 0) / (1024 * 1024)
                 print(f"  [下载中] 大小: {size_mb:.2f} MB...")
                 
-                zip_path = os.path.join(out_dir, f"{item['tag']}.zip")
                 urllib.request.urlretrieve(file_url, zip_path)
-                print(f"  [成功] 已保存至: {zip_path}")
+                print(f"  [下载成功] 已保存至: {zip_path}")
+
+                print(f"  [解压中] -> {model_dir}...")
+                os.makedirs(model_dir, exist_ok=True)
+                with zipfile.ZipFile(zip_path, "r") as z:
+                    z.extractall(model_dir)
+                print(f"  [解压完成] -> {gltf_file}")
         except urllib.error.HTTPError as e:
             print(f"  [错误] HTTP {e.code}: {e.read().decode()}")
         except Exception as e:

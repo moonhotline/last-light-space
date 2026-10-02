@@ -622,7 +622,13 @@ export class GameView {
       loader.loadAsync("/assets/beacon.glb"),
       loader.loadAsync("/assets/observatory.glb"),
       loader.loadAsync("/assets/hoverboard.glb"),
-      loader.loadAsync("/assets/kinetic-rifle.glb"),
+      (async () => {
+        try {
+          return await loader.loadAsync("/assets/models/hmg-379/scene.gltf");
+        } catch {
+          return await loader.loadAsync("/assets/kinetic-rifle.glb");
+        }
+      })(),
       loader.loadAsync("/assets/echo-grapple.glb"),
       loader.loadAsync("/assets/survey-camera.glb"),
       loader.loadAsync("/assets/obelisk.glb"),
@@ -671,11 +677,18 @@ export class GameView {
     }
 
     await this.adventure.load();
+    await this.interplanetary.loadAssets(loader);
     if (this.rifleAsset) {
       this.fpRifle = this.rifleAsset.clone(true);
-      this.fpRifle.scale.setScalar(0.55);
-      this.fpRifle.position.set(0.22, -0.24, -0.44);
-      this.fpRifle.rotation.set(0.05, Math.PI, 0);
+      const box = new THREE.Box3().setFromObject(this.fpRifle);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      const maxDim = Math.max(size.x, size.y, size.z);
+      if (maxDim > 0.01) {
+        this.fpRifle.scale.setScalar(0.82 / maxDim);
+      }
+      this.fpRifle.position.set(0.18, -0.22, -0.42);
+      this.fpRifle.rotation.set(0.04, Math.PI, 0);
       this.toolModel.add(this.fpRifle);
     }
     if (this.grappleAsset) {
