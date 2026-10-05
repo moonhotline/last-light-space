@@ -11,19 +11,19 @@ import {
 test("spherical gravity always directs acceleration towards planet center", () => {
   const kepler = SOLAR_SYSTEM.kepler;
   // Test position at top of sphere
-  const topPos = { x: 0, y: kepler.radius + 10, z: 0 };
+  const topPos = { x: kepler.position.x, y: kepler.position.y + kepler.radius + 10, z: kepler.position.z };
   const topG = sphericalGravity(topPos, kepler);
   assert.ok(topG.gravityVec.y < 0, "Gravity at top should pull down along -y");
   assert.equal(Math.round(topG.altitude), 10);
 
   // Test position at side of sphere (x > 0)
-  const sidePos = { x: kepler.radius + 20, y: 0, z: 0 };
+  const sidePos = { x: kepler.position.x + kepler.radius + 20, y: kepler.position.y, z: kepler.position.z };
   const sideG = sphericalGravity(sidePos, kepler);
   assert.ok(sideG.gravityVec.x < 0, "Gravity at +x side should pull back towards -x center");
   assert.equal(Math.round(sideG.altitude), 20);
 
   // Test position at bottom of sphere (y < 0) - Columbus 'world is round'
-  const bottomPos = { x: 0, y: -(kepler.radius + 5), z: 0 };
+  const bottomPos = { x: kepler.position.x, y: kepler.position.y - (kepler.radius + 5), z: kepler.position.z };
   const bottomG = sphericalGravity(bottomPos, kepler);
   assert.ok(bottomG.gravityVec.y > 0, "Gravity at antipodal bottom must pull upwards towards center");
   assert.equal(Math.round(bottomG.altitude), 5);

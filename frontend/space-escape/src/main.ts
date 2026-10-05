@@ -123,6 +123,7 @@ let panel:
   lastLore = -1,
   inventorySignature = "";
 let correction = { x: 0, y: 0, z: 0 };
+let nearCorridorHeld = false;
 let SimulationCtor: typeof import("../shared/simulation").Simulation | null =
     null,
   MovementWorldCtor: typeof import("../shared/physics").MovementWorld | null =
@@ -253,6 +254,7 @@ function releaseSession() {
   correction = { x: 0, y: 0, z: 0 };
   lastEvent = 0;
   lastLore = -1;
+  nearCorridorHeld = false;
   view.lastMe = "";
   delete document.body.dataset.phase;
   $("journal").hidden = true;
@@ -534,7 +536,7 @@ function makeInput(): Input {
     jump: active && (keys.has("Space") || pulses.has("Space")),
     jet:
       active &&
-      (keys.has("KeyF") ||
+      (keys.has("KeyJ") ||
         ((keys.has("Space") || pulses.has("Space")) &&
           performance.now() - spaceAt > 220)),
     dash: active && (keys.has("KeyC") || pulses.has("KeyC")),
@@ -565,11 +567,50 @@ function step() {
   }
   if (sim) {
     if (panel) return;
-    sim.input(me.id, makeInput());
+    const input = makeInput();
+    const guideFollowing = view.interplanetary.guideDialogue(me, input.interact);
+    if (guideFollowing !== null)
+      notice(guideFollowing ? "Blerk 已加入队伍" : "Blerk 暂时停留在原地");
+    if (input.interact && state) {
+      const ship = state.adventure.ship;
+      if (me.seat < 0 && distance3(me, { ...ship, y: ship.y + 1 }) < 15 && (ship.grounded || view.interplanetary.inCorridor)) {
+        if (!nearCorridorHeld) {
+          nearCorridorHeld = true;
+          if (view.interplanetary.inCorridor) {
+            view.interplanetary.toggleCorridor(false);
+            recordTrick("返回母星地表", 120);
+          }
+        }
+      } else {
+        nearCorridorHeld = false;
+      }
+    } else {
+      nearCorridorHeld = false;
+    }
+    sim.input(me.id, input);
     sim.tick();
     receive(sim.snapshot());
   } else if (room && predicted && prediction) {
     const i = makeInput();
+    const guideFollowing = view.interplanetary.guideDialogue(me, i.interact);
+    if (guideFollowing !== null)
+      notice(guideFollowing ? "Blerk 已加入队伍" : "Blerk 暂时停留在原地");
+    if (i.interact && state) {
+      const ship = state.adventure.ship;
+      if (me.seat < 0 && distance3(me, { ...ship, y: ship.y + 1 }) < 15 && (ship.grounded || view.interplanetary.inCorridor)) {
+        if (!nearCorridorHeld) {
+          nearCorridorHeld = true;
+          if (view.interplanetary.inCorridor) {
+            view.interplanetary.toggleCorridor(false);
+            recordTrick("返回母星地表", 120);
+          }
+        }
+      } else {
+        nearCorridorHeld = false;
+      }
+    } else {
+      nearCorridorHeld = false;
+    }
     room.send("input", i);
     pending.push(i);
     if (pending.length > 120) {
@@ -591,13 +632,17 @@ function prompt() {
     ship = a.ship;
   if (me.seat >= 0)
     return { label: ship.grounded ? "E · 已着陆，可以离舱" : "", progress: 0 };
-  if (distance3(me, { ...ship, y: ship.y + 1 }) < 15)
+  if (distance3(me, { ...ship, y: ship.y + 1 }) < 15) {
+    if (view.interplanetary.inCorridor) {
+      return { label: "E · 离开飞船走廊返回地表", progress: 0 };
+    }
     return {
       label: ship.repaired
-        ? "E · 登上游隼号"
+        ? "E · 登上游隼号 / 进入飞船走廊"
         : "长按 E · 存入材料 / 修复游隼号 · Tab 查看配方",
       progress: ship.progress,
     };
+  }
   const clue = LORE.find((l) => distance3(me!, l) < 8);
   if (clue) return { label: `E · 阅读 ${clue.site}`, progress: 0 };
   const n = a.nodes.find(
@@ -1084,8 +1129,6 @@ addEventListener("keydown", (e) => {
     takeSnapshot(view);
   }
   if (e.code === "KeyK") toggleHoverboard();
-  if (e.code === "KeyF") toggleCorridorView();
-  if (e.code === "KeyU") switchSpacecraft();
   if (e.code === "KeyR") command("mark");
   if (e.code === "KeyB") command("respawn");
   if (e.code === "KeyG") command("heal");
@@ -1432,6 +1475,8 @@ void Promise.all([
   });
 Object.assign(window, {
   __lastLight: {
+    sim: () => sim,
+    setViewRotation: (y: number, p: number) => { yaw = y; pitch = p; },
     snapshot: () => (state ? structuredClone(state) : null),
     player: () => (me ? { ...me } : null),
     position: () => (predicted ? { ...predicted } : me ? { ...me } : null),
@@ -1465,6 +1510,8 @@ Object.assign(window, {
       earthY: view.earth.position.y,
       moonY: view.moon.position.y,
       thermalCount: view.thermalGroups.filter((g) => g.visible).length,
+      downloadedModels: view.interplanetary.downloadedAssets.size,
+      assetErrors: [...view.interplanetary.assetErrors],
     }),
   },
 });

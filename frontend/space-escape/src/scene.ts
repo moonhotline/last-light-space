@@ -4,6 +4,7 @@ import { missionObjective } from "../shared/objectives";
 import { InterplanetarySystem } from "./interplanetary";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
@@ -30,6 +31,9 @@ import {
 } from "../shared/map";
 import type { Snapshot, Player } from "../shared/types";
 import type { MovementWorld } from "../shared/physics";
+import { SOLAR_SYSTEM } from "../shared/celestial";
+import { FOOT_OFFSET, playerUp, surfaceOrientation, eyePosition, viewOrientation } from "../shared/surface";
+import { createHandRig, equipmentModel, attachHeldModel } from "./hand-rig";
 const COLORS = [0x9eeafa, 0xffc98b, 0xff9f81, 0xa6baff];
 const v3 = (v: Vec) => new THREE.Vector3(v.x, v.y, v.z);
 const vertex = `varying vec2 vUv; varying vec3 vNormal; varying vec3 vPosition; void main(){vUv=uv;vNormal=normal;vPosition=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`;
@@ -116,6 +120,7 @@ export class GameView {
   ready = false;
   frames = 0;
   thirdPerson = true;
+  cameraOverride: { position: THREE.Vector3; lookAt: THREE.Vector3 } | null = null;
   effects = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 0.55;
   listener: THREE.AudioListener | null = null;
   music: THREE.Audio | null = null;
@@ -149,7 +154,12 @@ export class GameView {
   fpRifle: THREE.Group | null = null;
   fpGrapple: THREE.Group | null = null;
   fpCamera: THREE.Group | null = null;
+  fpHandRig: THREE.Object3D | null = null;
+  fpRightHand: THREE.Object3D | null = null;
+  fpLeftHand: THREE.Object3D | null = null;
   toolModel = new THREE.Group();
+  private rifleEnvironment: THREE.WebGLRenderTarget | null = null;
+  private rifleFill = new THREE.PointLight(0xfff5e8, 0.45, 2, 2);
   interplanetary: InterplanetarySystem;
 
   setWeapon(w: "rifle" | "grapple" | "camera") {
@@ -157,6 +167,52 @@ export class GameView {
     this.activeWeapon = w;
     this.weaponSwitchTime = 0.25;
     this.sound("tool", 1.35);
+  }
+  private brightenRifle(root: THREE.Object3D) {
+    // Metallic surfaces need broad reflections as well as a small local fill.
+    if (!this.rifleEnvironment) {
+      const room = new RoomEnvironment();
+      const pmrem = new THREE.PMREMGenerator(this.renderer);
+      this.rifleEnvironment = pmrem.fromScene(room, 0.04, 0.1, 100, { size: 64 });
+      room.dispose();
+      pmrem.dispose();
+    }
+    root.traverse((o) => {
+      if (!(o instanceof THREE.Mesh)) return;
+      for (const material of Array.isArray(o.material) ? o.material : [o.material]) {
+        if (material instanceof THREE.MeshStandardMaterial) {
+          material.envMap = this.rifleEnvironment!.texture;
+          material.envMapIntensity = 1.0;
+          material.needsUpdate = true;
+        }
+      }
+    });
+  }
+  private setupFirstPersonHands() {
+    const right = createHandRig(this.astronaut, "Right", new THREE.Vector3(0.34, -0.23, -0.5));
+    const left = createHandRig(this.astronaut, "Left", new THREE.Vector3(0.12, -0.25, -0.85));
+    this.fpHandRig = new THREE.Group();
+    if (right) { this.fpHandRig.add(right.root); this.fpRightHand = right.joint; }
+    if (left) { this.fpHandRig.add(left.root); this.fpLeftHand = left.joint; }
+    this.toolModel.add(this.fpHandRig);
+  }
+  private mountFirstPerson(source: THREE.Group, kind: "rifle" | "grapple" | "camera", hand = this.fpRightHand) {
+    const size = kind === "rifle" ? 1.12 : kind === "grapple" ? 0.62 : 0.4;
+    const model = equipmentModel(source, size);
+    model.name = `first_person_${kind}`;
+    model.userData.asset = kind === "rifle" ? "hmg-379" : kind;
+    const pos = kind === "camera"
+      ? new THREE.Vector3(0.3, -0.17, -0.52)
+      : new THREE.Vector3(0.34, -0.22, kind === "rifle" ? -0.85 : -0.68);
+    attachHeldModel(this.toolModel, hand, model, pos);
+    if (kind === "grapple") {
+      const light = new THREE.PointLight(0x65e6ff, 1.5, 2.4, 2);
+      light.name = "grapple_point_light";
+      light.position.set(0, 0.08, 0.2);
+      model.add(light);
+    }
+    model.visible = this.activeWeapon === kind;
+    return model;
   }
   avatars = new Map<string, THREE.Group>();
   beacons: THREE.Group[] = [];
@@ -215,6 +271,9 @@ export class GameView {
     this.sun.shadow.bias = -0.00025;
     this.sun.shadow.normalBias = 0.22;
     this.scene.add(this.sun, this.sun.target, this.camera);
+    this.rifleFill.name = "rifle_point_light";
+    this.rifleFill.position.set(-0.3, 0.15, 0.05);
+    this.toolModel.add(this.rifleFill);
     this.buildSky();
     this.buildTerrain();
     const crystalMat = new THREE.MeshStandardMaterial({
@@ -485,35 +544,8 @@ export class GameView {
       }),
     );
     this.sky.add(starfield);
-    this.sky.add(this.earth, this.giant, this.moon);
-    this.giant.position.set(4800, 4500, -9200);
-    this.earth.position.set(-900, 1600, -8000);
-    this.moon.position.set(-3600, -700, -8500);
-    const gas = new THREE.Mesh(
-      new THREE.SphereGeometry(1350, 96, 64),
-      new THREE.ShaderMaterial({
-        vertexShader: vertex,
-        fragmentShader: `varying vec2 vUv;varying vec3 vNormal;void main(){float q=vUv.y+sin(vUv.x*22.+vUv.y*45.)*.003;float b=.5+.13*sin(q*94.)+.065*sin(q*210.+sin(vUv.x*31.))+.04*sin(q*470.);vec3 c=mix(vec3(.28,.19,.12),vec3(.78,.62,.40),b);float l=smoothstep(-.25,.7,dot(normalize(vNormal),normalize(vec3(-.9,.22,.32))));c*=.035+l;gl_FragColor=vec4(c,1.);}`,
-      }),
-    );
-    this.giant.add(gas);
-    const ringGeo = new THREE.RingGeometry(1770, 3440, 240, 10);
-    const ring = new THREE.Mesh(
-      ringGeo,
-      new THREE.ShaderMaterial({
-        side: THREE.DoubleSide,
-        transparent: true,
-        depthWrite: false,
-        vertexShader: vertex,
-        fragmentShader: `varying vec3 vPosition;void main(){float r=length(vPosition.xy);float t=(r-1770.)/1670.;float bands=.62+.08*sin(r*.19)+.12*sin(r*.048)+.045*sin(r*.81);float gap=1.-.91*exp(-pow((t-.45)/.018,2.));gap*=1.-.5*exp(-pow((t-.73)/.015,2.));vec3 c=mix(vec3(.39,.29,.18),vec3(.92,.76,.47),bands);float shadow=smoothstep(600.,1800.,vPosition.x+abs(vPosition.y)*1.3);c*=mix(.23,1.,shadow);float edge=smoothstep(0.,.04,t)*(1.-smoothstep(.90,1.,t));gl_FragColor=vec4(c,bands*gap*edge*.93);}`,
-      }),
-    );
-    ring.rotation.x = 1.42;
-    ring.rotation.z = 0;
-    this.giant.rotation.z = 0.42;
-    this.giant.add(ring);
-    this.atmosphere(this.giant, 1356, 0xe3c197, 0.24);
-    // A distant sun with a soft optical halo, kept below the ring composition.
+    // Removed old procedural billboard giant and old meshes so real high-detail solar system planets shine in sky.
+    // A distant sun with a soft optical halo.
     const sun = new THREE.Mesh(
       new THREE.SphereGeometry(75, 24, 16),
       new THREE.MeshBasicMaterial({
@@ -606,6 +638,31 @@ export class GameView {
   async load() {
     const loader = new GLTFLoader(),
       textureLoader = new THREE.TextureLoader();
+    const loadGltf = async (url: string, fallback?: string) => {
+      let error: unknown;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          return await loader.loadAsync(url);
+        } catch (e) {
+          error = e;
+          await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+        }
+      }
+      if (fallback) return loadGltf(fallback);
+      throw error;
+    };
+    const loadTexture = async (url: string) => {
+      let error: unknown;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          return await textureLoader.loadAsync(url);
+        } catch (e) {
+          error = e;
+          await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+        }
+      }
+      throw error;
+    };
     const [
       explorer,
       beacon,
@@ -615,27 +672,25 @@ export class GameView {
       grappleGltf,
       cameraGltf,
       obeliskGltf,
-      earth,
-      moon,
     ] = await Promise.all([
-      loader.loadAsync("/assets/explorer-v4.glb"),
-      loader.loadAsync("/assets/beacon.glb"),
-      loader.loadAsync("/assets/observatory.glb"),
-      loader.loadAsync("/assets/hoverboard.glb"),
-      loader.loadAsync("/assets/kinetic-rifle.glb"),
-      loader.loadAsync("/assets/echo-grapple.glb"),
-      loader.loadAsync("/assets/survey-camera.glb"),
-      loader.loadAsync("/assets/obelisk.glb"),
-      textureLoader.loadAsync("/assets/earth.jpg"),
-      textureLoader.loadAsync("/assets/moon.jpg"),
+      loadGltf("/assets/explorer-v4.glb", "/assets/explorer-v3.glb"),
+      loadGltf("/assets/beacon.glb"),
+      loadGltf("/assets/observatory.glb"),
+      loadGltf("/assets/models/hoverboard/scene.gltf", "/assets/hoverboard.glb"),
+      loadGltf("/assets/kinetic-rifle.glb"),
+      loadGltf("/assets/models/dx5-mobility-rifle/scene.gltf", "/assets/echo-grapple.glb"),
+      loadGltf("/assets/survey-camera.glb"),
+      loadGltf("/assets/obelisk.glb"),
     ]);
     this.astronaut = explorer.scene;
     this.astronautAnimations = explorer.animations;
     weatherMaterials(this.astronaut);
-    this.hoverboardAsset = hoverboardGltf.scene;
-    this.rifleAsset = rifleGltf.scene;
-    this.grappleAsset = grappleGltf.scene;
-    this.cameraAsset = cameraGltf.scene;
+    this.hoverboardAsset = equipmentModel(hoverboardGltf.scene, 1.3, 0);
+    this.rifleAsset = equipmentModel(rifleGltf.scene, 0.95, 0);
+    this.brightenRifle(this.rifleAsset);
+    this.grappleAsset = equipmentModel(grappleGltf.scene, 0.55, 0);
+    this.cameraAsset = equipmentModel(cameraGltf.scene, 0.35, 0);
+    this.setupFirstPersonHands();
     this.obeliskAsset = obeliskGltf.scene;
 
     for (const m of [
@@ -682,54 +737,24 @@ export class GameView {
       .loadAsync("/assets/models/hmg-379/scene.gltf")
       .then((hmgGltf) => {
         if (hmgGltf && hmgGltf.scene) {
+          this.interplanetary.downloadedAssets.set("hmg-379", hmgGltf.scene);
           weatherMaterials(hmgGltf.scene);
+          this.brightenRifle(hmgGltf.scene);
           this.rifleAsset = hmgGltf.scene;
-          if (this.fpRifle) {
-            this.toolModel.remove(this.fpRifle);
-          }
-          this.fpRifle = hmgGltf.scene.clone(true);
-          const box = new THREE.Box3().setFromObject(this.fpRifle);
-          const size = new THREE.Vector3();
-          box.getSize(size);
-          const maxDim = Math.max(size.x, size.y, size.z);
-          if (maxDim > 0.01) {
-            this.fpRifle.scale.setScalar(0.82 / maxDim);
-          }
-          this.fpRifle.position.set(0.18, -0.22, -0.42);
-          this.fpRifle.rotation.set(0.04, Math.PI, 0);
-          this.fpRifle.visible = this.activeWeapon === "rifle";
-          this.toolModel.add(this.fpRifle);
+          this.fpRifle?.removeFromParent();
+          this.fpRifle = this.mountFirstPerson(this.rifleAsset, "rifle");
+          for (const avatar of this.avatars.values()) avatar.userData.equipmentDirty = true;
         }
       })
       .catch(() => {});
     if (this.rifleAsset) {
-      this.fpRifle = this.rifleAsset.clone(true);
-      const box = new THREE.Box3().setFromObject(this.fpRifle);
-      const size = new THREE.Vector3();
-      box.getSize(size);
-      const maxDim = Math.max(size.x, size.y, size.z);
-      if (maxDim > 0.01) {
-        this.fpRifle.scale.setScalar(0.82 / maxDim);
-      }
-      this.fpRifle.position.set(0.18, -0.22, -0.42);
-      this.fpRifle.rotation.set(0.04, Math.PI, 0);
-      this.toolModel.add(this.fpRifle);
+      this.fpRifle = this.mountFirstPerson(this.rifleAsset, "rifle");
     }
     if (this.grappleAsset) {
-      this.fpGrapple = this.grappleAsset.clone(true);
-      this.fpGrapple.scale.setScalar(0.75);
-      this.fpGrapple.position.set(-0.20, -0.22, -0.42);
-      this.fpGrapple.rotation.set(0.05, Math.PI, 0);
-      this.fpGrapple.visible = false;
-      this.toolModel.add(this.fpGrapple);
+      this.fpGrapple = this.mountFirstPerson(this.grappleAsset, "grapple", this.fpLeftHand);
     }
     if (this.cameraAsset) {
-      this.fpCamera = this.cameraAsset.clone(true);
-      this.fpCamera.scale.setScalar(1.1);
-      this.fpCamera.position.set(0, -0.16, -0.36);
-      this.fpCamera.rotation.set(0, 0, 0);
-      this.fpCamera.visible = false;
-      this.toolModel.add(this.fpCamera);
+      this.fpCamera = this.mountFirstPerson(this.cameraAsset, "camera");
     }
     this.camera.add(this.toolModel);
     this.toolModel.visible = false;
@@ -790,23 +815,6 @@ export class GameView {
         this.scene.add(arch);
       }
     });
-    earth.colorSpace = moon.colorSpace = THREE.SRGBColorSpace;
-    const planetMat = (map: THREE.Texture) =>
-      new THREE.ShaderMaterial({
-        uniforms: { map: { value: map } },
-        vertexShader: vertex,
-        fragmentShader: `uniform sampler2D map;varying vec2 vUv;varying vec3 vNormal;void main(){vec3 c=texture2D(map,vUv).rgb;float d=dot(normalize(vNormal),normalize(vec3(.2,.35,.85)));float light=smoothstep(-.12,.75,d);c*=.025+light*.97;gl_FragColor=vec4(c,1.);}`,
-      });
-    const e = new THREE.Mesh(
-      new THREE.SphereGeometry(890, 96, 64),
-      planetMat(earth),
-    );
-    e.rotation.y = -0.6;
-    this.earth.add(e);
-    this.atmosphere(this.earth, 890, 0x73bfff, 0.78);
-    this.moon.add(
-      new THREE.Mesh(new THREE.SphereGeometry(490, 64, 48), planetMat(moon)),
-    );
     this.ready = true;
     this.canvas.dataset.assetsLoaded = "4";
     void this.renderer.compileAsync(this.scene, this.camera).catch(() => {});
@@ -936,16 +944,21 @@ export class GameView {
   ) {
     this.adventure.update(s, me, dt, t);
     this.interplanetary.step(dt, me || { x: 0, y: 0, z: 0 });
+    this.interplanetary.setShipState(s?.adventure.ship || null);
     this.toolModel.visible = !!me && !this.thirdPerson && me.seat < 0;
+    this.rifleFill.visible = this.toolModel.visible && this.activeWeapon === "rifle";
+    if (this.fpHandRig) this.fpHandRig.visible = this.toolModel.visible;
+    const leftViewArm = this.fpHandRig?.getObjectByName("left_view_arm");
+    if (leftViewArm) leftViewArm.visible = this.toolModel.visible && this.activeWeapon !== "rifle";
     if (me) {
       if (this.weaponSwitchTime > 0) this.weaponSwitchTime -= dt;
       const switchDrop = Math.sin(Math.max(0, this.weaponSwitchTime) / 0.25 * Math.PI) * 0.14;
       const recoilKick = Math.max(0, me.toolCooldown - 0.12) * 0.22;
       this.toolModel.position.y =
-        -0.3 -
+        0 -
         switchDrop +
         Math.sin(t * 7) * Math.min(0.012, Math.hypot(me.vx, me.vz) * 0.001);
-      this.toolModel.position.z = -0.58 + recoilKick;
+      this.toolModel.position.z = recoilKick;
 
       if (this.fpRifle) this.fpRifle.visible = this.activeWeapon === "rifle";
       if (this.fpGrapple) this.fpGrapple.visible = this.activeWeapon === "grapple";
@@ -972,16 +985,17 @@ export class GameView {
       }
       this.camera.fov = THREE.MathUtils.damp(this.camera.fov, fov, 10, dt);
       this.camera.updateProjectionMatrix();
-      const target = new THREE.Vector3(me.x, me.y + 0.9, me.z),
-        rotation = new THREE.Euler(me.pitch, me.yaw, 0, "YXZ");
-      this.camera.rotation.copy(rotation);
+      const target = eyePosition(me), up = playerUp(me);
+      const orientation = viewOrientation(me);
+      this.camera.up.copy(up);
+      this.camera.quaternion.copy(orientation);
       this.cameraObstructed = false;
       if (this.thirdPerson) {
         const offset = new THREE.Vector3(
             0,
             me.seat >= 0 ? 6 : 0,
             me.seat >= 0 ? 23 : 8,
-          ).applyEuler(rotation),
+          ).applyQuaternion(orientation),
           desired = target.clone().add(offset);
         let range = offset.length();
         if (physics)
@@ -989,7 +1003,7 @@ export class GameView {
         // Check the complete camera segment against terrain, including its safety margin.
         for (let f = 0.08; f <= 1; f += 0.035) {
           const q = target.clone().addScaledVector(offset, f);
-          if (q.y < groundAt(q.x, q.z) + 0.55) {
+          if (!me.planet && q.y < groundAt(q.x, q.z) + 0.55) {
             range = Math.min(range, offset.length() * Math.max(0.06, f - 0.04));
             break;
           }
@@ -1010,12 +1024,14 @@ export class GameView {
           );
         }
       }
+      if (this.cameraOverride) {
+        this.camera.position.copy(this.cameraOverride.position);
+        this.camera.lookAt(this.cameraOverride.lookAt);
+      }
       this.shake *= Math.exp(-dt * 12);
       if (playing && this.effects > 0) {
-        this.camera.position.y +=
-          Math.sin(t * 48) * this.shake * this.effects * 0.09;
-        this.camera.rotation.z =
-          Math.sin(t * 33) * this.shake * this.effects * 0.003;
+        this.camera.position.addScaledVector(up, Math.sin(t * 48) * this.shake * this.effects * 0.09);
+        this.camera.rotateZ(Math.sin(t * 33) * this.shake * this.effects * 0.003);
       }
       if (me.crystals > this.lastCollected) {
         this.sound("pickup", 1 + Math.min(me.combo, 8) * 0.09);
@@ -1089,13 +1105,6 @@ export class GameView {
     this.skyCamera.fov = this.camera.fov;
     this.skyCamera.aspect = this.camera.aspect;
     this.skyCamera.updateProjectionMatrix();
-    const earthAge = s ? (s.earthAt < 0 ? 0 : s.time - s.earthAt) : 55;
-    this.earth.position.y = -420 + 2320 * smooth(earthAge / 45);
-    this.earth.rotation.y = worldTime * 0.002;
-    const moonAge = s && s.completedAt >= 0 ? s.time - s.completedAt : 0;
-    this.moon.position.y = -600 + 2600 * smooth(moonAge / 40);
-    this.moon.rotation.y = worldTime * 0.001;
-    this.giant.rotation.y = Math.sin(worldTime * 0.001) * 0.05;
     this.musicLayers.forEach((a, i) => {
       const goal =
         i === 0
@@ -1200,7 +1209,7 @@ export class GameView {
         const board = this.hoverboardAsset
           ? this.hoverboardAsset.clone(true)
           : new THREE.Group();
-        board.position.set(0, 0.015, 0.0);
+        board.position.set(0, -0.38, 0.0);
         board.name = "hoverboard";
         board.visible = false;
         a.add(board);
@@ -1223,14 +1232,15 @@ export class GameView {
         if (this.rifleAsset) {
           const heldRifle = this.rifleAsset.clone(true);
           heldRifle.name = "heldRifle";
-          heldRifle.scale.setScalar(0.52);
-          heldRifle.position.set(0.02, -0.05, 0.08);
+          // Accurately calibrated weapon scale and grip socket offset aligned with right hand palms
+          heldRifle.scale.setScalar(17.2);
+          heldRifle.position.set(0.015, -0.045, 0.095);
           heldRifle.rotation.set(-Math.PI / 2, 0, Math.PI);
           if (rightHand) rightHand.add(heldRifle);
 
           const backRifle = this.rifleAsset.clone(true);
           backRifle.name = "backRifle";
-          backRifle.scale.setScalar(0.52);
+          backRifle.scale.setScalar(17.2);
           backRifle.position.set(0.12, 0.15, -0.22);
           backRifle.rotation.set(0.2, 0.1, 2.35);
           backRifle.visible = false;
@@ -1240,23 +1250,24 @@ export class GameView {
         if (this.grappleAsset) {
           const grapple = this.grappleAsset.clone(true);
           grapple.name = "grappleLauncher";
-          grapple.scale.setScalar(0.65);
-          grapple.position.set(0.02, 0.12, 0.02);
-          grapple.rotation.set(0, 0, 0);
+          // Fixed forearm bracket socket aligned to outer forearm plane, eliminating forearm clipping
+          grapple.scale.setScalar(0.68);
+          grapple.position.set(0.025, 0.16, 0.045);
+          grapple.rotation.set(0.12, 0, -0.08);
           if (leftForeArm) leftForeArm.add(grapple);
         }
 
         if (this.cameraAsset) {
           const hipCamera = this.cameraAsset.clone(true);
           hipCamera.name = "hipCamera";
-          hipCamera.scale.setScalar(1.0);
+          hipCamera.scale.setScalar(100);
           hipCamera.position.set(0.18, -0.06, 0.08);
           hipCamera.rotation.set(0.2, -0.3, 0.1);
           if (hips) hips.add(hipCamera);
 
           const heldCamera = this.cameraAsset.clone(true);
           heldCamera.name = "heldCamera";
-          heldCamera.scale.setScalar(1.0);
+          heldCamera.scale.setScalar(100);
           heldCamera.position.set(0.05, -0.04, 0.08);
           heldCamera.rotation.set(-Math.PI / 2, 0, 0);
           heldCamera.visible = false;
@@ -1302,19 +1313,23 @@ export class GameView {
       }
       a.visible =
         p.seat < 0 && !(own && (!this.thirdPerson || this.cameraRange < 0.4));
-      if (own) a.position.set(p.x, p.y - 0.82, p.z);
+      if (p.planet) {
+        a.position.copy(v3(p)).addScaledVector(playerUp(p), -FOOT_OFFSET);
+      } else if (own) a.position.set(p.x, p.y - 0.82, p.z);
       else
         a.position.lerp(
           new THREE.Vector3(p.x, p.y - 0.82, p.z),
           1 - Math.exp(-dt * 14),
         );
       const targetYaw = p.yaw + Math.PI;
-      a.rotation.y +=
-        Math.atan2(
-          Math.sin(targetYaw - a.rotation.y),
-          Math.cos(targetYaw - a.rotation.y),
-        ) *
-        (1 - Math.exp(-dt * 12));
+      if (!p.planet) {
+        a.rotation.y +=
+          Math.atan2(
+            Math.sin(targetYaw - a.rotation.y),
+            Math.cos(targetYaw - a.rotation.y),
+          ) *
+          (1 - Math.exp(-dt * 12));
+      }
       const speed = Math.hypot(p.vx, p.vz);
       const targetPitch = p.skate
         ? 0
@@ -1341,6 +1356,11 @@ export class GameView {
           Math.max(-0.25, Math.min(0.25, -turnDelta * 0.35)),
           8,
           dt,
+        );
+      }
+      if (p.planet) {
+        a.quaternion.copy(surfaceOrientation(p)).multiply(
+          new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), targetYaw),
         );
       }
 
@@ -1472,13 +1492,13 @@ export class GameView {
             board.rotation.x = THREE.MathUtils.damp(board.rotation.x, popPitch, 12, dt);
             board.rotation.y = THREE.MathUtils.damp(board.rotation.y, 0, 10, dt);
             // Downward clearance: board drops 12-22cm below feet during the flip to guarantee zero body clipping
-            const clearance = -0.10 - Math.sin(progress * Math.PI) * 0.12;
+            const clearance = -0.44 - Math.sin(progress * Math.PI) * 0.12;
             board.position.set(0, clearance, 0.0);
           } else {
             board.rotation.x = THREE.MathUtils.damp(board.rotation.x, 0, 12, dt);
             board.rotation.z = THREE.MathUtils.damp(board.rotation.z, 0, 12, dt);
             board.rotation.y = THREE.MathUtils.damp(board.rotation.y, 0, 12, dt);
-            board.position.set(0, 0.015 + Math.sin(t * 8) * 0.008, 0.0);
+            board.position.set(0, -0.38 + Math.sin(t * 8) * 0.008, 0.0);
           }
         }
       }

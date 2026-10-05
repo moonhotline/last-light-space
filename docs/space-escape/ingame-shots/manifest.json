@@ -1,0 +1,86 @@
+[
+  {
+    "id": "01_blerk_guide",
+    "title": "01 / 友方外星向导 Blerk The Alien",
+    "desc": "在异星基地地表与宇航员并肩站立，背负科技背包与外星装备",
+    "filename": "01_blerk_guide.png"
+  },
+  {
+    "id": "02_hmg379_fp",
+    "title": "02 / HMG-379 重型电磁突击机枪 (第一人称战术持握)",
+    "desc": "高精金属导轨、光学瞄准镜与能量导管第一人称实机持枪视界",
+    "filename": "02_hmg379_fp.png"
+  },
+  {
+    "id": "03_hmg379_tp",
+    "title": "03 / HMG-379 重型电磁突击机枪 (第三人称实机瞄准姿态)",
+    "desc": "宇航员双手战术抵肩持枪，重型机枪在阳光与星光照耀下的真实金属反射",
+    "filename": "03_hmg379_tp.png"
+  },
+  {
+    "id": "04_alien1_stalker",
+    "title": "04 / 敌对生物 Another Alien 敏捷突进异兽",
+    "desc": "潜伏在异星基地的敏捷突进异兽，张开双翼呈狩猎攻击姿态",
+    "filename": "04_alien1_stalker.png"
+  },
+  {
+    "id": "05_alien2_reptillian",
+    "title": "05 / 敌对生物 Reptillian Alien 重装蜥蜴异兽",
+    "desc": "21万三角面高精重装外星守卫，驻守在异星地表防御圈",
+    "filename": "05_alien2_reptillian.png"
+  },
+  {
+    "id": "06_mineral_specimens",
+    "title": "06 / 自然博物馆地质矿石标本群落 Mineral Samples",
+    "desc": "斯洛文尼亚自然博物馆高精矿石标本群落，真实地质纹理结晶簇",
+    "filename": "06_mineral_specimens.png"
+  },
+  {
+    "id": "07_spaceship_corridor",
+    "title": "07 / 飞船内部战术走廊 Spaceship Corridor",
+    "desc": "按 F 键切入飞船内部漫步，全景抗辐射观景舷窗与发光能量舱道",
+    "filename": "07_spaceship_corridor.png"
+  },
+  {
+    "id": "08_light_fighter_flight",
+    "title": "08 / 高机动穿梭战机 Light Fighter Spaceship",
+    "desc": "星际战机巡航于异星峡谷天际，流线型机翼与离子主推力引擎",
+    "filename": "08_light_fighter_flight.png"
+  },
+  {
+    "id": "09_intergalactic_ship",
+    "title": "09 / 跃迁旗舰 Intergalactic Spaceship 重型母舰",
+    "desc": "跃迁级重型星际探索母舰，厚重装甲模块与多重星舰推进喷口",
+    "filename": "09_intergalactic_ship.png"
+  },
+  {
+    "id": "10_solar_system_orbits",
+    "title": "10 / 太阳系星际航线网络 Simple Solar System",
+    "desc": "太阳系八大行星运转轨道系统，日心发光烈焰与多层公转环线",
+    "filename": "10_solar_system_orbits.png"
+  },
+  {
+    "id": "11_earth_highres",
+    "title": "11 / 高精 PBR 真实母星地球 Earth",
+    "desc": "替换原简易母星，真实大洋反光、大气蓝晕透镜与云层立体投影",
+    "filename": "11_earth_highres.png"
+  },
+  {
+    "id": "12_mercury_planet",
+    "title": "12 / 替换月球天体 Mercury Planet 水星陨石坑球体",
+    "desc": "替换原月球，密集撞击陨石坑高精表面与心向引力环绕球体",
+    "filename": "12_mercury_planet.png"
+  },
+  {
+    "id": "13_stylized_planet",
+    "title": "13 / Stylized Planet 生机新星",
+    "desc": "绿意生态独立星球，哥伦布“星球是圆的”心向引力环球生态圈",
+    "filename": "13_stylized_planet.png"
+  },
+  {
+    "id": "14_cave_and_sky",
+    "title": "14 / 异星洞窟 Cave on Alien Planet & 极光天气球 Fantasy Sky",
+    "desc": "地下全景洞窟岩壁与梦幻极光动态天气球，全景双面天幕深度包围",
+    "filename": "14_cave_and_sky.png"
+  }
+]

@@ -8,6 +8,7 @@ import {
 } from "./adventure";
 import { type ItemId } from "./adventure-data";
 import { MovementWorld, fuelCapacity } from "./physics";
+import { playerUp } from "./surface";
 import {
   SPAWN,
   BEACON_SITES,
@@ -71,6 +72,8 @@ export class Simulation {
     )!;
     const p: Player = {
       id,
+      planet: null,
+      surfaceRotation: { x: 0, y: 0, z: 0, w: 1 },
       name:
         name
           .replace(/[<>\x00-\x1f]/g, "")
@@ -169,6 +172,8 @@ export class Simulation {
     p.invulnerable = 4;
     const b = p.checkpoint ? this.s.beacons[p.checkpoint - 1] : SPAWN;
     Object.assign(p, {
+      planet: null,
+      surfaceRotation: { x: 0, y: 0, z: 0, w: 1 },
       x: b.x,
       y: groundAt(b.x, b.z + 8) + 0.85,
       z: b.z + 8,
@@ -194,7 +199,12 @@ export class Simulation {
     }
     if (command === "close-lore") p.lore = -1;
     if (command === "ollie") {
-      p.vy = Math.max(p.vy + 8.5, 14);
+      const up = playerUp(p);
+      const radial = p.vx * up.x + p.vy * up.y + p.vz * up.z;
+      const impulse = Math.max(radial + 8.5, 14) - radial;
+      p.vx += up.x * impulse;
+      p.vy += up.y * impulse;
+      p.vz += up.z * impulse;
       p.grounded = false;
       p.ollieUntil = this.s.time + 0.8;
       p.trickScore = (p.trickScore || 0) + 300;
@@ -238,7 +248,7 @@ export class Simulation {
     for (const p of s.players) {
       const i = inputs.get(p.id)!;
       if (p.seat < 0) this.physics.move(p, i);
-      interactAdventure(this, p, i);
+      if (p.planet === null) interactAdventure(this, p, i);
       if (i.fire) tool(this, p);
       if (i.interact && p.seat < 0) interactions.add(p.id);
     }
@@ -246,7 +256,7 @@ export class Simulation {
     tickDrones(this);
     for (const p of s.players) {
       if (p.seat >= 0) continue;
-      if (p.y < groundAt(p.x, p.z) - 8 || p.y < -100) this.respawn(p);
+      if (!p.planet && (p.y < groundAt(p.x, p.z) - 8 || p.y < -100)) this.respawn(p);
       if (p.comboUntil < s.time) p.combo = 0;
       if (s.earthAt < 0 && p.z < 260) {
         s.earthAt = s.time;

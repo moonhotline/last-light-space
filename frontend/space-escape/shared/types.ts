@@ -19,6 +19,8 @@ export interface Input {
   skate?: boolean;
 }
 export interface Player extends Vec {
+  planet: string | null;
+  surfaceRotation: { x: number; y: number; z: number; w: number };
   id: string;
   name: string;
   color: number;

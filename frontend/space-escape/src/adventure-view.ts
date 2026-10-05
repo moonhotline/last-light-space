@@ -80,11 +80,23 @@ export class AdventureView {
   ) {}
   async load() {
     const loader = new GLTFLoader();
+    const load = async (url: string) => {
+      let error: unknown;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          return await loader.loadAsync(url);
+        } catch (e) {
+          error = e;
+          await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+        }
+      }
+      throw error;
+    };
     const [ship, lab, drone, bullet] = await Promise.all([
-      loader.loadAsync("/assets/skiff.glb"),
-      loader.loadAsync("/assets/dawn-lab.glb"),
-      loader.loadAsync("/assets/drone.glb"),
-      loader.loadAsync("/assets/kinetic-bullet.glb"),
+      load("/assets/skiff.glb"),
+      load("/assets/dawn-lab.glb"),
+      load("/assets/drone.glb"),
+      load("/assets/kinetic-bullet.glb"),
     ]);
     this.bulletModel = bullet.scene;
     this.bulletModel.traverse((o) => {

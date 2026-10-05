@@ -1,0 +1,11 @@
+Model Information:
+* title:	Grapple Gun Low Poly / Claw
+* source:	https://sketchfab.com/3d-models/grapple-gun-low-poly-claw-24597965a6bd40da9e6c5f81a3bbfe9d
+* author:	mdsz13 (https://sketchfab.com/shaz13)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Grapple Gun Low Poly / Claw" (https://sketchfab.com/3d-models/grapple-gun-low-poly-claw-24597965a6bd40da9e6c5f81a3bbfe9d) by mdsz13 (https://sketchfab.com/shaz13) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

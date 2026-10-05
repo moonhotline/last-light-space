@@ -10,7 +10,7 @@ const health = new URL('/parties/main/_health', endpoint);
 health.protocol = 'https:';
 const response = await fetch(health, { signal: AbortSignal.timeout(15000) });
 const status = await response.json();
-if (!response.ok || status.game !== 'last-light' || status.transport !== 'partykit')
+if (!response.ok || status.game !== 'last-light' || !['partykit', 'partyserver'].includes(status.transport))
   throw new Error('The public room service did not pass its health check.');
 
 const gameRoot = new URL('../', import.meta.url);
@@ -24,6 +24,7 @@ await writeFile(new URL('static/connection.json', output), JSON.stringify({ url:
 await writeFile(new URL('config.json', output), JSON.stringify({
   version: 3,
   routes: [
+    { src: '/assets/(.*)', headers: { 'Cache-Control': 'public, max-age=3600, must-revalidate' }, continue: true },
     { src: '/connection.json', headers: { 'Cache-Control': 'no-store' }, continue: true },
     { handle: 'filesystem' },
   ],

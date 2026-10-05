@@ -1,5 +1,7 @@
 import { LAB, LAB_BOXES } from "./adventure-data";
 import RAPIER from "@dimforge/rapier3d-compat";
+import { Quaternion, Vector3 } from "three";
+import { FOOT_OFFSET, surfaceOrientation, eyePosition, viewDirection } from "./surface";
 import {
   terrainMesh,
   groundAt,
@@ -10,6 +12,11 @@ import {
   distance,
   type Vec,
 } from "./map";
+import {
+  projectToSphere,
+  sphericalGravity,
+  SOLAR_SYSTEM,
+} from "./celestial";
 import { DT, type Input, type Player } from "./types";
 let ready: Promise<void> | undefined;
 export const initPhysics = (wasmModule?: unknown) =>
@@ -128,9 +135,97 @@ export class MovementWorld {
     b?.setNextKinematicTranslation(p);
     this.world.propagateModifiedBodyPositionsToColliders();
   }
+  private moveOnSphere(p: Player, i: Input) {
+    const planet = SOLAR_SYSTEM[p.planet!];
+    const body = this.bodies.get(p.id)!;
+    const position = new Vector3(p.x, p.y, p.z);
+    const center = new Vector3().copy(planet.position);
+    const up = position.clone().sub(center).normalize();
+    const frame = surfaceOrientation(p);
+    const velocity = new Vector3(p.vx, p.vy, p.vz);
+    let radial = velocity.dot(up);
+    const tangent = velocity.addScaledVector(up, -radial);
+    const wasJumpHeld = p.jumpHeld;
+    const wasGrounded = p.grounded;
+    p.dashCooldown = Math.max(0, p.dashCooldown - DT);
+    p.dashTime = Math.max(0, p.dashTime - DT);
+    if (i.dash && !p.dashHeld && p.dashCooldown === 0 && p.fuel >= 16) {
+      p.dashTime = 0.3;
+      p.dashCooldown = 1.5;
+      p.fuel -= 16;
+    }
+    p.dashHeld = i.dash;
+    p.skate = !!i.skate;
+    const speed = p.dashTime > 0 ? 43 : p.skate ? (i.sprint ? 32 : 23) : i.sprint ? 23 : 15;
+    const target = new Vector3(
+      Math.cos(i.yaw) * i.side - Math.sin(i.yaw) * i.forward,
+      0,
+      -Math.sin(i.yaw) * i.side - Math.cos(i.yaw) * i.forward,
+    ).divideScalar(Math.max(1, Math.hypot(i.forward, i.side))).applyQuaternion(frame).multiplyScalar(speed);
+    tangent.lerp(target, 1 - Math.exp(-(wasGrounded ? 10 : 2) * DT));
+    p.jumpHeld = i.jump;
+    p.jetting = i.jet && p.fuel > 0;
+    const gravity = new Vector3().copy(sphericalGravity(position, planet).gravityVec);
+    radial = Math.max(-40, radial + gravity.dot(up) * DT);
+    if (i.jump && !wasJumpHeld && wasGrounded) radial = 12;
+    if (p.jetting) {
+      radial = Math.min(p.level >= 1 ? 24 : 19, radial + (p.level >= 1 ? 25 : 21) * DT);
+      p.fuel = Math.max(0, p.fuel - DT * 20);
+    } else if (p.grounded) {
+      p.fuel = Math.min(fuelCapacity(p.level), p.fuel + DT * 24);
+    }
+    p.grapple = null;
+    p.grappleHeld = i.grapple;
+    this.controller.setUp(up);
+    body.body.setRotation(frame, true);
+    this.world.propagateModifiedBodyPositionsToColliders();
+    const movement = tangent.clone().addScaledVector(up, radial).multiplyScalar(DT);
+    this.controller.computeColliderMovement(body.collider, movement, RAPIER.QueryFilterFlags.EXCLUDE_KINEMATIC);
+    const next = position.clone().add(this.controller.computedMovement());
+    const landed = radial <= 0 && next.distanceTo(center) <= planet.radius + FOOT_OFFSET + 0.08;
+    const resolved = landed ? new Vector3().copy(projectToSphere(next, planet, FOOT_OFFSET)) : next;
+    if (landed && !p.grounded && radial < -2) {
+      p.landing = -radial;
+      p.landingId++;
+    }
+    p.x = resolved.x;
+    p.y = resolved.y;
+    p.z = resolved.z;
+    const nextUp = resolved.clone().sub(center).normalize();
+    const transport = new Quaternion().setFromUnitVectors(up, nextUp);
+    const nextVelocity = tangent.applyQuaternion(transport).addScaledVector(nextUp, landed ? 0 : radial);
+    p.vx = nextVelocity.x;
+    p.vy = nextVelocity.y;
+    p.vz = nextVelocity.z;
+    p.grounded = landed;
+    p.travel += resolved.distanceTo(position);
+    const q = transport.multiply(frame).normalize();
+    p.surfaceRotation = { x: q.x, y: q.y, z: q.z, w: q.w };
+    p.yaw = i.yaw;
+    p.pitch = i.pitch;
+    body.body.setNextKinematicRotation(q);
+    body.body.setNextKinematicTranslation(p);
+  }
   move(p: Player, i: Input) {
     const body = this.bodies.get(p.id);
     if (!body) return;
+    const nearPlanet = Object.values(SOLAR_SYSTEM).find(planet =>
+      Math.hypot(p.x - planet.position.x, p.y - planet.position.y, p.z - planet.position.z) < planet.radius + 60);
+    if (!p.planet && p.y > groundAt(p.x, p.z) + 80 && (p.jetting || nearPlanet)) {
+      const nearby = Object.values(SOLAR_SYSTEM).find(planet =>
+        Math.hypot(p.x - planet.position.x, p.y - planet.position.y, p.z - planet.position.z) < planet.radius + 260);
+      if (nearby) {
+        p.planet = nearby.id;
+        const q = surfaceOrientation(p);
+        p.surfaceRotation = { x: q.x, y: q.y, z: q.z, w: q.w };
+      }
+    }
+    if (p.planet && SOLAR_SYSTEM[p.planet]) {
+      this.moveOnSphere(p, i);
+      return;
+    }
+    this.controller.setUp({ x: 0, y: 1, z: 0 });
+    body.body.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
     if (i.grapple && !p.grappleHeld) {
       if (p.grapple) p.grapple = null;
       else {
@@ -236,12 +331,8 @@ export class MovementWorld {
     this.world.step();
   }
   aim(p: Player, range: number): Vec | null {
-    const origin = { x: p.x, y: p.y + 0.9, z: p.z };
-    const direction = {
-      x: -Math.sin(p.yaw) * Math.cos(p.pitch),
-      y: Math.sin(p.pitch),
-      z: -Math.cos(p.yaw) * Math.cos(p.pitch),
-    };
+    const origin = eyePosition(p);
+    const direction = viewDirection(p);
     const hit = this.world.castRay(
       new RAPIER.Ray(origin, direction),
       range,

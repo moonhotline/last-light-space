@@ -17,6 +17,7 @@ import {
   type ItemId,
 } from "./adventure-data";
 import { groundAt, distance3, distance, HALF, clamp, type Vec } from "./map";
+import { eyePosition, viewDirection } from "./surface";
 import type { Simulation } from "./simulation";
 export function createAdventure(): Adventure {
   return {
@@ -73,18 +74,17 @@ export function adventurePlayer() {
     invulnerable: 0,
   };
 }
-const eye = (p: Player): Vec => ({ x: p.x, y: p.y + 0.9, z: p.z });
+const eye = (p: Player): Vec => eyePosition(p);
 const towards = (p: Player, target: Vec) => {
   const e = eye(p),
     x = target.x - e.x,
     y = target.y - e.y,
     z = target.z - e.z,
     d = Math.hypot(x, y, z);
+  const aim = viewDirection(p);
   return (
     d < 1 ||
-    (x * -Math.sin(p.yaw) * Math.cos(p.pitch) +
-      y * Math.sin(p.pitch) +
-      z * -Math.cos(p.yaw) * Math.cos(p.pitch)) /
+    (x * aim.x + y * aim.y + z * aim.z) /
       d >
       0.965
   );
@@ -97,10 +97,11 @@ export function tool(sim: Simulation, p: Player) {
   const a = sim.s.adventure,
     e = eye(p);
   const wall = sim.physics.aim(p, 65);
+  const direction = viewDirection(p);
   p.shotEnd = wall || {
-    x: e.x - Math.sin(p.yaw) * Math.cos(p.pitch) * 65,
-    y: e.y + Math.sin(p.pitch) * 65,
-    z: e.z - Math.cos(p.yaw) * Math.cos(p.pitch) * 65,
+    x: e.x + direction.x * 65,
+    y: e.y + direction.y * 65,
+    z: e.z + direction.z * 65,
   };
   const targets = [
     ...a.drones

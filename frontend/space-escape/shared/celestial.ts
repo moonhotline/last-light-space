@@ -32,11 +32,11 @@ export const SOLAR_SYSTEM: Record<string, CelestialBody> = {
     radius: 420,
     atmosphereRadius: 650,
     gravity: 7.5,
-    position: { x: 0, y: 0, z: 0 },
+    position: { x: 0, y: 650, z: 340 },
     color: 0x243b55,
     atmosphereColor: 0x38bdf8,
     unlocked: true,
-    landingSite: { x: -11, y: 425, z: 347 },
+    landingSite: { x: 0, y: 1071, z: 340 },
   },
   mercury: {
     id: "mercury",
