@@ -254,8 +254,8 @@ export class GameView {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
-    this.scene.fog = new THREE.FogExp2(0x667f91, 0.00052);
+    // Ultra-subtle deep cosmic dust haze instead of thick blue fog overlay
+    this.scene.fog = new THREE.FogExp2(0x0c141d, 0.00004);
     this.scene.add(new THREE.HemisphereLight(0x8db4d8, 0x222f3a, 1.8));
     this.sun.position.set(-240, 190, -140);
     this.sun.castShadow = true;
@@ -676,9 +676,9 @@ export class GameView {
       loadGltf("/assets/explorer-v4.glb", "/assets/explorer-v3.glb"),
       loadGltf("/assets/beacon.glb"),
       loadGltf("/assets/observatory.glb"),
-      loadGltf("/assets/models/hoverboard/scene.gltf", "/assets/hoverboard.glb"),
+      loadGltf("/assets/hoverboard.glb"),
       loadGltf("/assets/kinetic-rifle.glb"),
-      loadGltf("/assets/models/dx5-mobility-rifle/scene.gltf", "/assets/echo-grapple.glb"),
+      loadGltf("/assets/echo-grapple.glb"),
       loadGltf("/assets/survey-camera.glb"),
       loadGltf("/assets/obelisk.glb"),
     ]);
@@ -743,6 +743,34 @@ export class GameView {
           this.rifleAsset = hmgGltf.scene;
           this.fpRifle?.removeFromParent();
           this.fpRifle = this.mountFirstPerson(this.rifleAsset, "rifle");
+          for (const avatar of this.avatars.values()) avatar.userData.equipmentDirty = true;
+        }
+      })
+      .catch(() => {});
+
+    // Background upgrade to high-fidelity hoverboard model
+    void loader
+      .loadAsync("/assets/models/hoverboard/scene.gltf")
+      .then((hoverGltf) => {
+        if (hoverGltf && hoverGltf.scene) {
+          this.interplanetary.downloadedAssets.set("hoverboard", hoverGltf.scene);
+          weatherMaterials(hoverGltf.scene);
+          this.hoverboardAsset = equipmentModel(hoverGltf.scene, 1.3, 0);
+          for (const avatar of this.avatars.values()) avatar.userData.equipmentDirty = true;
+        }
+      })
+      .catch(() => {});
+
+    // Background upgrade to high-fidelity DX5 mobility rifle grapple model
+    void loader
+      .loadAsync("/assets/models/dx5-mobility-rifle/scene.gltf")
+      .then((dx5Gltf) => {
+        if (dx5Gltf && dx5Gltf.scene) {
+          this.interplanetary.downloadedAssets.set("dx5-mobility-rifle", dx5Gltf.scene);
+          weatherMaterials(dx5Gltf.scene);
+          this.grappleAsset = equipmentModel(dx5Gltf.scene, 0.55, 0);
+          this.fpGrapple?.removeFromParent();
+          this.fpGrapple = this.mountFirstPerson(this.grappleAsset, "grapple", this.fpLeftHand);
           for (const avatar of this.avatars.values()) avatar.userData.equipmentDirty = true;
         }
       })
