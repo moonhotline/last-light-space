@@ -81,6 +81,50 @@ export class InterplanetarySystem {
   assetLibrary: THREE.Group = new THREE.Group();
   downloadedAssets = new Map<string, THREE.Group>();
   assetErrors: string[] = [];
+  // Category-driven loading state. No button ever triggers a model load:
+  // planets / ships / NPCs load in the background and retry on their own.
+  assetStatus = new Map<string, "pending" | "loaded" | "placeholder" | "failed">();
+  private lastLoader: GLTFLoader | null = null;
+  private retryTimer = 0;
+  private retrying = false;
+  private lastShipPosition: THREE.Vector3 | null = null;
+  private lastShipYaw = 0;
+
+  private makePlaceholder(kind: "ship" | "npc", targetSize: number): THREE.Group {
+    const group = new THREE.Group();
+    group.userData.placeholder = true;
+    if (kind === "npc") {
+      const mesh = new THREE.Mesh(
+        new THREE.CapsuleGeometry(0.45, 1.1, 4, 12),
+        new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.6, emissive: 0x0c4a6e, emissiveIntensity: 0.4 }),
+      );
+      mesh.position.y = 1.1;
+      mesh.castShadow = true;
+      group.add(mesh);
+    } else {
+      const hull = new THREE.Mesh(
+        new THREE.ConeGeometry(0.6, 2.4, 8),
+        new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.4, metalness: 0.6 }),
+      );
+      hull.rotation.x = Math.PI / 2;
+      hull.castShadow = true;
+      const body = new THREE.Mesh(
+        new THREE.BoxGeometry(1.1, 0.5, 2.2),
+        new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.5, metalness: 0.5 }),
+      );
+      group.add(hull, body);
+    }
+    const box = new THREE.Box3().setFromObject(group);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const maxDim = Math.max(size.x, size.y, size.z);
+    if (maxDim > 0.001) group.scale.setScalar(targetSize / maxDim);
+    return group;
+  }
+
+  private replacePlaceholder(oldModel: THREE.Group | undefined, parent: THREE.Object3D) {
+    if (oldModel && oldModel.userData.placeholder) parent.remove(oldModel);
+  }
   guideModel: THREE.Group | null = null;
   guideFollowing = false;
   guideInteractHeld = false;
@@ -322,19 +366,25 @@ export class InterplanetarySystem {
     }
   }
 
-  /** Toggle Spaceship Corridor Interior View */
+  /** Toggle Spaceship Corridor Interior View.
+   * The corridor is a real place anchored to the ship, never a box
+   * teleported onto the camera. Without a known ship position it stays
+   * hidden instead of appearing at the camera. */
   toggleCorridor(enter?: boolean): boolean {
-    this.inCorridor = enter !== undefined ? enter : !this.inCorridor;
-    if (this.inCorridor) {
-      this.corridorGroup.position.copy(this.camera.position);
-      this.corridorGroup.rotation.copy(this.camera.rotation);
-    } else {
-      this.corridorGroup.position.set(0, 0, 0);
-      this.corridorGroup.rotation.set(0, 0, 0);
+    const next = enter !== undefined ? enter : !this.inCorridor;
+    if (!next) {
+      this.inCorridor = false;
+      this.corridorGroup.visible = false;
+      this.flightMode = "surface";
+      return false;
     }
-    this.corridorGroup.visible = this.inCorridor;
-    this.flightMode = this.inCorridor ? "interior" : "surface";
-    return this.inCorridor;
+    if (!this.lastShipPosition) return false;
+    this.inCorridor = true;
+    this.corridorGroup.position.copy(this.lastShipPosition);
+    this.corridorGroup.rotation.set(0, this.lastShipYaw, 0);
+    this.corridorGroup.visible = true;
+    this.flightMode = "interior";
+    return true;
   }
 
   /** Switch between Spaceship models */
@@ -356,6 +406,10 @@ export class InterplanetarySystem {
     return toggled ? this.guideFollowing : null;
   }
   setShipState(ship: { x: number; y: number; z: number; yaw: number; bank: number; seats: string[] } | null) {
+    if (ship) {
+      this.lastShipPosition = new THREE.Vector3(ship.x, ship.y, ship.z);
+      this.lastShipYaw = ship.yaw;
+    }
     for (const [id, model] of this.shipMeshes) {
       model.visible = !!ship && (this.flightMode === "cruise" || ship.seats.some(Boolean)) && id === this.activeShip;
       if (!ship || !model.visible) continue;
@@ -366,6 +420,20 @@ export class InterplanetarySystem {
 
   /** Step solar system rotation & flight physics */
   step(dt: number, shipPos: { x: number; y: number; z: number }) {
+    // Category-driven auto-retry: failed planet / ship / NPC models are
+    // retried in the background on a timer. No button is involved, and a
+    // failed model never leaves its slot empty because placeholders below
+    // already occupy it.
+    if (this.lastLoader && this.assetErrors.length > 0 && !this.retrying) {
+      this.retryTimer += dt;
+      if (this.retryTimer >= 20) {
+        this.retryTimer = 0;
+        this.retrying = true;
+        void this.loadAssets(this.lastLoader).finally(() => {
+          this.retrying = false;
+        });
+      }
+    }
     // Slowly rotate planets along their polar axis
     for (const [id, entry] of this.planets) {
       entry.group.rotation.y += (id === "mercury" ? 0.04 : 0.08) * dt;
@@ -468,20 +536,34 @@ export class InterplanetarySystem {
    * Runs progressively in background so game boot is instantaneous and never blocked.
    */
   async loadAssets(loader: GLTFLoader) {
-    const loadSafe = async (url: string) => {
-      try {
-        return await loader.loadAsync(url);
-      } catch {
-        this.assetErrors.push(url);
-        return null;
+    this.lastLoader = loader;
+    // A fresh pass retries only what is still missing; already-loaded real
+    // models are returned from cache so a retry never duplicates them.
+    const loadSafe = async (url: string, key: string) => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          this.assetStatus.set(key, "pending");
+          return await loader.loadAsync(url);
+        } catch {
+          await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+        }
       }
+      if (!this.assetErrors.includes(url)) this.assetErrors.push(url);
+      this.assetStatus.set(key, "failed");
+      return null;
     };
 
     const loadModel = async (key: string, url: string, targetSize = 1) => {
-      const gltf = await loadSafe(url);
+      const cached = this.downloadedAssets.get(key);
+      if (cached && !cached.userData.placeholder) return cached;
+      const gltf = await loadSafe(url, key);
       if (!gltf) return null;
       const model = normalizeModelContainer(gltf.scene, targetSize);
+      // A real model replaces its placeholder in place; the placeholder
+      // is removed from whichever parent it was shown in.
+      if (cached) cached.removeFromParent();
       this.downloadedAssets.set(key, model);
+      this.assetStatus.set(key, "loaded");
       this.assetLibrary.add(model);
       return model;
     };
@@ -510,21 +592,54 @@ export class InterplanetarySystem {
         this.corridorGroup.add(model);
       }),
       loadModel("fighter", "/assets/models/fighter/scene.gltf", 12).then((model) => {
-        if (!model) return;
+        if (!model) {
+          if (!this.shipMeshes.has("light_fighter")) {
+            const placeholder = this.makePlaceholder("ship", 12);
+            placeholder.position.copy(SOLAR_SYSTEM.kepler.position).add(new THREE.Vector3(0, 520, 0));
+            placeholder.visible = false;
+            this.shipMeshes.set("light_fighter", placeholder);
+            this.systemGroup.add(placeholder);
+            this.assetStatus.set("fighter", "placeholder");
+          }
+          return;
+        }
+        this.replacePlaceholder(this.shipMeshes.get("light_fighter"), this.systemGroup);
         model.position.copy(SOLAR_SYSTEM.kepler.position).add(new THREE.Vector3(0, 520, 0));
         model.visible = false;
         this.shipMeshes.set("light_fighter", model);
         this.systemGroup.add(model);
       }),
       loadModel("intergalactic", "/assets/models/intergalactic/scene.gltf", 34).then((model) => {
-        if (!model) return;
+        if (!model) {
+          if (!this.shipMeshes.has("cruiser")) {
+            const placeholder = this.makePlaceholder("ship", 34);
+            placeholder.position.copy(SOLAR_SYSTEM.kepler.position).add(new THREE.Vector3(0, 520, 0));
+            placeholder.visible = false;
+            this.shipMeshes.set("cruiser", placeholder);
+            this.systemGroup.add(placeholder);
+            this.assetStatus.set("intergalactic", "placeholder");
+          }
+          return;
+        }
+        this.replacePlaceholder(this.shipMeshes.get("cruiser"), this.systemGroup);
         model.position.copy(SOLAR_SYSTEM.kepler.position).add(new THREE.Vector3(0, 520, 0));
         model.visible = false;
         this.shipMeshes.set("cruiser", model);
         this.systemGroup.add(model);
       }),
       loadModel("blerk", "/assets/models/blerk/scene-web.glb", 2.2).then((model) => {
+        if (!model) {
+          if (!this.guideModel) {
+            const placeholder = this.makePlaceholder("npc", 2.2);
+            placeholder.position.set(8, groundAt(8, 335) + 1.1, 335);
+            this.guideModel = placeholder;
+            this.scene.add(placeholder);
+            this.assetStatus.set("blerk", "placeholder");
+          }
+          return;
+        }
         if (model) {
+          this.replacePlaceholder(this.guideModel ?? undefined, this.scene);
           model.position.set(8, groundAt(8, 335) + 1.1, 335);
           this.guideModel = model;
           this.scene.add(model);
@@ -595,16 +710,34 @@ export class InterplanetarySystem {
         }
       }),
       loadModel("alien1", "/assets/models/alien1/scene.gltf", 2).then((model) => {
-        if (model) {
-          model.position.set(165, groundAt(165, -85) + 1, -85);
-          this.scene.add(model);
+        if (!model) {
+          if (!this.downloadedAssets.has("alien1")) {
+            const placeholder = this.makePlaceholder("npc", 2);
+            placeholder.position.set(165, groundAt(165, -85) + 1, -85);
+            this.downloadedAssets.set("alien1", placeholder);
+            this.scene.add(placeholder);
+            this.assetStatus.set("alien1", "placeholder");
+          }
+          return;
         }
+        this.replacePlaceholder(this.downloadedAssets.get("alien1"), this.scene);
+        model.position.set(165, groundAt(165, -85) + 1, -85);
+        this.scene.add(model);
       }),
       loadModel("alien2", "/assets/models/alien2/scene.gltf", 2.4).then((model) => {
-        if (model) {
-          model.position.set(-170, groundAt(-170, -150) + 1.2, -150);
-          this.scene.add(model);
+        if (!model) {
+          if (!this.downloadedAssets.has("alien2")) {
+            const placeholder = this.makePlaceholder("npc", 2.4);
+            placeholder.position.set(-170, groundAt(-170, -150) + 1.2, -150);
+            this.downloadedAssets.set("alien2", placeholder);
+            this.scene.add(placeholder);
+            this.assetStatus.set("alien2", "placeholder");
+          }
+          return;
         }
+        this.replacePlaceholder(this.downloadedAssets.get("alien2"), this.scene);
+        model.position.set(-170, groundAt(-170, -150) + 1.2, -150);
+        this.scene.add(model);
       }),
       loadModel("minerals", "/assets/models/minerals/scene.gltf", 2.4).then((model) => {
         if (model) {

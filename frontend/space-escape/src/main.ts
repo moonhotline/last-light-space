@@ -1512,6 +1512,7 @@ Object.assign(window, {
       thermalCount: view.thermalGroups.filter((g) => g.visible).length,
       downloadedModels: view.interplanetary.downloadedAssets.size,
       assetErrors: [...view.interplanetary.assetErrors],
+      assetStatus: Object.fromEntries(view.interplanetary.assetStatus),
     }),
   },
 });

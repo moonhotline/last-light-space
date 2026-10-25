@@ -1349,8 +1349,29 @@ export class GameView {
           new THREE.Vector3(p.x, p.y - 0.82, p.z),
           1 - Math.exp(-dt * 14),
         );
-      const targetYaw = p.yaw + Math.PI;
-      if (!p.planet) {
+      const speed = Math.hypot(p.vx, p.vz);
+      // Skate steering: face the velocity, not the camera. Camera yaw can
+      // jump / wrap, while velocity changes continuously, so using it stops
+      // the "turn once, then snap back the other way" flip. The continuous
+      // yaw in userData is unwrapped, so a turn past PI never reverses.
+      let targetYaw = p.yaw + Math.PI;
+      if (p.skate && speed > 3) {
+        targetYaw = Math.atan2(-p.vx, -p.vz) + Math.PI;
+        const prev = (a.userData.skateYaw ?? targetYaw) as number;
+        const delta = Math.atan2(
+          Math.sin(targetYaw - prev),
+          Math.cos(targetYaw - prev),
+        );
+        const next = prev + delta * (1 - Math.exp(-dt * 10));
+        a.userData.skateYaw = next;
+        a.userData.skateTurnRate = dt > 0 ? (next - prev) / dt : 0;
+        if (!p.planet) a.rotation.y = next;
+        targetYaw = next;
+      } else {
+        a.userData.skateYaw = undefined;
+        a.userData.skateTurnRate = 0;
+      }
+      if (!p.planet && !(p.skate && speed > 3)) {
         a.rotation.y +=
           Math.atan2(
             Math.sin(targetYaw - a.rotation.y),
@@ -1358,7 +1379,6 @@ export class GameView {
           ) *
           (1 - Math.exp(-dt * 12));
       }
-      const speed = Math.hypot(p.vx, p.vz);
       const targetPitch = p.skate
         ? 0
         : p.jetting
@@ -1375,13 +1395,13 @@ export class GameView {
       );
 
       if (p.skate) {
-        const turnDelta = Math.atan2(
-          Math.sin(targetYaw - a.rotation.y),
-          Math.cos(targetYaw - a.rotation.y),
-        );
+        // Lean from actual turn rate, not from the remaining yaw error.
+        // Remaining-error lean flips sign the moment the error crosses
+        // zero, which is the visible "lean one way, then lean back" flick.
+        const turnRate = (a.userData.skateTurnRate ?? 0) as number;
         a.rotation.z = THREE.MathUtils.damp(
           a.rotation.z,
-          Math.max(-0.25, Math.min(0.25, -turnDelta * 0.35)),
+          Math.max(-0.25, Math.min(0.25, -turnRate * 0.12)),
           8,
           dt,
         );
