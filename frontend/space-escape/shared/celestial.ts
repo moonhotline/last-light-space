@@ -101,8 +101,205 @@ export interface FlightSystemState {
   warpPower: number; // 0..100 Warp charge
   throttle: number; // 0..1
   velocity: Vec3;
-  altitude: number; // Distance above current planet surface
+  altitude: number; // Distance above nearest planet surface
   inCorridor: boolean; // Inside spaceship interior
+  nearestPlanet?: string; // Body whose gravity well / atmosphere we are in
+  atmosphereDensity?: number; // 0 in deep space .. 1 at a planet's surface
+}
+
+/**
+ * The universe this game takes place in: one star system, named and
+ * catalogued in one place. Every body in SOLAR_SYSTEM belongs to it, and
+ * interplanetary travel is movement between these bodies — there is no
+ * separate "space" scene, the universe is continuous.
+ */
+export const UNIVERSE = {
+  name: "余晖宇宙 (Last Light Verse)",
+  starSystem: "LAST LIGHT SYSTEM",
+  star: {
+    id: "last-light",
+    name: "余晖主星",
+    // Parked far off the playable basin, in the direction of the sky dome.
+    position: { x: 18000, y: 9000, z: -24000 } as Vec3,
+  },
+  bodyIds: ["kepler", "mercury", "earth", "stylized"] as const,
+};
+
+/** Cruise speed (m/s in universe coordinates) per spaceship kind. */
+export const CRUISE_SPEEDS: Record<SpaceshipKind, number> = {
+  skiff: 120,
+  light_fighter: 300,
+  cruiser: 520,
+};
+
+export interface AtmosphereSample {
+  bodyId: string;
+  altitude: number; // Meters above the body's surface (negative below it)
+  /** Kármán altitude: atmosphereRadius - radius. At/above it, space. */
+  karmanAltitude: number;
+  inside: boolean; // Within the atmosphere shell
+  /** 1 at the surface, easing to 0 at the Kármán line, 0 in deep space. */
+  density: number;
+}
+
+/** Sample the atmosphere of one body at a universe position. */
+export function atmosphereAt(pos: Vec3, body: CelestialBody): AtmosphereSample {
+  const dist = Math.hypot(
+    pos.x - body.position.x,
+    pos.y - body.position.y,
+    pos.z - body.position.z,
+  );
+  const altitude = dist - body.radius;
+  const karmanAltitude = body.atmosphereRadius - body.radius;
+  const t = Math.max(0, Math.min(1, karmanAltitude > 0 ? altitude / karmanAltitude : 1));
+  // Smoothstep falloff: thick low, thinning fast near the Kármán line.
+  const density = altitude <= 0 ? 1 : 1 - t * t * (3 - 2 * t);
+  return {
+    bodyId: body.id,
+    altitude,
+    karmanAltitude,
+    inside: altitude <= karmanAltitude,
+    density,
+  };
+}
+
+export interface NearestBody {
+  body: CelestialBody;
+  distance: number; // To the body's center
+  atmosphere: AtmosphereSample;
+}
+
+/** The body whose gravity well a universe position belongs to. */
+export function nearestBody(pos: Vec3): NearestBody {
+  let best: NearestBody | null = null;
+  for (const body of Object.values(SOLAR_SYSTEM)) {
+    const distance = Math.hypot(
+      pos.x - body.position.x,
+      pos.y - body.position.y,
+      pos.z - body.position.z,
+    );
+    if (!best || distance < best.distance) {
+      best = { body, distance, atmosphere: atmosphereAt(pos, body) };
+    }
+  }
+  return best!;
+}
+
+export function createFlightState(): FlightSystemState {
+  return {
+    mode: "surface",
+    shipKind: "light_fighter",
+    currentPlanet: "kepler",
+    targetPlanet: "mercury",
+    warpPower: 100,
+    throttle: 0,
+    velocity: { x: 0, y: 0, z: 0 },
+    altitude: 0,
+    inCorridor: false,
+    nearestPlanet: "kepler",
+    atmosphereDensity: 1,
+  };
+}
+
+/** At or below this altitude above a surface, a reentry counts as landed. */
+export const LANDING_ALTITUDE = 6;
+
+/**
+ * The interplanetary flight state machine, driven purely by where the
+ * ship is in the universe:
+ *
+ *   surface ──(climb inside home atmosphere)──▶ ascent
+ *   ascent  ──(cross the Kármán line)────────▶ cruise
+ *   cruise  ──(enter any atmosphere)──────────▶ reentry
+ *   reentry ──(reach the surface)─────────────▶ surface (currentPlanet moves)
+ *
+ * There is no teleport and no mode button: leaving a planet, crossing
+ * deep space and arriving somewhere else all fall out of position.
+ */
+export function updateFlightState(
+  pos: Vec3,
+  state: FlightSystemState,
+  opts: { grounded?: boolean } = {},
+): FlightSystemState {
+  const next: FlightSystemState = { ...state };
+  if (state.inCorridor) {
+    next.mode = "interior";
+    return next;
+  }
+  const near = nearestBody(pos);
+  next.nearestPlanet = near.body.id;
+  next.altitude = Math.max(0, near.atmosphere.altitude);
+  next.atmosphereDensity = near.atmosphere.density;
+
+  if (opts.grounded && near.atmosphere.inside) {
+    // Parked on a surface inside an atmosphere: landed, whatever the
+    // approach looked like. The local basin the ship sits in is a surface
+    // patch of the home body, so "grounded" outranks raw sphere altitude.
+    next.mode = "surface";
+    next.currentPlanet = near.body.id;
+    return next;
+  }
+  if (!near.atmosphere.inside) {
+    // Beyond every Kármán line: deep-space cruise, whichever way we came.
+    next.mode = "cruise";
+    return next;
+  }
+  if (state.mode === "cruise" || state.mode === "reentry") {
+    if (next.altitude <= LANDING_ALTITUDE) {
+      // Touchdown: the nearest body becomes home until we leave again.
+      next.mode = "surface";
+      next.currentPlanet = near.body.id;
+    } else {
+      next.mode = "reentry";
+    }
+    return next;
+  }
+  // Coming from surface / ascent (or a fresh spawn inside an atmosphere).
+  next.mode = next.altitude <= LANDING_ALTITUDE ? "surface" : "ascent";
+  return next;
+}
+
+export interface TravelPlan {
+  from: string;
+  to: string;
+  /** Center-to-center distance between the two bodies, in meters. */
+  distance: number;
+  /** Distance actually spent in deep-space cruise (outside both atmospheres). */
+  cruiseDistance: number;
+  shipKind: SpaceshipKind;
+  cruiseSpeed: number;
+  /** Rough cruise time in seconds, excluding ascent and reentry. */
+  estimatedSeconds: number;
+}
+
+/** Plan an interplanetary trip between two catalogued bodies. */
+export function travelPlan(
+  fromId: string,
+  toId: string,
+  shipKind: SpaceshipKind = "light_fighter",
+): TravelPlan | null {
+  const from = SOLAR_SYSTEM[fromId];
+  const to = SOLAR_SYSTEM[toId];
+  if (!from || !to || fromId === toId) return null;
+  const distance = Math.hypot(
+    to.position.x - from.position.x,
+    to.position.y - from.position.y,
+    to.position.z - from.position.z,
+  );
+  const cruiseDistance = Math.max(
+    0,
+    distance - from.atmosphereRadius - to.atmosphereRadius,
+  );
+  const cruiseSpeed = CRUISE_SPEEDS[shipKind];
+  return {
+    from: fromId,
+    to: toId,
+    distance,
+    cruiseDistance,
+    shipKind,
+    cruiseSpeed,
+    estimatedSeconds: cruiseDistance / cruiseSpeed,
+  };
 }
 
 /** Mineral specimen classification (Based on Slovenian Natural History Museum) */
