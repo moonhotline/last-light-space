@@ -4,9 +4,15 @@ import {
   SOLAR_SYSTEM,
   MINERAL_SAMPLES,
   ALIEN_ROSTER,
+  atmosphereAt,
+  createFlightState,
+  travelPlan,
+  updateFlightState,
   type CelestialBody,
   type SpaceshipKind,
   type FlightFlightMode,
+  type FlightSystemState,
+  type TravelPlan,
 } from "../shared/celestial";
 import { groundAt } from "../shared/map";
 
@@ -63,11 +69,15 @@ export class InterplanetarySystem {
   corridorGroup = new THREE.Group();
   inCorridor = false;
 
-  // Flight Cruise State
+  // Flight Cruise State. flightState (shared/celestial) is the source of
+  // truth for the universe flight model; the fields below mirror it for
+  // the existing HUD / corridor / ship-visibility code.
+  flightState: FlightSystemState = createFlightState();
   flightMode: FlightFlightMode = "surface";
   activeShip: SpaceshipKind = "light_fighter";
   currentPlanet = "kepler";
   targetPlanet = "mercury";
+  atmosphereDensity = 1; // 0 in deep space .. 1 at a surface
 
   warpSpeed = 0; // Current warp velocity
   warpCharge = 100; // 0..100
@@ -89,6 +99,7 @@ export class InterplanetarySystem {
   private retrying = false;
   private lastShipPosition: THREE.Vector3 | null = null;
   private lastShipYaw = 0;
+  private lastShipGrounded = true;
 
   private makePlaceholder(kind: "ship" | "npc", targetSize: number): THREE.Group {
     const group = new THREE.Group();
@@ -374,17 +385,46 @@ export class InterplanetarySystem {
     const next = enter !== undefined ? enter : !this.inCorridor;
     if (!next) {
       this.inCorridor = false;
+      this.flightState.inCorridor = false;
       this.corridorGroup.visible = false;
       this.flightMode = "surface";
+      this.flightState.mode = "surface";
       return false;
     }
     if (!this.lastShipPosition) return false;
     this.inCorridor = true;
+    this.flightState.inCorridor = true;
     this.corridorGroup.position.copy(this.lastShipPosition);
     this.corridorGroup.rotation.set(0, this.lastShipYaw, 0);
     this.corridorGroup.visible = true;
     this.flightMode = "interior";
+    this.flightState.mode = "interior";
     return true;
+  }
+
+  /**
+   * Choose the next interplanetary destination. Only unlocked bodies in
+   * the universe catalog can be targeted, and never the body we are on.
+   * Returns the travel plan for the HUD, or null when rejected.
+   */
+  setTargetPlanet(id: string): TravelPlan | null {
+    const body = SOLAR_SYSTEM[id];
+    if (!body || !body.unlocked || id === this.flightState.currentPlanet) return null;
+    const plan = travelPlan(this.flightState.currentPlanet, id, this.activeShip);
+    if (!plan) return null;
+    this.flightState.targetPlanet = id;
+    this.targetPlanet = id;
+    return plan;
+  }
+
+  /** The next unlocked destination after the current target (HUD cycling). */
+  nextTargetPlanet(): string {
+    const unlocked = Object.values(SOLAR_SYSTEM).filter(
+      (b) => b.unlocked && b.id !== this.flightState.currentPlanet,
+    );
+    if (!unlocked.length) return this.targetPlanet;
+    const idx = unlocked.findIndex((b) => b.id === this.targetPlanet);
+    return unlocked[(idx + 1) % unlocked.length].id;
   }
 
   /** Switch between Spaceship models */
@@ -405,10 +445,11 @@ export class InterplanetarySystem {
     if (toggled) this.guideFollowing = !this.guideFollowing;
     return toggled ? this.guideFollowing : null;
   }
-  setShipState(ship: { x: number; y: number; z: number; yaw: number; bank: number; seats: string[] } | null) {
+  setShipState(ship: { x: number; y: number; z: number; yaw: number; bank: number; seats: string[]; grounded?: boolean } | null) {
     if (ship) {
       this.lastShipPosition = new THREE.Vector3(ship.x, ship.y, ship.z);
       this.lastShipYaw = ship.yaw;
+      this.lastShipGrounded = ship.grounded ?? this.lastShipGrounded;
     }
     for (const [id, model] of this.shipMeshes) {
       model.visible = !!ship && (this.flightMode === "cruise" || ship.seats.some(Boolean)) && id === this.activeShip;
@@ -440,6 +481,13 @@ export class InterplanetarySystem {
       const showHighDetail = this.flightMode === "cruise" || id === "kepler";
       entry.surfaceMesh.visible = !showHighDetail || !entry.highDetail;
       if (entry.highDetail) entry.highDetail.visible = showHighDetail;
+      // Atmosphere glow thickens as the ship actually enters the shell:
+      // density comes from the shared atmosphere model, not a fixed look.
+      if (entry.atmosphereMesh) {
+        const density = atmosphereAt(shipPos, entry.body).density;
+        const mat = entry.atmosphereMesh.material as THREE.MeshBasicMaterial;
+        mat.opacity = 0.07 + 0.22 * density;
+      }
     }
     for (const [id, ship] of this.shipMeshes)
       ship.visible = this.flightMode === "cruise" && id === this.activeShip;
@@ -514,20 +562,26 @@ export class InterplanetarySystem {
       c.rotation.y += 0.4 * dt * (idx % 2 === 0 ? 1 : -1);
     });
 
-    // Altitude calculation relative to Kepler
-    const current = SOLAR_SYSTEM[this.currentPlanet] || SOLAR_SYSTEM.kepler;
-    const distToCenter = Math.hypot(
-      shipPos.x - current.position.x,
-      shipPos.y - current.position.y,
-      shipPos.z - current.position.z,
-    );
-    this.flightAltitude = Math.max(0, distToCenter - current.radius);
-
-    // Automatic flight mode transition
-    if (this.flightAltitude > 350 && this.flightMode === "surface") {
-      this.flightMode = "cruise";
-    } else if (this.flightAltitude <= 300 && this.flightMode === "cruise" && shipPos.y < 300) {
-      this.flightMode = "surface";
+    // Universe flight model: altitude, atmosphere and the mode itself all
+    // come from the shared state machine (surface → ascent → cruise →
+    // reentry → surface). Crossing a Kármán line is what changes the
+    // mode; landing on a new body is what moves currentPlanet.
+    this.flightState.shipKind = this.activeShip;
+    const landedOn = this.flightState.currentPlanet;
+    this.flightState = updateFlightState(shipPos, this.flightState, {
+      grounded: this.lastShipGrounded,
+    });
+    this.flightMode = this.flightState.mode;
+    this.currentPlanet = this.flightState.currentPlanet;
+    this.targetPlanet = this.flightState.targetPlanet;
+    this.flightAltitude = this.flightState.altitude;
+    this.atmosphereDensity = this.flightState.atmosphereDensity ?? 0;
+    if (this.currentPlanet !== landedOn) {
+      // Touchdown on a new world: the next trip starts from here.
+      if (this.targetPlanet === this.currentPlanet) {
+        this.flightState.targetPlanet = this.nextTargetPlanet();
+        this.targetPlanet = this.flightState.targetPlanet;
+      }
     }
   }
 
