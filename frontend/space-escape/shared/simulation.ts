@@ -229,6 +229,9 @@ export class Simulation {
       this.emit(`${p.name} 标记了探索路线`);
     }
   }
+  setInterplanetaryTarget(planetId: string) {
+    this.s.adventure.ship.targetPlanet = planetId;
+  }
   tick() {
     const s = this.s;
     s.tick++;

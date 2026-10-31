@@ -18,6 +18,7 @@ import {
 } from "./adventure-data";
 import { groundAt, distance3, distance, HALF, clamp, type Vec } from "./map";
 import { eyePosition, viewDirection } from "./surface";
+import { SOLAR_SYSTEM } from "./celestial";
 import type { Simulation } from "./simulation";
 export function createAdventure(): Adventure {
   return {
@@ -167,6 +168,9 @@ export function interactAdventure(sim: Simulation, p: Player, i: Input) {
       }
       ship.seats[p.seat] = "";
       p.seat = -1;
+      if (ship.seats.every((s) => !s)) {
+        ship.companionSeats = [];
+      }
       // Choose a clear side exit, validating height and line of sight.
       const exit = [-1, 1]
         .map((side) => ({
@@ -226,6 +230,10 @@ export function interactAdventure(sim: Simulation, p: Player, i: Input) {
         p.seat = seat;
         ship.seats[seat] = p.id;
         p.grapple = null;
+        if (!ship.companionSeats) ship.companionSeats = [];
+        if (!ship.companionSeats.includes("blerk")) {
+          ship.companionSeats.push("blerk");
+        }
         sim.emit(
           seat === 0
             ? "驾驶位 · WASD 推进 / 空格上升 / X 下降 / Shift 刹车"
@@ -266,42 +274,97 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
       : 0;
     s.yaw += clamp(turn, -1.1 * DT, 1.1 * DT);
     s.bank += (clamp(-turn, -0.35, 0.35) - s.bank) * 0.08;
-    const damping = i.sprint || !pilot ? 3.5 : 0.22;
-    s.vx =
-      s.vx * Math.exp(-damping * DT) +
-      (Math.cos(s.yaw) * i.side - Math.sin(s.yaw) * i.forward) * 28 * DT;
-    s.vz =
-      s.vz * Math.exp(-damping * DT) +
-      (-Math.sin(s.yaw) * i.side - Math.cos(s.yaw) * i.forward) * 28 * DT;
-    s.vy =
-      s.vy * Math.exp(-(i.sprint ? 4 : 1.8) * DT) +
-      ((i.jump || i.jet ? 30 : 0) - (i.brake ? 24 : 0) - 3) * DT;
-    const speed = Math.hypot(s.vx, s.vz);
-    if (speed > 72) {
-      s.vx *= 72 / speed;
-      s.vz *= 72 / speed;
+    const isInterplanetary = s.targetPlanet && s.targetPlanet !== "kepler";
+    const inDeepSpace = s.y >= 600 && isInterplanetary;
+
+    if (inDeepSpace) {
+      s.flightStage = "space";
+      const pitch = i.pitch || 0;
+      s.pitch = clamp(pitch, -1.3, 1.3);
+      const cosPitch = Math.cos(s.pitch);
+      const sinPitch = Math.sin(s.pitch);
+      const thrustAccel = (i.sprint ? 90 : 45) * DT;
+      s.vx += (-Math.sin(s.yaw) * cosPitch * i.forward + Math.cos(s.yaw) * i.side) * thrustAccel;
+      s.vy += (sinPitch * i.forward + (i.jump || i.jet ? 1 : 0) - (i.brake ? 1 : 0)) * thrustAccel;
+      s.vz += (-Math.cos(s.yaw) * cosPitch * i.forward - Math.sin(s.yaw) * i.side) * thrustAccel;
+
+      const spaceSpeed = Math.hypot(s.vx, s.vy, s.vz);
+      const maxSpeed = i.sprint ? 280 : 160;
+      if (spaceSpeed > maxSpeed) {
+        const factor = maxSpeed / spaceSpeed;
+        s.vx *= factor;
+        s.vy *= factor;
+        s.vz *= factor;
+      }
+      s.x += s.vx * DT;
+      s.y += s.vy * DT;
+      s.z += s.vz * DT;
+      s.grounded = false;
+
+      // Check Mercury approach & touchdown
+      const mercury = SOLAR_SYSTEM.mercury;
+      const distToMercury = Math.hypot(s.x - mercury.position.x, s.y - mercury.position.y, s.z - mercury.position.z);
+      const distToMercuryLanding = Math.hypot(s.x - mercury.landingSite.x, s.y - mercury.landingSite.y, s.z - mercury.landingSite.z);
+
+      if (distToMercury < mercury.atmosphereRadius + 200) {
+        s.flightStage = "descent";
+      }
+
+      if (!s.arrived && (distToMercuryLanding < 55 || (distToMercury < mercury.atmosphereRadius && spaceSpeed < 25 && s.y <= mercury.landingSite.y + 10))) {
+        s.arrived = true;
+        s.grounded = true;
+        s.flightStage = "landed";
+        s.x = mercury.landingSite.x;
+        s.y = mercury.landingSite.y;
+        s.z = mercury.landingSite.z;
+        s.vx = 0;
+        s.vy = 0;
+        s.vz = 0;
+        sim.s.adventure.completeAt = sim.s.time;
+        sim.s.completedAt = sim.s.time;
+        sim.s.phase = "won";
+        sim.emit("抵达水星盆地 · 异星着陆成功，随行伙伴就位");
+      }
+    } else {
+      s.flightStage = s.grounded ? "grounded" : "ascent";
+      s.pitch = 0;
+      const damping = i.sprint || !pilot ? 3.5 : 0.22;
+      s.vx =
+        s.vx * Math.exp(-damping * DT) +
+        (Math.cos(s.yaw) * i.side - Math.sin(s.yaw) * i.forward) * 28 * DT;
+      s.vz =
+        s.vz * Math.exp(-damping * DT) +
+        (-Math.sin(s.yaw) * i.side - Math.cos(s.yaw) * i.forward) * 28 * DT;
+      s.vy =
+        s.vy * Math.exp(-(i.sprint ? 4 : 1.8) * DT) +
+        ((i.jump || i.jet ? 30 : 0) - (i.brake ? 24 : 0) - 3) * DT;
+      const speed = Math.hypot(s.vx, s.vz);
+      if (speed > 72) {
+        s.vx *= 72 / speed;
+        s.vz *= 72 / speed;
+      }
+      s.vy = clamp(s.vy, -16, 23);
+      const proposed = sim.physics.shipMotion(s, {
+        x: s.vx * DT,
+        y: s.vy * DT,
+        z: s.vz * DT,
+      });
+      if (Math.hypot(proposed.x - s.x, proposed.z - s.z) < speed * DT * 0.6) {
+        s.vx *= 0.65;
+        s.vz *= 0.65;
+      }
+      s.x = clamp(proposed.x, -HALF + 20, HALF - 20);
+      s.z = clamp(proposed.z, -HALF + 20, HALF - 20);
+      const floor = Math.max(
+        ...[-4, 0, 4].flatMap((x) =>
+          [-5, 0, 5].map((z) => groundAt(s.x + x, s.z + z)),
+        ),
+      );
+      // Keep the basin terrain floor, but allow ascent beyond the old 650m ceiling.
+      s.y = Math.max(proposed.y, floor);
+      s.grounded = s.y <= floor + 0.15;
+      if (s.grounded && s.vy < 0) s.vy = 0;
     }
-    s.vy = clamp(s.vy, -16, 23);
-    const proposed = sim.physics.shipMotion(s, {
-      x: s.vx * DT,
-      y: s.vy * DT,
-      z: s.vz * DT,
-    });
-    if (Math.hypot(proposed.x - s.x, proposed.z - s.z) < speed * DT * 0.6) {
-      s.vx *= 0.65;
-      s.vz *= 0.65;
-    }
-    s.x = clamp(proposed.x, -HALF + 20, HALF - 20);
-    s.z = clamp(proposed.z, -HALF + 20, HALF - 20);
-    const floor = Math.max(
-      ...[-4, 0, 4].flatMap((x) =>
-        [-5, 0, 5].map((z) => groundAt(s.x + x, s.z + z)),
-      ),
-    );
-    // Keep the basin terrain floor, but allow ascent beyond the old 650m ceiling.
-    s.y = Math.max(proposed.y, floor);
-    s.grounded = s.y <= floor + 0.15;
-    if (s.grounded && s.vy < 0) s.vy = 0;
     s.thrust =
       Math.abs(i.forward) + Math.abs(i.side) + (i.jump || i.jet ? 1 : 0);
     if (!s.grounded && pilot) s.flightTime += DT;

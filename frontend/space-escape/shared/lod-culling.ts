@@ -78,33 +78,85 @@ export class FrustumCullingEngine {
   }
 }
 
-export interface AssetLoadRequest {
+export interface AssetLoadRequest<T = any> {
   id: string;
-  url: string;
-  priority: number; // Higher number = higher priority
-  onLoad: () => void;
+  url?: string;
+  priority?: number; // Higher number = higher priority
+  load?: () => Promise<T>;
+  onLoad?: (asset: T) => void;
+  onError?: (err: any) => void;
 }
 
 export class LazyAssetScheduler {
   private queue: AssetLoadRequest[] = [];
   private activeCount = 0;
   private maxConcurrent: number;
+  private inFlight = new Map<string, Promise<any>>();
   loadedAssets = new Set<string>();
+  failedAssets = new Set<string>();
 
   constructor(maxConcurrent = 2) {
-    this.maxConcurrent = maxConcurrent;
+    this.maxConcurrent = Math.max(1, maxConcurrent);
   }
 
-  requestAsset(req: AssetLoadRequest): void {
+  requestAsset<T = any>(req: AssetLoadRequest<T>): Promise<T> {
+    const priority = req.priority ?? 0;
+    // 1. If already loaded, immediately notify and resolve
     if (this.loadedAssets.has(req.id)) {
-      req.onLoad();
-      return;
+      if (req.onLoad) req.onLoad(undefined as any);
+      return Promise.resolve(undefined as any);
     }
-    if (!this.queue.some((r) => r.id === req.id)) {
-      this.queue.push(req);
-      this.queue.sort((a, b) => b.priority - a.priority);
+
+    // 2. If already in flight, attach callbacks to the existing in-flight Promise
+    if (this.inFlight.has(req.id)) {
+      const promise = this.inFlight.get(req.id)!;
+      return promise.then((res) => {
+        if (req.onLoad) req.onLoad(res);
+        return res;
+      }).catch((err) => {
+        if (req.onError) req.onError(err);
+        throw err;
+      });
     }
-    this.pump();
+
+    // 3. Queue the request or upgrade priority if already queued
+    return new Promise<T>((resolve, reject) => {
+      const internalReq: AssetLoadRequest = {
+        ...req,
+        priority,
+        onLoad: (res) => {
+          if (req.onLoad) req.onLoad(res);
+          resolve(res);
+        },
+        onError: (err) => {
+          if (req.onError) req.onError(err);
+          reject(err);
+        },
+      };
+
+      const existing = this.queue.find((r) => r.id === req.id);
+      if (existing) {
+        if (priority > (existing.priority ?? 0)) {
+          existing.priority = priority;
+          this.queue.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+        }
+        const origOnLoad = existing.onLoad;
+        const origOnError = existing.onError;
+        existing.onLoad = (res) => {
+          if (origOnLoad) origOnLoad(res);
+          internalReq.onLoad!(res);
+        };
+        existing.onError = (err) => {
+          if (origOnError) origOnError(err);
+          internalReq.onError!(err);
+        };
+      } else {
+        this.queue.push(internalReq);
+        this.queue.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+      }
+
+      this.pump();
+    });
   }
 
   private pump(): void {
@@ -113,13 +165,29 @@ export class LazyAssetScheduler {
       if (!next) break;
 
       this.activeCount++;
-      // Simulate or delegate asynchronous progressive download
-      Promise.resolve().then(() => {
-        this.loadedAssets.add(next.id);
-        next.onLoad();
-        this.activeCount--;
-        this.pump();
-      });
+      let promise: Promise<any>;
+      try {
+        promise = Promise.resolve(next.load ? next.load() : undefined);
+      } catch (err) {
+        promise = Promise.reject(err);
+      }
+      this.inFlight.set(next.id, promise);
+
+      promise
+        .then((result) => {
+          this.loadedAssets.add(next.id);
+          this.failedAssets.delete(next.id);
+          if (next.onLoad) next.onLoad(result);
+        })
+        .catch((err) => {
+          this.failedAssets.add(next.id);
+          if (next.onError) next.onError(err);
+        })
+        .finally(() => {
+          this.inFlight.delete(next.id);
+          this.activeCount--;
+          this.pump();
+        });
     }
   }
 
@@ -127,7 +195,15 @@ export class LazyAssetScheduler {
     return this.loadedAssets.has(id);
   }
 
+  isInFlight(id: string): boolean {
+    return this.inFlight.has(id);
+  }
+
   get pendingCount(): number {
     return this.queue.length;
+  }
+
+  get currentActiveCount(): number {
+    return this.activeCount;
   }
 }
