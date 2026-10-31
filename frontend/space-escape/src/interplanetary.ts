@@ -426,7 +426,7 @@ export class InterplanetarySystem {
   }
 
   /** Step solar system rotation & flight physics */
-  step(dt: number, shipPos: { x: number; y: number; z: number }) {
+  step(dt: number, shipPos: { x: number; y: number; z: number; planet?: string | null }) {
     // Category-driven auto-retry: failed planet / ship / NPC models are
     // retried in the background on a timer. No button is involved, and a
     // failed model never leaves its slot empty because placeholders below
@@ -521,19 +521,22 @@ export class InterplanetarySystem {
       c.rotation.y += 0.4 * dt * (idx % 2 === 0 ? 1 : -1);
     });
 
-    // Altitude calculation relative to Kepler
-    const current = SOLAR_SYSTEM[this.currentPlanet] || SOLAR_SYSTEM.kepler;
+    // The basin is a heightfield below the decorative Kepler sphere.
+    // Raising that sphere must not mark a player on the basin floor as cruising.
+    const current = SOLAR_SYSTEM[shipPos.planet || this.currentPlanet] || SOLAR_SYSTEM.kepler;
     const distToCenter = Math.hypot(
       shipPos.x - current.position.x,
       shipPos.y - current.position.y,
       shipPos.z - current.position.z,
     );
-    this.flightAltitude = Math.max(0, distToCenter - current.radius);
+    this.flightAltitude = Math.max(0, current.id === "kepler" && shipPos.planet !== "kepler"
+      ? shipPos.y - groundAt(shipPos.x, shipPos.z)
+      : distToCenter - current.radius);
 
     // Automatic flight mode transition
     if (this.flightAltitude > 350 && this.flightMode === "surface") {
       this.flightMode = "cruise";
-    } else if (this.flightAltitude <= 300 && this.flightMode === "cruise" && shipPos.y < 300) {
+    } else if (this.flightAltitude <= 300 && this.flightMode === "cruise") {
       this.flightMode = "surface";
     }
   }

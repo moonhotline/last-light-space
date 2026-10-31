@@ -1,4 +1,5 @@
 import test from "node:test";
+import { terrainMesh } from "../../frontend/space-escape/shared/map";
 import assert from "node:assert/strict";
 import {
   SOLAR_SYSTEM,
@@ -66,4 +67,17 @@ test("alien fauna roster differentiates friendly guides from hostile predators",
   assert.equal(ALIEN_ROSTER.another_alien.faction, "hostile");
   assert.equal(ALIEN_ROSTER.reptillian_alien.faction, "hostile");
   assert.ok(ALIEN_ROSTER.reptillian_alien.attackDamage > 0);
+});
+
+test("elevated Kepler atmosphere clears the basin and landing site stays on its crust", () => {
+  const body = SOLAR_SYSTEM.kepler;
+  assert.deepEqual(body.position, { x: 0, y: 1800, z: 340 });
+  const vertices = terrainMesh().vertices;
+  let highestTerrain = -Infinity;
+  for (let index = 1; index < vertices.length; index += 3) {
+    highestTerrain = Math.max(highestTerrain, vertices[index]);
+  }
+  assert.ok(body.position.y - body.atmosphereRadius > highestTerrain);
+  assert.equal(sphericalGravity(body.landingSite, body).altitude, 1);
+  assert.deepEqual(projectToSphere(body.landingSite, body, 1), body.landingSite);
 });

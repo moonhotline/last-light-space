@@ -298,7 +298,8 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
         [-5, 0, 5].map((z) => groundAt(s.x + x, s.z + z)),
       ),
     );
-    s.y = clamp(proposed.y, floor, 650);
+    // Keep the basin terrain floor, but allow ascent beyond the old 650m ceiling.
+    s.y = Math.max(proposed.y, floor);
     s.grounded = s.y <= floor + 0.15;
     if (s.grounded && s.vy < 0) s.vy = 0;
     s.thrust =

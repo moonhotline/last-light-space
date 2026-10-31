@@ -32,11 +32,11 @@ export const SOLAR_SYSTEM: Record<string, CelestialBody> = {
     radius: 420,
     atmosphereRadius: 850,
     gravity: 7.5,
-    position: { x: 0, y: 1300, z: 340 }, // Doubled elevation from 650m to 1300m to clear 430m terrain peaks
+    position: { x: 0, y: 1800, z: 340 },
     color: 0x243b55,
     atmosphereColor: 0x38bdf8,
     unlocked: true,
-    landingSite: { x: 0, y: 1721, z: 340 },
+    landingSite: { x: 0, y: 2221, z: 340 },
   },
   mercury: {
     id: "mercury",
