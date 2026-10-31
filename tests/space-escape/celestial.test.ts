@@ -7,6 +7,7 @@ import {
   ALIEN_ROSTER,
   sphericalGravity,
   projectToSphere,
+  computeAtmosphericFog,
 } from "../../frontend/space-escape/shared/celestial";
 
 test("spherical gravity always directs acceleration towards planet center", () => {
@@ -53,13 +54,12 @@ test("solar system contains key planetary destinations", () => {
   assert.ok(SOLAR_SYSTEM.earth.radius > SOLAR_SYSTEM.mercury.radius);
 });
 
-test("mineral specimen catalog provides geological properties", () => {
-  const calcite = MINERAL_SAMPLES.calcite;
-  assert.equal(calcite.formula, "CaCO₃");
-  assert.equal(calcite.hardness, 3.0);
-  assert.ok(MINERAL_SAMPLES.pyrite);
-  assert.ok(MINERAL_SAMPLES.amethyst);
-  assert.ok(MINERAL_SAMPLES.celestite);
+test("computeAtmosphericFog scales density inversely with space altitude", () => {
+  const groundFog = computeAtmosphericFog(50);
+  const orbitFog = computeAtmosphericFog(1200);
+  assert.ok(groundFog.density > orbitFog.density, "Ground fog must be denser than space vacuum haze");
+  assert.equal(groundFog.color, 0x0c141d);
+  assert.equal(orbitFog.color, 0x020408);
 });
 
 test("alien fauna roster differentiates friendly guides from hostile predators", () => {

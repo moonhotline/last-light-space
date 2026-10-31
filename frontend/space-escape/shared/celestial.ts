@@ -30,7 +30,7 @@ export const SOLAR_SYSTEM: Record<string, CelestialBody> = {
     name: "开普勒-07 (母星)",
     subtitle: "KEPLER / HOME BASIN",
     radius: 420,
-    atmosphereRadius: 650,
+    atmosphereRadius: 850,
     gravity: 7.5,
     position: { x: 0, y: 1800, z: 340 },
     color: 0x243b55,
@@ -274,4 +274,22 @@ export function projectToSphere(
     y: planet.position.y + (dy / dist) * targetDist,
     z: planet.position.z + (dz / dist) * targetDist,
   };
+}
+
+/**
+ * Dynamic Atmospheric & Deep Cosmic Fog Parameters.
+ * Smoothly interpolates between atmospheric boundary haze and vacuum blackness
+ * so distant planets remain crisp while ground maintains atmospheric depth.
+ */
+export function computeAtmosphericFog(altitude: number): { color: number; density: number } {
+  const clampedAlt = Math.max(0, altitude);
+  if (clampedAlt < 200) {
+    return { color: 0x0c141d, density: 0.000045 };
+  } else if (clampedAlt < 850) {
+    const t = (clampedAlt - 200) / 650;
+    const density = 0.000045 * (1 - t * 0.8);
+    return { color: 0x070c14, density };
+  } else {
+    return { color: 0x020408, density: 0.000008 };
+  }
 }
