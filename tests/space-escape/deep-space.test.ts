@@ -4,6 +4,7 @@ import { Scene, PerspectiveCamera, Vector3 } from "three";
 import { InterplanetarySystem } from "../../frontend/space-escape/src/interplanetary";
 import { SOLAR_SYSTEM } from "../../frontend/space-escape/shared/celestial";
 import { groundAt, SPAWN } from "../../frontend/space-escape/shared/map";
+import { SHIP_HOME } from "../../frontend/space-escape/shared/adventure-data";
 
 test("planet surface and atmosphere share elevated global coordinates", () => {
   const system = new InterplanetarySystem(new Scene(), new PerspectiveCamera());
@@ -71,9 +72,9 @@ test("Blerk equips hoverboard and activates repulsor surfing when following at s
   assert.equal(hoverboard.visible, false, "Hoverboard should stow when Blerk is idle");
 });
 
-test("InterplanetarySystem hides systemGroup on surface and culls off-screen entities with camera frustum", () => {
+test("InterplanetarySystem preserves all planets and docks spaceship at starting position with frustum culling", () => {
   const scene = new Scene();
-  const camera = new PerspectiveCamera(60, 1, 0.1, 1000);
+  const camera = new PerspectiveCamera(60, 1, 0.1, 10000);
   camera.position.set(0, 10, 0);
   camera.lookAt(0, 10, 100); // looking toward +Z
   camera.updateMatrixWorld();
@@ -82,30 +83,31 @@ test("InterplanetarySystem hides systemGroup on surface and culls off-screen ent
   const system = new InterplanetarySystem(scene, camera);
   const floor = groundAt(SPAWN.x, SPAWN.z);
 
-  // Surface mode: systemGroup must be hidden so procedural 3D planets do not pollute skybox
+  // Kepler and other planets are NOT deleted or hidden; systemGroup remains active
   system.step(1 / 30, { ...SPAWN, y: floor + 0.85 });
-  assert.equal(system.flightMode, "surface");
-  assert.equal(system.systemGroup.visible, false, "systemGroup must be hidden during surface flightMode");
+  assert.equal(system.systemGroup.visible, true, "systemGroup and planetary bodies must be preserved");
+  assert.ok(system.planets.has("kepler"), "Kepler planet must exist");
+  assert.ok(system.planets.has("earth"), "Earth planet must exist");
+  assert.ok(system.planets.has("mercury"), "Mercury planet must exist");
+  assert.ok(system.planets.has("stylized"), "Stylized planet must exist");
 
-  // Setup NPC model in front of camera (+Z)
-  const npcInFront = system["makePlaceholder"]("npc", 2);
-  npcInFront.position.set(0, 10, 50);
-  system.guideModel = npcInFront;
-  scene.add(npcInFront);
+  // Spaceship is docked at starting position SHIP_HOME
+  const ship = system.shipMeshes.get("light_fighter");
+  assert.ok(ship, "Spaceship model must exist");
+  assert.equal(ship.position.x, SHIP_HOME.x, "Ship x coordinate must match SHIP_HOME starting position");
+  assert.equal(ship.position.z, SHIP_HOME.z, "Ship z coordinate must match SHIP_HOME starting position");
 
-  system.step(1 / 30, { ...SPAWN, y: floor + 0.85 });
-  assert.equal(system.guideModel.visible, true, "NPC inside camera frustum must be visible");
-
-  // Move camera to look in opposite direction (-Z)
-  camera.lookAt(0, 10, -100);
+  // Camera pointing at SHIP_HOME starting position
+  camera.lookAt(SHIP_HOME.x, SHIP_HOME.y, SHIP_HOME.z);
   camera.updateMatrixWorld();
   camera.updateProjectionMatrix();
-
   system.step(1 / 30, { ...SPAWN, y: floor + 0.85 });
-  assert.equal(system.guideModel.visible, false, "NPC outside camera frustum must be culled (visible = false)");
+  assert.equal(ship.visible, true, "Spaceship in front of camera must be visible at starting position");
 
-  // Deep space cruise mode: systemGroup must be visible
-  system.step(1 / 30, { ...SPAWN, y: floor + 700 });
-  assert.equal(system.flightMode, "cruise");
-  assert.equal(system.systemGroup.visible, true, "systemGroup must be visible in cruise mode");
+  // Camera looking in opposite direction culls the spaceship
+  camera.lookAt(-SHIP_HOME.x, SHIP_HOME.y, -SHIP_HOME.z);
+  camera.updateMatrixWorld();
+  camera.updateProjectionMatrix();
+  system.step(1 / 30, { ...SPAWN, y: floor + 0.85 });
+  assert.equal(ship.visible, false, "Spaceship outside camera frustum must be culled");
 });

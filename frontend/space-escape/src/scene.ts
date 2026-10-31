@@ -1054,6 +1054,9 @@ uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*
     this.adventure.update(s, me, dt, t);
     this.interplanetary.step(dt, me || { x: 0, y: 0, z: 0 });
     this.interplanetary.setShipState(s?.adventure.ship || null);
+    if (this.interplanetary.activeShip !== "skiff" && this.interplanetary.shipMeshes.has(this.interplanetary.activeShip)) {
+      this.adventure.ship.visible = false;
+    }
     this.toolModel.visible = !!me && !this.thirdPerson && me.seat < 0;
     this.rifleFill.visible = this.toolModel.visible && this.activeWeapon === "rifle";
     if (this.fpHandRig) this.fpHandRig.visible = this.toolModel.visible;
@@ -1221,10 +1224,9 @@ uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*
     this.moon.position.y = -600 + 2600 * smooth(moonAge / 40);
     this.moon.rotation.y = worldTime * 0.001;
     this.giant.rotation.y = Math.sin(worldTime * 0.001) * 0.05;
-    const isCruising = this.interplanetary.flightMode !== "surface";
-    this.earth.visible = !isCruising;
-    this.giant.visible = !isCruising;
-    this.moon.visible = !isCruising;
+    this.earth.visible = true;
+    this.giant.visible = true;
+    this.moon.visible = true;
     this.musicLayers.forEach((a, i) => {
       const goal =
         i === 0
