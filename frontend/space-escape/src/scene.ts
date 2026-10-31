@@ -560,7 +560,34 @@ varying vec3 vPosition;void main(){vec3 d=normalize(vPosition);float h=max(0.,d.
       }),
     );
     this.sky.add(starfield);
-    // Removed old procedural billboard giant and old meshes so real high-detail solar system planets shine in sky.
+    this.sky.add(this.earth, this.giant, this.moon);
+    this.giant.position.set(4800, 4500, -9200);
+    this.earth.position.set(-900, 1600, -8000);
+    this.moon.position.set(-3600, -700, -8500);
+    const gas = new THREE.Mesh(
+      new THREE.SphereGeometry(1350, 96, 64),
+      new THREE.ShaderMaterial({
+        vertexShader: vertex,
+        fragmentShader: `varying vec2 vUv;varying vec3 vNormal;void main(){float q=vUv.y+sin(vUv.x*22.+vUv.y*45.)*.003;float b=.5+.13*sin(q*94.)+.065*sin(q*210.+sin(vUv.x*31.))+.04*sin(q*470.);vec3 c=mix(vec3(.28,.19,.12),vec3(.78,.62,.40),b);float l=smoothstep(-.25,.7,dot(normalize(vNormal),normalize(vec3(-.9,.22,.32))));c*=.035+l;gl_FragColor=vec4(c,1.);}`,
+      }),
+    );
+    this.giant.add(gas);
+    const ringGeo = new THREE.RingGeometry(1770, 3440, 240, 10);
+    const ring = new THREE.Mesh(
+      ringGeo,
+      new THREE.ShaderMaterial({
+        side: THREE.DoubleSide,
+        transparent: true,
+        depthWrite: false,
+        vertexShader: vertex,
+        fragmentShader: `varying vec3 vPosition;void main(){float r=length(vPosition.xy);float t=(r-1770.)/1670.;float bands=.62+.08*sin(r*.19)+.12*sin(r*.048)+.045*sin(r*.81);float gap=1.-.91*exp(-pow((t-.45)/.018,2.));gap*=1.-.5*exp(-pow((t-.73)/.015,2.));vec3 c=mix(vec3(.39,.29,.18),vec3(.92,.76,.47),bands);float shadow=smoothstep(600.,1800.,vPosition.x+abs(vPosition.y)*1.3);c*=mix(.23,1.,shadow);float edge=smoothstep(0.,.04,t)*(1.-smoothstep(.90,1.,t));gl_FragColor=vec4(c,bands*gap*edge*.93);}`,
+      }),
+    );
+    ring.rotation.x = 1.42;
+    ring.rotation.z = 0;
+    this.giant.rotation.z = 0.42;
+    this.giant.add(ring);
+    this.atmosphere(this.giant, 1356, 0xe3c197, 0.24);
     // A distant sun with a soft optical halo.
     const sun = new THREE.Mesh(
       new THREE.SphereGeometry(75, 24, 16),
@@ -702,6 +729,8 @@ varying float alpha;void main(){float d=length(gl_PointCoord-.5)*2.;gl_FragColor
       grappleGltf,
       cameraGltf,
       obeliskGltf,
+      earthTex,
+      moonTex,
     ] = await Promise.all([
       loadGltf("/assets/explorer-v4.glb", "/assets/explorer-v3.glb"),
       loadGltf("/assets/beacon.glb"),
@@ -711,6 +740,8 @@ varying float alpha;void main(){float d=length(gl_PointCoord-.5)*2.;gl_FragColor
       loadGltf("/assets/echo-grapple.glb"),
       loadGltf("/assets/survey-camera.glb"),
       loadGltf("/assets/obelisk.glb"),
+      loadTexture("/assets/earth.jpg"),
+      loadTexture("/assets/moon.jpg"),
     ]);
     this.astronaut = explorer.scene;
     this.astronautAnimations = explorer.animations;
@@ -721,6 +752,23 @@ varying float alpha;void main(){float d=length(gl_PointCoord-.5)*2.;gl_FragColor
     this.grappleAsset = equipmentModel(grappleGltf.scene, 0.55, 0);
     this.cameraAsset = equipmentModel(cameraGltf.scene, 0.35, 0);
     this.setupFirstPersonHands();
+    earthTex.colorSpace = moonTex.colorSpace = THREE.SRGBColorSpace;
+    const planetMat = (map: THREE.Texture) =>
+      new THREE.ShaderMaterial({
+        uniforms: { map: { value: map } },
+        vertexShader: vertex,
+        fragmentShader: `uniform sampler2D map;varying vec2 vUv;varying vec3 vNormal;void main(){vec3 c=texture2D(map,vUv).rgb;float d=dot(normalize(vNormal),normalize(vec3(.2,.35,.85)));float light=smoothstep(-.12,.75,d);c*=.025+light*.97;gl_FragColor=vec4(c,1.);}`,
+      });
+    const e = new THREE.Mesh(
+      new THREE.SphereGeometry(890, 96, 64),
+      planetMat(earthTex),
+    );
+    e.rotation.y = -0.6;
+    this.earth.add(e);
+    this.atmosphere(this.earth, 890, 0x73bfff, 0.78);
+    this.moon.add(
+      new THREE.Mesh(new THREE.SphereGeometry(490, 64, 48), planetMat(moonTex)),
+    );
     this.obeliskAsset = obeliskGltf.scene;
 
     for (const m of [
@@ -735,7 +783,7 @@ varying float alpha;void main(){float d=length(gl_PointCoord-.5)*2.;gl_FragColor
           if (o instanceof THREE.Mesh) {
             o.castShadow = true;
             o.receiveShadow = true;
-            o.frustumCulled = false;
+            o.frustumCulled = (m !== this.obeliskAsset) ? false : true;
           }
         });
         weatherMaterials(m);
@@ -1166,6 +1214,17 @@ uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*
     this.skyCamera.fov = this.camera.fov;
     this.skyCamera.aspect = this.camera.aspect;
     this.skyCamera.updateProjectionMatrix();
+    const earthAge = s ? (s.earthAt < 0 ? 0 : s.time - s.earthAt) : 55;
+    this.earth.position.y = -420 + 2320 * smooth(earthAge / 45);
+    this.earth.rotation.y = worldTime * 0.002;
+    const moonAge = s && s.completedAt >= 0 ? s.time - s.completedAt : 0;
+    this.moon.position.y = -600 + 2600 * smooth(moonAge / 40);
+    this.moon.rotation.y = worldTime * 0.001;
+    this.giant.rotation.y = Math.sin(worldTime * 0.001) * 0.05;
+    const isCruising = this.interplanetary.flightMode !== "surface";
+    this.earth.visible = !isCruising;
+    this.giant.visible = !isCruising;
+    this.moon.visible = !isCruising;
     this.musicLayers.forEach((a, i) => {
       const goal =
         i === 0

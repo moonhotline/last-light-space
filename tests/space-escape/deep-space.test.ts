@@ -70,3 +70,42 @@ test("Blerk equips hoverboard and activates repulsor surfing when following at s
   system.step(0.1, new Vector3(system.guideModel.position.x + 1, 20, system.guideModel.position.z));
   assert.equal(hoverboard.visible, false, "Hoverboard should stow when Blerk is idle");
 });
+
+test("InterplanetarySystem hides systemGroup on surface and culls off-screen entities with camera frustum", () => {
+  const scene = new Scene();
+  const camera = new PerspectiveCamera(60, 1, 0.1, 1000);
+  camera.position.set(0, 10, 0);
+  camera.lookAt(0, 10, 100); // looking toward +Z
+  camera.updateMatrixWorld();
+  camera.updateProjectionMatrix();
+
+  const system = new InterplanetarySystem(scene, camera);
+  const floor = groundAt(SPAWN.x, SPAWN.z);
+
+  // Surface mode: systemGroup must be hidden so procedural 3D planets do not pollute skybox
+  system.step(1 / 30, { ...SPAWN, y: floor + 0.85 });
+  assert.equal(system.flightMode, "surface");
+  assert.equal(system.systemGroup.visible, false, "systemGroup must be hidden during surface flightMode");
+
+  // Setup NPC model in front of camera (+Z)
+  const npcInFront = system["makePlaceholder"]("npc", 2);
+  npcInFront.position.set(0, 10, 50);
+  system.guideModel = npcInFront;
+  scene.add(npcInFront);
+
+  system.step(1 / 30, { ...SPAWN, y: floor + 0.85 });
+  assert.equal(system.guideModel.visible, true, "NPC inside camera frustum must be visible");
+
+  // Move camera to look in opposite direction (-Z)
+  camera.lookAt(0, 10, -100);
+  camera.updateMatrixWorld();
+  camera.updateProjectionMatrix();
+
+  system.step(1 / 30, { ...SPAWN, y: floor + 0.85 });
+  assert.equal(system.guideModel.visible, false, "NPC outside camera frustum must be culled (visible = false)");
+
+  // Deep space cruise mode: systemGroup must be visible
+  system.step(1 / 30, { ...SPAWN, y: floor + 700 });
+  assert.equal(system.flightMode, "cruise");
+  assert.equal(system.systemGroup.visible, true, "systemGroup must be visible in cruise mode");
+});
