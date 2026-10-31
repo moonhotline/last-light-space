@@ -25,41 +25,105 @@ test("FrustumCullingEngine assigns high, medium, low and culled LOD levels based
   assert.equal(FrustumCullingEngine.evaluateLOD(beyondObj, cameraPos), "culled");
 });
 
-test("LazyAssetScheduler prioritizes requests and respects concurrency ceiling", async () => {
-  const scheduler = new LazyAssetScheduler(2);
-  let loadedOrder: string[] = [];
+test("LazyAssetScheduler prioritizes requests, respects concurrency ceiling, and deduplicates in-flight requests", async () => {
+  const scheduler = new LazyAssetScheduler(1); // Strict concurrency = 1
+  let peakActive = 0;
+  const executionOrder: string[] = [];
 
-  await new Promise<void>((resolve) => {
-    scheduler.requestAsset({
-      id: "low_pri",
-      url: "/assets/low.glb",
-      priority: 1,
-      onLoad: () => {
-        loadedOrder.push("low_pri");
-        if (loadedOrder.length === 3) resolve();
-      },
-    });
-    scheduler.requestAsset({
-      id: "high_pri",
-      url: "/assets/high.glb",
-      priority: 10,
-      onLoad: () => {
-        loadedOrder.push("high_pri");
-        if (loadedOrder.length === 3) resolve();
-      },
-    });
-    scheduler.requestAsset({
-      id: "urgent",
-      url: "/assets/urgent.glb",
-      priority: 100,
-      onLoad: () => {
-        loadedOrder.push("urgent");
-        if (loadedOrder.length === 3) resolve();
-      },
-    });
+  // Deferred promise helper
+  type Resolver = () => void;
+  const resolvers: Record<string, Resolver> = {};
+  const createControlledLoad = (id: string) => {
+    return () =>
+      new Promise<string>((resolve) => {
+        peakActive = Math.max(peakActive, scheduler.currentActiveCount);
+        executionOrder.push(id);
+        resolvers[id] = () => resolve(id);
+      });
+  };
+
+  // Submit 3 requests with concurrency = 1
+  const pLow = scheduler.requestAsset({
+    id: "low_pri",
+    priority: 1,
+    load: createControlledLoad("low_pri"),
+  });
+  const pHigh = scheduler.requestAsset({
+    id: "high_pri",
+    priority: 10,
+    load: createControlledLoad("high_pri"),
+  });
+  const pUrgent = scheduler.requestAsset({
+    id: "urgent",
+    priority: 100,
+    load: createControlledLoad("urgent"),
   });
 
-  assert.equal(scheduler.isLoaded("urgent"), true);
-  assert.equal(scheduler.isLoaded("high_pri"), true);
+  // At this moment, low_pri was shifted first before others were queued
+  assert.equal(scheduler.currentActiveCount, 1);
+  assert.equal(scheduler.isLoaded("low_pri"), false);
+
+  // Complete low_pri
+  resolvers["low_pri"]();
+  await pLow;
+  // Let finally microtask pump next queue item
+  await new Promise((r) => setTimeout(r, 5));
   assert.equal(scheduler.isLoaded("low_pri"), true);
+
+  // Next active task must be "urgent" due to priority 100 > 10
+  assert.equal(executionOrder[1], "urgent");
+  assert.equal(peakActive, 1);
+
+  // Test deduplication: request "urgent" again while it's in flight
+  let dedupeCalled = false;
+  const pUrgentDedupe = scheduler.requestAsset({
+    id: "urgent",
+    onLoad: () => {
+      dedupeCalled = true;
+    },
+  });
+
+  // Complete urgent
+  resolvers["urgent"]();
+  const resUrgent = await pUrgent;
+  await pUrgentDedupe;
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(resUrgent, "urgent");
+  assert.equal(dedupeCalled, true);
+  assert.equal(scheduler.isLoaded("urgent"), true);
+
+  // Finally high_pri runs
+  assert.equal(executionOrder[2], "high_pri");
+  resolvers["high_pri"]();
+  await pHigh;
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(scheduler.isLoaded("high_pri"), true);
+  assert.equal(peakActive, 1);
+});
+
+test("LazyAssetScheduler handles load failures cleanly without blocking queue", async () => {
+  const scheduler = new LazyAssetScheduler(1);
+  let failedCaught = false;
+
+  const pFail = scheduler
+    .requestAsset({
+      id: "failing_asset",
+      load: () => Promise.reject(new Error("Network timeout")),
+    })
+    .catch(() => {
+      failedCaught = true;
+    });
+
+  const pSuccess = scheduler.requestAsset({
+    id: "subsequent_asset",
+    load: () => Promise.resolve("ok"),
+  });
+
+  await Promise.all([pFail, pSuccess]);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(failedCaught, true);
+  assert.equal(scheduler.isLoaded("failing_asset"), false);
+  assert.equal(scheduler.failedAssets.has("failing_asset"), true);
+  assert.equal(scheduler.isLoaded("subsequent_asset"), true);
+  assert.equal(scheduler.currentActiveCount, 0);
 });

@@ -12,6 +12,7 @@ import { groundAt } from "../shared/map";
 import { ShipAutopilot, InterplanetaryNavigator } from "../shared/interplanetary-nav";
 import { MultiPlanetaryExpedition } from "../shared/expedition";
 import { SteeringSystem } from "../shared/npc-ai";
+import { LazyAssetScheduler } from "../shared/lod-culling";
 
 export function normalizeModelContainer(
   obj: THREE.Object3D,
@@ -87,6 +88,8 @@ export class InterplanetarySystem {
   // Category-driven loading state. No button ever triggers a model load:
   // planets / ships / NPCs load in the background and retry on their own.
   assetStatus = new Map<string, "pending" | "loaded" | "placeholder" | "failed">();
+  scheduler = new LazyAssetScheduler(3);
+  guideHoverboard: THREE.Group | null = null;
   private lastLoader: GLTFLoader | null = null;
   private retryTimer = 0;
   private retrying = false;
@@ -175,11 +178,13 @@ export class InterplanetarySystem {
           emissiveIntensity: 0.25,
         });
       } else if (id === "mercury") {
-        // Mercury heavily cratered surface
+        // Mercury cratered surface with visible celestial albedo and specular
         mat = new THREE.MeshStandardMaterial({
-          color: 0x94a3b8,
-          roughness: 0.85,
-          metalness: 0.2,
+          color: 0xa0aec0,
+          roughness: 0.75,
+          metalness: 0.25,
+          emissive: 0x334155,
+          emissiveIntensity: 0.28,
         });
       } else if (id === "stylized") {
         // Stylized emerald green biosphere planet
@@ -444,9 +449,8 @@ export class InterplanetarySystem {
     // Slowly rotate planets along their polar axis
     for (const [id, entry] of this.planets) {
       entry.group.rotation.y += (id === "mercury" ? 0.04 : 0.08) * dt;
-      const showHighDetail = this.flightMode === "cruise" || id === "kepler";
-      entry.surfaceMesh.visible = !showHighDetail || !entry.highDetail;
-      if (entry.highDetail) entry.highDetail.visible = showHighDetail;
+      entry.surfaceMesh.visible = !entry.highDetail;
+      if (entry.highDetail) entry.highDetail.visible = true;
     }
     for (const [id, ship] of this.shipMeshes)
       ship.visible = this.flightMode === "cruise" && id === this.activeShip;
@@ -499,7 +503,20 @@ export class InterplanetarySystem {
         desiredState = "idle";
       }
 
-      this.guideModel.position.y = groundAt(this.guideModel.position.x, this.guideModel.position.z) + 1.1;
+      // Check hoverboard deployment and surfing physics for companion
+      if (this.guideHoverboard) {
+        const isSurfing = desiredState === "run";
+        this.guideHoverboard.visible = isSurfing;
+        if (isSurfing) {
+          this.guideModel.position.y = groundAt(this.guideModel.position.x, this.guideModel.position.z) + 1.35;
+          this.guideHoverboard.rotation.z = THREE.MathUtils.damp(this.guideHoverboard.rotation.z, -dx * 0.015, 10, dt);
+        } else {
+          this.guideModel.position.y = groundAt(this.guideModel.position.x, this.guideModel.position.z) + 1.1;
+          this.guideHoverboard.rotation.z = 0;
+        }
+      } else {
+        this.guideModel.position.y = groundAt(this.guideModel.position.x, this.guideModel.position.z) + 1.1;
+      }
 
       // Cross-fade state machine transitions
       if (this.guideState !== desiredState && this.guideActions[desiredState]) {
@@ -542,6 +559,57 @@ export class InterplanetarySystem {
   }
 
   /**
+   * Attaches sleek glowing repulsor hoverboard beneath Blerk's feet
+   */
+  attachBlerkHoverboard(): THREE.Group | null {
+    if (!this.guideModel) return null;
+    const existing = this.guideModel.getObjectByName("blerk-hoverboard");
+    if (existing) {
+      this.guideHoverboard = existing as THREE.Group;
+      return this.guideHoverboard;
+    }
+
+    const board = new THREE.Group();
+    board.name = "blerk-hoverboard";
+
+    const deckGeo = new THREE.BoxGeometry(0.55, 0.05, 1.35);
+    const deckMat = new THREE.MeshStandardMaterial({
+      color: 0x0f172a,
+      metalness: 0.8,
+      roughness: 0.2,
+    });
+    board.add(new THREE.Mesh(deckGeo, deckMat));
+
+    const glowGeo = new THREE.BoxGeometry(0.58, 0.02, 1.38);
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0.85,
+    });
+    board.add(new THREE.Mesh(glowGeo, glowMat));
+
+    const thrusterGeo = new THREE.CylinderGeometry(0.08, 0.12, 0.18, 16);
+    const thrusterMat = new THREE.MeshBasicMaterial({
+      color: 0x67e8f9,
+      transparent: true,
+      opacity: 0.9,
+    });
+    const tFront = new THREE.Mesh(thrusterGeo, thrusterMat);
+    tFront.position.set(0, -0.08, 0.45);
+    board.add(tFront);
+
+    const tRear = new THREE.Mesh(thrusterGeo, thrusterMat);
+    tRear.position.set(0, -0.08, -0.45);
+    board.add(tRear);
+
+    board.position.set(0, -0.95, 0);
+    board.visible = false;
+    this.guideModel.add(board);
+    this.guideHoverboard = board;
+    return board;
+  }
+
+  /**
    * Asynchronously load real downloaded Sketchfab models with anti-clipping normalization.
    * Runs progressively in background so game boot is instantaneous and never blocked.
    */
@@ -549,24 +617,34 @@ export class InterplanetarySystem {
     this.lastLoader = loader;
     // A fresh pass retries only what is still missing; already-loaded real
     // models are returned from cache so a retry never duplicates them.
-    const loadSafe = async (url: string, key: string) => {
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
+    const loadSafe = async (url: string, key: string, priority = 5) => {
+      return this.scheduler.requestAsset({
+        id: key,
+        url,
+        priority,
+        load: async () => {
           this.assetStatus.set(key, "pending");
-          return await loader.loadAsync(url);
-        } catch {
-          await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
-        }
-      }
-      if (!this.assetErrors.includes(url)) this.assetErrors.push(url);
-      this.assetStatus.set(key, "failed");
-      return null;
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              return await loader.loadAsync(url);
+            } catch (err) {
+              if (attempt === 2) throw err;
+              await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+            }
+          }
+          throw new Error(`Failed to load ${url}`);
+        },
+      }).catch((err) => {
+        if (!this.assetErrors.includes(url)) this.assetErrors.push(url);
+        this.assetStatus.set(key, "failed");
+        return null;
+      });
     };
 
-    const loadModel = async (key: string, url: string, targetSize = 1) => {
+    const loadModel = async (key: string, url: string, targetSize = 1, priority = 5) => {
       const cached = this.downloadedAssets.get(key);
       if (cached && !cached.userData.placeholder) return cached;
-      const gltf = await loadSafe(url, key);
+      const gltf = await loadSafe(url, key, priority);
       if (!gltf) return null;
       const model = normalizeModelContainer(gltf.scene, targetSize);
       // A real model replaces its placeholder in place; the placeholder
@@ -577,31 +655,110 @@ export class InterplanetarySystem {
       this.assetLibrary.add(model);
       return model;
     };
-    const replacePlanet = async (id: string, key: string, url: string) => {
-      const model = await loadModel(key, url, this.planets.get(id)!.body.radius * 2);
+    const replacePlanet = async (id: string, key: string, url: string, priority = 1) => {
+      const model = await loadModel(key, url, this.planets.get(id)!.body.radius * 2, priority);
       const entry = this.planets.get(id);
       if (!model || !entry) return;
-      model.visible = false;
+      model.visible = true;
       entry.highDetail = model;
       entry.group.add(model);
     };
 
     await Promise.allSettled([
-      replacePlanet("kepler", "kepler_surface", "/assets/models/stylized_planet/scene.gltf"),
-      replacePlanet("stylized", "stylized_planet", "/assets/models/stylized_planet/scene.gltf"),
-      replacePlanet("mercury", "mercury", "/assets/models/mercury/scene.gltf"),
-      replacePlanet("earth", "earth", "/assets/models/earth/scene.gltf"),
-    ]);
-    await Promise.allSettled([
-      loadModel("cave", "/assets/models/cave/scene.gltf", 40),
-      loadModel("sky", "/assets/models/sky/scene.gltf", 40),
-      loadModel("solar_system", "/assets/models/solar_system/scene.gltf", 80),
-      loadModel("corridor", "/assets/models/corridor/scene.gltf", 38).then((model) => {
-        if (!model) return;
-        this.corridorGroup.clear();
-        this.corridorGroup.add(model);
+      // Interactive companion Blerk with highest priority 10
+      loadModel("blerk", "/assets/models/blerk/scene-web.glb", 2.2, 10).then((model) => {
+        if (!model) {
+          if (!this.guideModel) {
+            const placeholder = this.makePlaceholder("npc", 2.2);
+            placeholder.position.set(8, groundAt(8, 335) + 1.1, 335);
+            this.guideModel = placeholder;
+            this.scene.add(placeholder);
+            this.assetStatus.set("blerk", "placeholder");
+            this.attachBlerkHoverboard();
+          }
+          return;
+        }
+        // If already loaded as a real model (e.g. from prior pass or background retry), do not reset position or rebuild mixer
+        if (this.guideModel && !this.guideModel.userData.placeholder) {
+          this.attachBlerkHoverboard();
+          return;
+        }
+        const prevPos = this.guideModel ? this.guideModel.position.clone() : new THREE.Vector3(8, groundAt(8, 335) + 1.1, 335);
+        const prevRot = this.guideModel ? this.guideModel.rotation.y : 0;
+        this.replacePlaceholder(this.guideModel ?? undefined, this.scene);
+        model.position.copy(prevPos);
+        model.rotation.y = prevRot;
+        this.guideModel = model;
+        this.scene.add(model);
+        this.attachBlerkHoverboard();
+
+        // Setup Cleck/Blerk skeletal animation clips (Idle, Run, Shoot)
+        const mixer = new THREE.AnimationMixer(model);
+        this.guideMixer = mixer;
+
+        // Target existing or child groups for keyframe tracks
+        const trackTarget = model.children[0]?.name || "";
+        const prefix = trackTarget ? `${trackTarget}.` : "";
+
+        // 1. Idle clip: subtle breathing and posture swaying
+        const idleTrackPos = new THREE.VectorKeyframeTrack(
+          `${prefix}position`,
+          [0, 1.2, 2.4],
+          [0, 0, 0,  0, 0.04, 0,  0, 0, 0]
+        );
+        const idleTrackRot = new THREE.QuaternionKeyframeTrack(
+          `${prefix}quaternion`,
+          [0, 1.2, 2.4],
+          [0, 0, 0, 1,  0, 0.035, 0, 0.999,  0, 0, 0, 1]
+        );
+        const idleClip = new THREE.AnimationClip("Idle", 2.4, [idleTrackPos, idleTrackRot]);
+
+        // 2. Run clip: energetic patrol movement with stride bounce
+        const runTrackPos = new THREE.VectorKeyframeTrack(
+          `${prefix}position`,
+          [0, 0.25, 0.5, 0.75, 1.0],
+          [0, 0, 0,  0, 0.12, 0,  0, 0, 0,  0, 0.12, 0,  0, 0, 0]
+        );
+        const runTrackRot = new THREE.QuaternionKeyframeTrack(
+          `${prefix}quaternion`,
+          [0, 0.25, 0.5, 0.75, 1.0],
+          [
+            0, 0, 0.06, 0.998,
+            0.04, 0, 0, 0.999,
+            0, 0, -0.06, 0.998,
+            0.04, 0, 0, 0.999,
+            0, 0, 0.06, 0.998,
+          ]
+        );
+        const runClip = new THREE.AnimationClip("Run", 1.0, [runTrackPos, runTrackRot]);
+
+        // 3. Shoot clip: combat recoil and weapon discharge stance
+        const shootTrackPos = new THREE.VectorKeyframeTrack(
+          `${prefix}position`,
+          [0, 0.08, 0.2, 0.4],
+          [0, 0, 0,  0, 0.02, -0.14,  0, 0.01, -0.05,  0, 0, 0]
+        );
+        const shootTrackRot = new THREE.QuaternionKeyframeTrack(
+          `${prefix}quaternion`,
+          [0, 0.08, 0.2, 0.4],
+          [
+            0, 0, 0, 1,
+            -0.08, 0, 0, 0.997,
+            -0.02, 0, 0, 1.0,
+            0, 0, 0, 1,
+          ]
+        );
+        const shootClip = new THREE.AnimationClip("Shoot", 0.4, [shootTrackPos, shootTrackRot]);
+
+        this.guideActions.idle = mixer.clipAction(idleClip);
+        this.guideActions.run = mixer.clipAction(runClip);
+        this.guideActions.shoot = mixer.clipAction(shootClip);
+        this.guideActions.idle.play();
+        this.guideState = "idle";
       }),
-      loadModel("fighter", "/assets/models/fighter/scene.gltf", 12).then((model) => {
+
+      // Priority 9: Spaceship
+      loadModel("fighter", "/assets/models/fighter/scene.gltf", 12, 9).then((model) => {
         if (!model) {
           if (!this.shipMeshes.has("light_fighter")) {
             const placeholder = this.makePlaceholder("ship", 12);
@@ -619,7 +776,16 @@ export class InterplanetarySystem {
         this.shipMeshes.set("light_fighter", model);
         this.systemGroup.add(model);
       }),
-      loadModel("intergalactic", "/assets/models/intergalactic/scene.gltf", 34).then((model) => {
+
+      // Priority 6: Corridor interior
+      loadModel("corridor", "/assets/models/corridor/scene.gltf", 38, 6).then((model) => {
+        if (!model) return;
+        this.corridorGroup.clear();
+        this.corridorGroup.add(model);
+      }),
+
+      // Priority 5: Capital ship & environments
+      loadModel("intergalactic", "/assets/models/intergalactic/scene.gltf", 34, 5).then((model) => {
         if (!model) {
           if (!this.shipMeshes.has("cruiser")) {
             const placeholder = this.makePlaceholder("ship", 34);
@@ -637,88 +803,15 @@ export class InterplanetarySystem {
         this.shipMeshes.set("cruiser", model);
         this.systemGroup.add(model);
       }),
-      loadModel("blerk", "/assets/models/blerk/scene-web.glb", 2.2).then((model) => {
-        if (!model) {
-          if (!this.guideModel) {
-            const placeholder = this.makePlaceholder("npc", 2.2);
-            placeholder.position.set(8, groundAt(8, 335) + 1.1, 335);
-            this.guideModel = placeholder;
-            this.scene.add(placeholder);
-            this.assetStatus.set("blerk", "placeholder");
-          }
-          return;
-        }
-        if (model) {
-          this.replacePlaceholder(this.guideModel ?? undefined, this.scene);
-          model.position.set(8, groundAt(8, 335) + 1.1, 335);
-          this.guideModel = model;
-          this.scene.add(model);
+      loadModel("cave", "/assets/models/cave/scene.gltf", 40, 4),
+      loadModel("sky", "/assets/models/sky/scene.gltf", 40, 4),
+      loadModel("solar_system", "/assets/models/solar_system/scene.gltf", 80, 4),
 
-          // Setup Cleck/Blerk skeletal animation clips (Idle, Run, Shoot)
-          const mixer = new THREE.AnimationMixer(model);
-          this.guideMixer = mixer;
-
-          // Target existing or child groups for keyframe tracks
-          const trackTarget = model.children[0]?.name || "";
-          const prefix = trackTarget ? `${trackTarget}.` : "";
-
-          // 1. Idle clip: subtle breathing and posture swaying
-          const idleTrackPos = new THREE.VectorKeyframeTrack(
-            `${prefix}position`,
-            [0, 1.2, 2.4],
-            [0, 0, 0,  0, 0.04, 0,  0, 0, 0]
-          );
-          const idleTrackRot = new THREE.QuaternionKeyframeTrack(
-            `${prefix}quaternion`,
-            [0, 1.2, 2.4],
-            [0, 0, 0, 1,  0, 0.035, 0, 0.999,  0, 0, 0, 1]
-          );
-          const idleClip = new THREE.AnimationClip("Idle", 2.4, [idleTrackPos, idleTrackRot]);
-
-          // 2. Run clip: energetic patrol movement with stride bounce
-          const runTrackPos = new THREE.VectorKeyframeTrack(
-            `${prefix}position`,
-            [0, 0.25, 0.5, 0.75, 1.0],
-            [0, 0, 0,  0, 0.12, 0,  0, 0, 0,  0, 0.12, 0,  0, 0, 0]
-          );
-          const runTrackRot = new THREE.QuaternionKeyframeTrack(
-            `${prefix}quaternion`,
-            [0, 0.25, 0.5, 0.75, 1.0],
-            [
-              0, 0, 0.06, 0.998,
-              0.04, 0, 0, 0.999,
-              0, 0, -0.06, 0.998,
-              0.04, 0, 0, 0.999,
-              0, 0, 0.06, 0.998,
-            ]
-          );
-          const runClip = new THREE.AnimationClip("Run", 1.0, [runTrackPos, runTrackRot]);
-
-          // 3. Shoot clip: combat recoil and weapon discharge stance
-          const shootTrackPos = new THREE.VectorKeyframeTrack(
-            `${prefix}position`,
-            [0, 0.08, 0.2, 0.4],
-            [0, 0, 0,  0, 0.02, -0.14,  0, 0.01, -0.05,  0, 0, 0]
-          );
-          const shootTrackRot = new THREE.QuaternionKeyframeTrack(
-            `${prefix}quaternion`,
-            [0, 0.08, 0.2, 0.4],
-            [
-              0, 0, 0, 1,
-              -0.08, 0, 0, 0.997,
-              -0.02, 0, 0, 1.0,
-              0, 0, 0, 1,
-            ]
-          );
-          const shootClip = new THREE.AnimationClip("Shoot", 0.4, [shootTrackPos, shootTrackRot]);
-
-          this.guideActions.idle = mixer.clipAction(idleClip);
-          this.guideActions.run = mixer.clipAction(runClip);
-          this.guideActions.shoot = mixer.clipAction(shootClip);
-          this.guideActions.idle.play();
-          this.guideState = "idle";
-        }
-      }),
+      // Background planetary celestial bodies
+      replacePlanet("kepler", "kepler_surface", "/assets/models/stylized_planet/scene.gltf", 4),
+      replacePlanet("mercury", "mercury", "/assets/models/mercury/scene.gltf", 2),
+      replacePlanet("stylized", "stylized_planet", "/assets/models/stylized_planet/scene.gltf", 1),
+      replacePlanet("earth", "earth", "/assets/models/earth/scene.gltf", 1),
       loadModel("alien1", "/assets/models/alien1/scene.gltf", 2).then((model) => {
         if (!model) {
           if (!this.downloadedAssets.has("alien1")) {

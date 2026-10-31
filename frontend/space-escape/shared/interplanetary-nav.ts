@@ -166,16 +166,27 @@ export class ShipAutopilot {
     const invDist = distToWp > 0.001 ? 1 / distToWp : 0;
     const step = Math.min(distToWp, speed * dt);
 
+    this.shipVel = {
+      x: dx * invDist * speed,
+      y: dy * invDist * speed,
+      z: dz * invDist * speed,
+    };
+
     this.shipPos.x += dx * invDist * step;
     this.shipPos.y += dy * invDist * step;
     this.shipPos.z += dz * invDist * step;
 
-    if (distToWp < 25) {
-      this.currentWaypointIdx++;
-      if (this.currentWaypointIdx >= this.flightPath.length) {
+    const isFinalWp = this.currentWaypointIdx === this.flightPath.length - 1;
+    const arrivalThreshold = isFinalWp ? 1.0 : 25;
+
+    if (distToWp <= arrivalThreshold || step >= distToWp) {
+      if (isFinalWp) {
+        this.shipPos = { ...wp.pos };
+        this.shipVel = { x: 0, y: 0, z: 0 };
         this.stage = "docked";
         this.throttle = 0;
       } else {
+        this.currentWaypointIdx++;
         const nextStage = this.flightPath[this.currentWaypointIdx].stage;
         this.stage = nextStage === "ascent" ? "takeoff" : nextStage === "warp_cruise" ? "warp" : "landing";
       }
