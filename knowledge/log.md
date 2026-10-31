@@ -17,3 +17,4 @@
 | 2026-10-31 21:32 | Commit 9c83abe | developer | 全库/配置同步 | docs(audit): comprehensive analysis & technical audit report for last-light-spac |
 | 2026-10-31 14:04 | Commit 9ad4b90 | moonhotline | 全库/配置同步 | fix(ci): provide default party.oodai.space endpoint for Vercel CICD room configu |
 | 2026-10-31 14:06 | Commit e1ca57a | moonhotline | 天体物理与大气, 渲染管线与 LOD | Merge pull request #24: 修复升空高度、开普勒坐标与 30km 视距 |
+| 2026-10-31 14:59 | PR #25 (50d9e6a) | moonhotline | 星际轨道导航, 渲染管线与 LOD, 权威多人仿真 | feat(space): wire interplanetary flight, companion expedition, and real lazy ass |

@@ -2,7 +2,7 @@
 title: "oodaispace (Last Light · 回声协议) Knowledge Bundle"
 version: "0.3.2"
 description: "面向 AI Agent 与工程团队的 Open Knowledge Format (OKF) 规范知识包。记录低重力行星探索、轨道导航、自主 AI、多人仿真与渲染架构。"
-lastUpdated: 2026-10-31T14:06:22.625Z
+lastUpdated: 2026-10-31T14:59:07.389Z
 entries:
   - concepts/architecture-overview.md
   - concepts/movement-physics.md
