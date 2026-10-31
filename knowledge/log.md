@@ -15,3 +15,4 @@
 | 2026-10-31 17:27 | PR #2 (c8a8932) | leek | shared/npc-ai.ts | feat(ai): 高级 NPC 雷诺转向行为库与分层战术决策树状态机 |
 | 2026-10-31 17:22 | PR #1 (2699d41) | leek | shared/perf-benchmark.ts | feat(perf): 60Hz 高频物理循环微秒级基准测试套件与 P99 抖动度量 |
 | 2026-10-31 21:32 | Commit 9c83abe | developer | 全库/配置同步 | docs(audit): comprehensive analysis & technical audit report for last-light-spac |
+| 2026-10-31 14:04 | Commit 9ad4b90 | moonhotline | 全库/配置同步 | fix(ci): provide default party.oodai.space endpoint for Vercel CICD room configu |
