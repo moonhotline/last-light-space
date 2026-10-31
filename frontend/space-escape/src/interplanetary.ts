@@ -446,14 +446,58 @@ export class InterplanetarySystem {
         });
       }
     }
-    // Slowly rotate planets along their polar axis
-    for (const [id, entry] of this.planets) {
-      entry.group.rotation.y += (id === "mercury" ? 0.04 : 0.08) * dt;
-      entry.surfaceMesh.visible = !entry.highDetail;
-      if (entry.highDetail) entry.highDetail.visible = true;
+    // The basin is a heightfield below the decorative Kepler sphere.
+    // Raising that sphere must not mark a player on the basin floor as cruising.
+    const current = SOLAR_SYSTEM[shipPos.planet || this.currentPlanet] || SOLAR_SYSTEM.kepler;
+    const distToCenter = Math.hypot(
+      shipPos.x - current.position.x,
+      shipPos.y - current.position.y,
+      shipPos.z - current.position.z,
+    );
+    this.flightAltitude = Math.max(0, current.id === "kepler" && shipPos.planet !== "kepler"
+      ? shipPos.y - groundAt(shipPos.x, shipPos.z)
+      : distToCenter - current.radius);
+
+    // Automatic flight mode transition
+    if (this.flightAltitude > 350 && this.flightMode === "surface") {
+      this.flightMode = "cruise";
+    } else if (this.flightAltitude <= 300 && this.flightMode === "cruise") {
+      this.flightMode = "surface";
     }
-    for (const [id, ship] of this.shipMeshes)
-      ship.visible = this.flightMode === "cruise" && id === this.activeShip;
+
+    const isCruising = this.flightMode === "cruise" || this.flightMode === "ascent" || this.flightMode === "reentry";
+    this.systemGroup.visible = isCruising;
+
+    // Camera Frustum Culling Engine: evaluate visibility within camera field of view
+    const frustum = new THREE.Frustum();
+    const projScreenMatrix = new THREE.Matrix4().multiplyMatrices(
+      this.camera.projectionMatrix,
+      this.camera.matrixWorldInverse,
+    );
+    frustum.setFromProjectionMatrix(projScreenMatrix);
+
+    const isInFrustum = (pos: THREE.Vector3, radius: number): boolean => {
+      return frustum.intersectsSphere(new THREE.Sphere(pos, radius));
+    };
+
+    // In space cruise mode, rotate and frustum-cull celestial bodies
+    if (isCruising) {
+      for (const [id, entry] of this.planets) {
+        entry.group.rotation.y += (id === "mercury" ? 0.04 : 0.08) * dt;
+        const inView = isInFrustum(entry.group.position, entry.body.radius * 2.5);
+        entry.group.visible = inView;
+        if (inView) {
+          entry.surfaceMesh.visible = !entry.highDetail;
+          if (entry.highDetail) entry.highDetail.visible = true;
+        }
+      }
+    }
+
+    for (const [id, ship] of this.shipMeshes) {
+      const active = isCruising && id === this.activeShip;
+      ship.visible = active && isInFrustum(ship.position, 40);
+    }
+
     if (this.guideMixer) {
       this.guideMixer.update(dt);
     }
@@ -469,7 +513,7 @@ export class InterplanetarySystem {
       let nearEnemy = false;
       let enemyTarget: THREE.Vector3 | null = null;
       for (const enemy of [alien1, alien2]) {
-        if (enemy && enemy.visible) {
+        if (enemy) {
           const eDist = Math.hypot(
             enemy.position.x - this.guideModel.position.x,
             enemy.position.z - this.guideModel.position.z
@@ -528,33 +572,31 @@ export class InterplanetarySystem {
           this.guideState = desiredState;
         }
       }
+
+      // Render only when within camera view frustum
+      this.guideModel.visible = !isCruising && isInFrustum(this.guideModel.position, 4);
     }
-    if (this.caveModel) this.caveModel.visible = this.inCorridor;
-    if (this.skyModel) this.skyModel.visible = this.flightMode === "cruise";
-    if (this.solarModel) this.solarModel.visible = this.flightMode === "cruise";
 
-    // Mineral clusters crystal oscillation
-    this.mineralNodes.children.forEach((c, idx) => {
-      c.rotation.y += 0.4 * dt * (idx % 2 === 0 ? 1 : -1);
-    });
+    // Alien predators frustum visibility
+    const alien1 = this.downloadedAssets.get("alien1");
+    if (alien1) {
+      alien1.visible = !isCruising && isInFrustum(alien1.position, 6);
+    }
+    const alien2 = this.downloadedAssets.get("alien2");
+    if (alien2) {
+      alien2.visible = !isCruising && isInFrustum(alien2.position, 8);
+    }
 
-    // The basin is a heightfield below the decorative Kepler sphere.
-    // Raising that sphere must not mark a player on the basin floor as cruising.
-    const current = SOLAR_SYSTEM[shipPos.planet || this.currentPlanet] || SOLAR_SYSTEM.kepler;
-    const distToCenter = Math.hypot(
-      shipPos.x - current.position.x,
-      shipPos.y - current.position.y,
-      shipPos.z - current.position.z,
-    );
-    this.flightAltitude = Math.max(0, current.id === "kepler" && shipPos.planet !== "kepler"
-      ? shipPos.y - groundAt(shipPos.x, shipPos.z)
-      : distToCenter - current.radius);
+    if (this.caveModel) this.caveModel.visible = this.inCorridor && isInFrustum(this.caveModel.position, 60);
+    if (this.skyModel) this.skyModel.visible = isCruising && isInFrustum(this.skyModel.position, 1000);
+    if (this.solarModel) this.solarModel.visible = isCruising && isInFrustum(this.solarModel.position, 2000);
 
-    // Automatic flight mode transition
-    if (this.flightAltitude > 350 && this.flightMode === "surface") {
-      this.flightMode = "cruise";
-    } else if (this.flightAltitude <= 300 && this.flightMode === "cruise") {
-      this.flightMode = "surface";
+    // Mineral clusters crystal oscillation and frustum culling
+    this.mineralNodes.visible = !isCruising && isInFrustum(new THREE.Vector3(-30, 21.5, 115), 35);
+    if (this.mineralNodes.visible) {
+      this.mineralNodes.children.forEach((c, idx) => {
+        c.rotation.y += 0.4 * dt * (idx % 2 === 0 ? 1 : -1);
+      });
     }
   }
 
