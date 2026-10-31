@@ -36,7 +36,11 @@ import { FOOT_OFFSET, playerUp, surfaceOrientation, eyePosition, viewOrientation
 import { createHandRig, equipmentModel, attachHeldModel } from "./hand-rig";
 const COLORS = [0x9eeafa, 0xffc98b, 0xff9f81, 0xa6baff];
 const v3 = (v: Vec) => new THREE.Vector3(v.x, v.y, v.z);
-const vertex = `varying vec2 vUv; varying vec3 vNormal; varying vec3 vPosition; void main(){vUv=uv;vNormal=normal;vPosition=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`;
+const vertex = `#include <common>
+#include <logdepthbuf_pars_vertex>
+varying vec2 vUv; varying vec3 vNormal; varying vec3 vPosition; void main(){vUv=uv;vNormal=normal;vPosition=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);
+#include <logdepthbuf_vertex>
+}`;
 const glowMaterial = (color: number, opacity = 0.5) =>
   new THREE.MeshBasicMaterial({
     color,
@@ -108,7 +112,7 @@ export class GameView {
   scene = new THREE.Scene();
   skyScene = new THREE.Scene();
   skyCamera = new THREE.PerspectiveCamera(66, 1, 100, 22000);
-  camera = new THREE.PerspectiveCamera(66, 1, 0.1, 6500);
+  camera = new THREE.PerspectiveCamera(66, 1, 0.1, 30000);
   renderer: THREE.WebGLRenderer;
   composer: EffectComposer;
   bloom: UnrealBloomPass;
@@ -246,6 +250,8 @@ export class GameView {
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: true,
+      // Preserve the 10cm near plane for first-person hands at deep-space ranges.
+      logarithmicDepthBuffer: true,
       powerPreference: "high-performance",
       preserveDrawingBuffer: true,
     });
@@ -319,8 +325,15 @@ export class GameView {
         transparent: true,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
-        vertexShader: `attribute float size; varying vec3 vColor; void main(){vColor=color;vec4 p=modelViewMatrix*vec4(position,1.);gl_Position=projectionMatrix*p;gl_PointSize=clamp(size*420./max(1.,-p.z),0.,85.);}`,
-        fragmentShader: `varying vec3 vColor;void main(){float d=length(gl_PointCoord-.5)*2.;if(d>1.)discard;gl_FragColor=vec4(vColor,pow(1.-d,2.));}`,
+        vertexShader: `#include <common>
+#include <logdepthbuf_pars_vertex>
+attribute float size; varying vec3 vColor; void main(){vColor=color;vec4 p=modelViewMatrix*vec4(position,1.);gl_Position=projectionMatrix*p;gl_PointSize=clamp(size*420./max(1.,-p.z),0.,85.);
+#include <logdepthbuf_vertex>
+}`,
+        fragmentShader: `#include <logdepthbuf_pars_fragment>
+varying vec3 vColor;void main(){float d=length(gl_PointCoord-.5)*2.;if(d>1.)discard;gl_FragColor=vec4(vColor,pow(1.-d,2.));
+#include <logdepthbuf_fragment>
+}`,
       }),
     );
     this.particlePoints.frustumCulled = false;
@@ -507,7 +520,10 @@ export class GameView {
       side: THREE.BackSide,
       depthWrite: false,
       vertexShader: vertex,
-      fragmentShader: `varying vec3 vPosition;void main(){vec3 d=normalize(vPosition);float h=max(0.,d.y);vec3 c=mix(vec3(.24,.32,.39),vec3(.009,.020,.041),pow(h,.38));float s=pow(max(0.,dot(d,normalize(vec3(-.65,.19,-.5)))),28.);c+=vec3(.24,.13,.045)*s;gl_FragColor=vec4(c,1.);}`,
+      fragmentShader: `#include <logdepthbuf_pars_fragment>
+varying vec3 vPosition;void main(){vec3 d=normalize(vPosition);float h=max(0.,d.y);vec3 c=mix(vec3(.24,.32,.39),vec3(.009,.020,.041),pow(h,.38));float s=pow(max(0.,dot(d,normalize(vec3(-.65,.19,-.5)))),28.);c+=vec3(.24,.13,.045)*s;gl_FragColor=vec4(c,1.);
+#include <logdepthbuf_fragment>
+}`,
     });
     const dome = new THREE.Mesh(
       new THREE.SphereGeometry(18000, 40, 24),
@@ -589,8 +605,15 @@ export class GameView {
         tint: { value: new THREE.Color(color) },
         strength: { value: strength },
       },
-      vertexShader: `varying vec3 n;varying vec3 eye;void main(){vec4 p=modelViewMatrix*vec4(position,1.);eye=-p.xyz;n=normalize(normalMatrix*normal);gl_Position=projectionMatrix*p;}`,
-      fragmentShader: `uniform vec3 tint;uniform float strength;varying vec3 n;varying vec3 eye;void main(){float rim=pow(1.-max(0.,dot(normalize(n),normalize(eye))),4.);gl_FragColor=vec4(tint,rim*strength);}`,
+      vertexShader: `#include <common>
+#include <logdepthbuf_pars_vertex>
+varying vec3 n;varying vec3 eye;void main(){vec4 p=modelViewMatrix*vec4(position,1.);eye=-p.xyz;n=normalize(normalMatrix*normal);gl_Position=projectionMatrix*p;
+#include <logdepthbuf_vertex>
+}`,
+      fragmentShader: `#include <logdepthbuf_pars_fragment>
+uniform vec3 tint;uniform float strength;varying vec3 n;varying vec3 eye;void main(){float rim=pow(1.-max(0.,dot(normalize(n),normalize(eye))),4.);gl_FragColor=vec4(tint,rim*strength);
+#include <logdepthbuf_fragment>
+}`,
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
@@ -616,8 +639,15 @@ export class GameView {
       geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
       const mat = new THREE.ShaderMaterial({
         uniforms: { time: { value: 0 }, height: { value: t.height } },
-        vertexShader: `uniform float time;uniform float height;varying float alpha;void main(){vec3 p=position;float a=time*.4+p.y*.04;mat2 rot=mat2(cos(a),-sin(a),sin(a),cos(a));p.xz=rot*p.xz;p.y=mod(p.y+time*16.,height);alpha=sin(p.y/height*3.14159);vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;gl_PointSize=clamp(130./max(1.,-mv.z),1.,5.);}`,
-        fragmentShader: `varying float alpha;void main(){float d=length(gl_PointCoord-.5)*2.;gl_FragColor=vec4(.6,.88,1.,(1.-d)*alpha*.7);}`,
+        vertexShader: `#include <common>
+#include <logdepthbuf_pars_vertex>
+uniform float time;uniform float height;varying float alpha;void main(){vec3 p=position;float a=time*.4+p.y*.04;mat2 rot=mat2(cos(a),-sin(a),sin(a),cos(a));p.xz=rot*p.xz;p.y=mod(p.y+time*16.,height);alpha=sin(p.y/height*3.14159);vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;gl_PointSize=clamp(130./max(1.,-mv.z),1.,5.);
+#include <logdepthbuf_vertex>
+}`,
+        fragmentShader: `#include <logdepthbuf_pars_fragment>
+varying float alpha;void main(){float d=length(gl_PointCoord-.5)*2.;gl_FragColor=vec4(.6,.88,1.,(1.-d)*alpha*.7);
+#include <logdepthbuf_fragment>
+}`,
         transparent: true,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
@@ -815,7 +845,10 @@ export class GameView {
           blending: THREE.AdditiveBlending,
           side: THREE.DoubleSide,
           vertexShader: vertex,
-          fragmentShader: `uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*(.055+activation*.16);gl_FragColor=vec4(.25,.75,1.,a);}`,
+          fragmentShader: `#include <logdepthbuf_pars_fragment>
+uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*(.055+activation*.16);gl_FragColor=vec4(.25,.75,1.,a);
+#include <logdepthbuf_fragment>
+}`,
         }),
       );
       beam.position.y = 130;

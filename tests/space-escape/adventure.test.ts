@@ -15,6 +15,7 @@ import {
   type ItemId,
 } from "../../frontend/space-escape/shared/adventure-data";
 import {
+  HALF,
   groundAt,
   distance3,
   type Vec,
@@ -255,4 +256,56 @@ test("arrival requires repaired ship, a pilot, actual flight and landing in the 
   assert.equal(ship.arrived, true);
   assert.equal(sim.s.phase, "won");
   sim.dispose();
+});
+
+test("pilot and passenger ascend past 650m and retain controls at deep-space heights", () => {
+  const { sim, p, g } = setup();
+  try {
+    const ship = sim.s.adventure.ship;
+    ship.repaired = true;
+    ship.seats[0] = p.id;
+    ship.seats[1] = g.id;
+    p.seat = 0;
+    g.seat = 1;
+    // Exercise the authoritative simulation, not a mocked position integrator.
+    for (const height of [649, 1799, 6999]) {
+      Object.assign(ship, { y: height, vy: 0, vx: 0, vz: 0 });
+      step(sim, p, { jump: true }, 90);
+      assert.ok(ship.y > height + 20, `must ascend from ${height}m`);
+      assert.equal(ship.grounded, false);
+      for (const occupant of [p, g]) {
+        assert.equal(occupant.y, ship.y + 2.2);
+        assert.equal(occupant.vy, ship.vy);
+        assert.ok(Number.isFinite(occupant.y));
+      }
+      const top = ship.y;
+      step(sim, p, { brake: true, sprint: true }, 90);
+      assert.ok(ship.y < top, "brakes must still permit descent");
+    }
+  } finally {
+    sim.dispose();
+  }
+});
+
+test("unbounded ascent retains the sampled terrain floor and basin lateral limits", () => {
+  const { sim, p } = setup();
+  try {
+    const ship = sim.s.adventure.ship;
+    ship.repaired = true;
+    ship.seats[0] = p.id;
+    p.seat = 0;
+    const floor = Math.max(...[-4, 0, 4].flatMap(x =>
+      [-5, 0, 5].map(z => groundAt(ship.x + x, ship.z + z))));
+    Object.assign(ship, { y: floor + 0.05, vy: -16 });
+    step(sim, p, { brake: true });
+    assert.equal(ship.y, floor);
+    assert.equal(ship.grounded, true);
+    assert.equal(ship.vy, 0);
+    Object.assign(ship, { x: HALF - 20, y: 7000, vx: 72, yaw: 0 });
+    step(sim, p, { side: 1 });
+    assert.equal(ship.x, HALF - 20, "lateral release is outside this patch");
+    assert.ok(ship.y > 650);
+  } finally {
+    sim.dispose();
+  }
 });
