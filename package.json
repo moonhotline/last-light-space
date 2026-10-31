@@ -13,6 +13,7 @@
     "space:ui": "playwright test --config playwright.space.config.ts",
     "space:record": "node frontend/space-escape/scripts/record-echo.mjs",
     "space:prepare-vercel": "npm run space:build && node frontend/space-escape/scripts/prepare-vercel.mjs",
+    "okf:update": "node scripts/update-okf.mjs",
     "postinstall": "node frontend/space-escape/scripts/patch-rapier.mjs"
   },
   "devDependencies": {
