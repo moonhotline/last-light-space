@@ -9,6 +9,7 @@ import {
   type FlightFlightMode,
 } from "../shared/celestial";
 import { groundAt } from "../shared/map";
+import { SHIP_HOME } from "../shared/adventure-data";
 import { ShipAutopilot, InterplanetaryNavigator } from "../shared/interplanetary-nav";
 import { MultiPlanetaryExpedition } from "../shared/expedition";
 import { SteeringSystem } from "../shared/npc-ai";
@@ -159,6 +160,14 @@ export class InterplanetarySystem {
     this.buildSolarSystem();
     this.buildSpaceshipCorridor();
     this.buildMineralSpecimens();
+
+    // Dock spaceship at starting home position from frame zero
+    const homePos = new THREE.Vector3(SHIP_HOME.x, groundAt(SHIP_HOME.x, SHIP_HOME.z) + 1.2, SHIP_HOME.z);
+    const initialShip = this.makePlaceholder("ship", 12);
+    initialShip.position.copy(homePos);
+    initialShip.visible = true;
+    this.shipMeshes.set("light_fighter", initialShip);
+    this.scene.add(initialShip);
   }
 
   /** Build 3D planetary celestial bodies and orbits */
@@ -422,11 +431,17 @@ export class InterplanetarySystem {
       this.lastShipPosition = new THREE.Vector3(ship.x, ship.y, ship.z);
       this.lastShipYaw = ship.yaw;
     }
+    const currentPos = ship
+      ? new THREE.Vector3(ship.x, ship.y + 1.2, ship.z)
+      : new THREE.Vector3(SHIP_HOME.x, groundAt(SHIP_HOME.x, SHIP_HOME.z) + 1.2, SHIP_HOME.z);
+    const yaw = ship ? ship.yaw : Math.PI;
+    const bank = ship ? -ship.bank : 0;
+
     for (const [id, model] of this.shipMeshes) {
-      model.visible = !!ship && (this.flightMode === "cruise" || ship.seats.some(Boolean)) && id === this.activeShip;
-      if (!ship || !model.visible) continue;
-      model.position.set(ship.x, ship.y + 2.2, ship.z);
-      model.rotation.set(0, ship.yaw, -ship.bank);
+      const isSelected = id === this.activeShip;
+      model.position.copy(currentPos);
+      model.rotation.set(0, yaw, bank);
+      model.visible = isSelected;
     }
   }
 
@@ -466,7 +481,7 @@ export class InterplanetarySystem {
     }
 
     const isCruising = this.flightMode === "cruise" || this.flightMode === "ascent" || this.flightMode === "reentry";
-    this.systemGroup.visible = isCruising;
+    this.systemGroup.visible = true;
 
     // Camera Frustum Culling Engine: evaluate visibility within camera field of view
     const frustum = new THREE.Frustum();
@@ -480,22 +495,24 @@ export class InterplanetarySystem {
       return frustum.intersectsSphere(new THREE.Sphere(pos, radius));
     };
 
-    // In space cruise mode, rotate and frustum-cull celestial bodies
-    if (isCruising) {
-      for (const [id, entry] of this.planets) {
-        entry.group.rotation.y += (id === "mercury" ? 0.04 : 0.08) * dt;
-        const inView = isInFrustum(entry.group.position, entry.body.radius * 2.5);
-        entry.group.visible = inView;
-        if (inView) {
-          entry.surfaceMesh.visible = !entry.highDetail;
-          if (entry.highDetail) entry.highDetail.visible = true;
-        }
+    // Rotate and frustum-cull celestial bodies (Kepler, Mercury, Earth, Stylized)
+    for (const [id, entry] of this.planets) {
+      entry.group.rotation.y += (id === "mercury" ? 0.04 : 0.08) * dt;
+      const inView = isInFrustum(entry.group.position, entry.body.radius * 2.5);
+      entry.group.visible = inView;
+      if (inView) {
+        entry.surfaceMesh.visible = !entry.highDetail;
+        if (entry.highDetail) entry.highDetail.visible = true;
       }
     }
 
     for (const [id, ship] of this.shipMeshes) {
-      const active = isCruising && id === this.activeShip;
-      ship.visible = active && isInFrustum(ship.position, 40);
+      const isSelected = id === this.activeShip;
+      if (!isSelected) {
+        ship.visible = false;
+        continue;
+      }
+      ship.visible = isInFrustum(ship.position, 40);
     }
 
     if (this.guideMixer) {
@@ -801,22 +818,23 @@ export class InterplanetarySystem {
 
       // Priority 9: Spaceship
       loadModel("fighter", "/assets/models/fighter/scene.gltf", 12, 9).then((model) => {
+        const homePos = new THREE.Vector3(SHIP_HOME.x, groundAt(SHIP_HOME.x, SHIP_HOME.z) + 1.2, SHIP_HOME.z);
         if (!model) {
           if (!this.shipMeshes.has("light_fighter")) {
             const placeholder = this.makePlaceholder("ship", 12);
-            placeholder.position.copy(SOLAR_SYSTEM.kepler.position).add(new THREE.Vector3(0, 520, 0));
-            placeholder.visible = false;
+            placeholder.position.copy(homePos);
+            placeholder.visible = this.activeShip === "light_fighter";
             this.shipMeshes.set("light_fighter", placeholder);
-            this.systemGroup.add(placeholder);
+            this.scene.add(placeholder);
             this.assetStatus.set("fighter", "placeholder");
           }
           return;
         }
-        this.replacePlaceholder(this.shipMeshes.get("light_fighter"), this.systemGroup);
-        model.position.copy(SOLAR_SYSTEM.kepler.position).add(new THREE.Vector3(0, 520, 0));
-        model.visible = false;
+        this.replacePlaceholder(this.shipMeshes.get("light_fighter"), this.scene);
+        model.position.copy(homePos);
+        model.visible = this.activeShip === "light_fighter";
         this.shipMeshes.set("light_fighter", model);
-        this.systemGroup.add(model);
+        this.scene.add(model);
       }),
 
       // Priority 6: Corridor interior
@@ -828,22 +846,23 @@ export class InterplanetarySystem {
 
       // Priority 5: Capital ship & environments
       loadModel("intergalactic", "/assets/models/intergalactic/scene.gltf", 34, 5).then((model) => {
+        const homePos = new THREE.Vector3(SHIP_HOME.x, groundAt(SHIP_HOME.x, SHIP_HOME.z) + 1.2, SHIP_HOME.z);
         if (!model) {
           if (!this.shipMeshes.has("cruiser")) {
             const placeholder = this.makePlaceholder("ship", 34);
-            placeholder.position.copy(SOLAR_SYSTEM.kepler.position).add(new THREE.Vector3(0, 520, 0));
-            placeholder.visible = false;
+            placeholder.position.copy(homePos);
+            placeholder.visible = this.activeShip === "cruiser";
             this.shipMeshes.set("cruiser", placeholder);
-            this.systemGroup.add(placeholder);
+            this.scene.add(placeholder);
             this.assetStatus.set("intergalactic", "placeholder");
           }
           return;
         }
-        this.replacePlaceholder(this.shipMeshes.get("cruiser"), this.systemGroup);
-        model.position.copy(SOLAR_SYSTEM.kepler.position).add(new THREE.Vector3(0, 520, 0));
-        model.visible = false;
+        this.replacePlaceholder(this.shipMeshes.get("cruiser"), this.scene);
+        model.position.copy(homePos);
+        model.visible = this.activeShip === "cruiser";
         this.shipMeshes.set("cruiser", model);
-        this.systemGroup.add(model);
+        this.scene.add(model);
       }),
       loadModel("cave", "/assets/models/cave/scene.gltf", 40, 4),
       loadModel("sky", "/assets/models/sky/scene.gltf", 40, 4),
