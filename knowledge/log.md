@@ -20,3 +20,4 @@
 | 2026-10-31 14:59 | PR #25 (50d9e6a) | moonhotline | 星际轨道导航, 渲染管线与 LOD, 权威多人仿真 | feat(space): wire interplanetary flight, companion expedition, and real lazy ass |
 | 2026-10-31 15:00 | Commit 72c0b79 | moonhotline | 星际轨道导航, 渲染管线与 LOD, 权威多人仿真 | Merge pull request #25 from moonhotline/feat/interplanetary-companion-flight-pip |
 | 2026-10-31 16:35 | PR #26 (c8fb247) | moonhotline | 渲染管线与 LOD | fix(rendering): restore skybox planets and implement camera frustum culling for  |
+| 2026-10-31 16:58 | PR #27 (4638a0b) | moonhotline | 渲染管线与 LOD | fix(space): preserve Kepler and solar planets with frustum culling and dock spac |
