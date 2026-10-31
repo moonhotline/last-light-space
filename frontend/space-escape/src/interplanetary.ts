@@ -9,6 +9,9 @@ import {
   type FlightFlightMode,
 } from "../shared/celestial";
 import { groundAt } from "../shared/map";
+import { ShipAutopilot, InterplanetaryNavigator } from "../shared/interplanetary-nav";
+import { MultiPlanetaryExpedition } from "../shared/expedition";
+import { SteeringSystem } from "../shared/npc-ai";
 
 export function normalizeModelContainer(
   obj: THREE.Object3D,
@@ -132,6 +135,8 @@ export class InterplanetarySystem {
   guideActions: Record<"idle" | "run" | "shoot", THREE.AnimationAction | null> = { idle: null, run: null, shoot: null };
   guideState: "idle" | "run" | "shoot" = "idle";
   guideShootTimer = 0;
+  autopilot: ShipAutopilot;
+  expedition: MultiPlanetaryExpedition;
   caveModel: THREE.Group | null = null;
   skyModel: THREE.Group | null = null;
   solarModel: THREE.Group | null = null;
@@ -139,6 +144,8 @@ export class InterplanetarySystem {
   constructor(scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
     this.scene = scene;
     this.camera = camera;
+    this.autopilot = new ShipAutopilot(SOLAR_SYSTEM.kepler.position);
+    this.expedition = new MultiPlanetaryExpedition(SOLAR_SYSTEM.kepler);
     this.scene.add(this.systemGroup);
     this.scene.add(this.corridorGroup);
     this.scene.add(this.mineralNodes);
