@@ -373,9 +373,12 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
     s.vz =
       s.vz * Math.exp(-damping * DT) +
       (-Math.sin(s.yaw) * i.side - Math.cos(s.yaw) * i.forward) * 28 * DT;
+    const isClimbing = (i.jump || i.jet) && !!pilot;
+    const climbForce = isClimbing ? 85 : 0;
+    const vyDamping = i.sprint ? 4.0 : (isClimbing ? 0.9 : 1.8);
     s.vy =
-      s.vy * Math.exp(-(i.sprint ? 4 : 1.8) * DT) +
-      ((i.jump || i.jet ? 30 : 0) - (i.brake ? 24 : 0) - 3) * DT;
+      s.vy * Math.exp(-vyDamping * DT) +
+      (climbForce - (i.brake ? 28 : 0) - 3) * DT;
     const speed = Math.hypot(s.vx, s.vz);
     const inDeepSpace = s.y > 650 || Math.abs(s.x) > HALF - 10 || Math.abs(s.z) > HALF - 10;
     const maxSpeed = inDeepSpace || (s.thrust || 0) > 1.2 ? 320 : 72;
@@ -383,7 +386,7 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
       s.vx *= maxSpeed / speed;
       s.vz *= maxSpeed / speed;
     }
-    const maxVy = inDeepSpace || (s.thrust || 0) > 1.2 ? 160 : 23;
+    const maxVy = inDeepSpace || (s.thrust || 0) > 0.8 || isClimbing ? 160 : 65;
     s.vy = clamp(s.vy, -maxVy, maxVy);
     const proposed = sim.physics.shipMotion(s, {
       x: s.vx * DT,
@@ -451,7 +454,7 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
       if (s.grounded && s.vy < 0) s.vy = 0;
     }
     s.thrust =
-      Math.abs(i.forward) + Math.abs(i.side) + (i.jump || i.jet ? 1 : 0);
+      Math.abs(i.forward) + Math.abs(i.side) + (isClimbing ? 1.5 : 0);
     if (!s.grounded && pilot) s.flightTime += DT;
     if (
       !s.arrived &&

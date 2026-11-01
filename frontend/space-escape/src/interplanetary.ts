@@ -302,6 +302,15 @@ export class InterplanetarySystem {
   // Spaceship models in flight
   shipMeshes: Map<SpaceshipKind, THREE.Group> = new Map();
   cruiserModel: THREE.Group | null = null;
+  initialPlaceholderShip?: THREE.Group;
+
+  setShipReference(shipGroup: THREE.Group) {
+    if (this.initialPlaceholderShip && this.initialPlaceholderShip.parent) {
+      this.initialPlaceholderShip.parent.remove(this.initialPlaceholderShip);
+      this.initialPlaceholderShip.visible = false;
+    }
+    this.shipMeshes.set("light_fighter", shipGroup);
+  }
 
   // Mineral specimens placed in world
   mineralNodes: THREE.Group = new THREE.Group();
@@ -405,6 +414,7 @@ export class InterplanetarySystem {
     const initialShip = this.makePlaceholder("ship", 12);
     initialShip.position.copy(homePos);
     initialShip.visible = true;
+    this.initialPlaceholderShip = initialShip;
     this.shipMeshes.set("light_fighter", initialShip);
     this.scene.add(initialShip);
 
@@ -881,13 +891,6 @@ export class InterplanetarySystem {
         alignShipToGround(this.cruiserModel, SHIP2_POS.x, SHIP2_POS.z, 0, 3.5, 8.0, 0.05);
       }
     }
-
-    const fighter = this.shipMeshes.get("light_fighter");
-    if (fighter && this.activeShip === "light_fighter" && ship && (ship.seats.some(Boolean) || (ship.flightTime || 0) > 0)) {
-      fighter.visible = true;
-      fighter.position.set(ship.x, ship.y + 2.2, ship.z);
-      fighter.rotation.set(0, ship.yaw, -ship.bank);
-    }
   }
 
   /** Step solar system rotation & flight physics */
@@ -1137,6 +1140,26 @@ export class InterplanetarySystem {
       ["earth", "earth", "/assets/models/earth/scene.gltf"],
     ] as const) {
       await replacePlanet(id, key, url);
+    }
+
+    try {
+      const landerGltf = await loader.loadAsync("/assets/lander.glb");
+      if (landerGltf && this.cruiserModel) {
+        clean3DEntityText(landerGltf.scene);
+        landerGltf.scene.scale.setScalar(1.2);
+        landerGltf.scene.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+            child.frustumCulled = true;
+          }
+        });
+        this.cruiserModel.clear();
+        this.cruiserModel.add(landerGltf.scene);
+        alignShipToGround(this.cruiserModel, SHIP2_POS.x, SHIP2_POS.z, 0, 3.5, 8.0, 0.05);
+      }
+    } catch {
+      /* Keep authored cruiser chassis fallback */
     }
 
     for (const [key, url, size] of [

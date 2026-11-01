@@ -462,6 +462,7 @@ export class GameView {
       (n, p) => this.sound(n, p),
     );
     this.interplanetary = new InterplanetarySystem(this.scene, this.camera);
+    this.interplanetary.setShipReference(this.adventure.ship);
     const pg = new THREE.BufferGeometry();
     pg.setAttribute(
       "position",
@@ -1515,15 +1516,6 @@ export class GameView {
           cloned.getObjectByName("Hips");
 
         if (this.rifleAsset) {
-          const heldRifle = this.rifleAsset.clone(true);
-          heldRifle.name = "heldRifle";
-          // Accurately calibrated weapon scale and grip socket offset aligned with right hand palms
-          heldRifle.scale.setScalar(17.2);
-          heldRifle.position.set(0.015, -0.045, 0.095);
-          heldRifle.rotation.set(-Math.PI / 2, 0, Math.PI);
-          heldRifle.visible = false;
-          if (rightHand) rightHand.add(heldRifle);
-
           const backRifle = this.rifleAsset.clone(true);
           backRifle.name = "backRifle";
           backRifle.scale.setScalar(17.2);
@@ -1533,32 +1525,14 @@ export class GameView {
           if (upperBack) upperBack.add(backRifle);
         }
 
-        if (this.grappleAsset) {
-          const grapple = this.grappleAsset.clone(true);
-          grapple.name = "grappleLauncher";
-          // Fixed forearm bracket socket aligned to outer forearm plane, eliminating forearm clipping
-          grapple.scale.setScalar(0.68);
-          grapple.position.set(0.025, 0.16, 0.045);
-          grapple.rotation.set(0.12, 0, -0.08);
-          grapple.visible = false;
-          if (leftForeArm) leftForeArm.add(grapple);
-        }
-
         if (this.cameraAsset) {
           const hipCamera = this.cameraAsset.clone(true);
           hipCamera.name = "hipCamera";
           hipCamera.scale.setScalar(100);
           hipCamera.position.set(0.18, -0.06, 0.08);
           hipCamera.rotation.set(0.2, -0.3, 0.1);
+          hipCamera.visible = false;
           if (hips) hips.add(hipCamera);
-
-          const heldCamera = this.cameraAsset.clone(true);
-          heldCamera.name = "heldCamera";
-          heldCamera.scale.setScalar(100);
-          heldCamera.position.set(0.05, -0.04, 0.08);
-          heldCamera.rotation.set(-Math.PI / 2, 0, 0);
-          heldCamera.visible = false;
-          if (rightHand) rightHand.add(heldCamera);
         }
 
         const mixer = new THREE.AnimationMixer(cloned);
@@ -1698,16 +1672,11 @@ export class GameView {
         const hipCamera = a.getObjectByName("hipCamera");
         const grappleLauncher = a.getObjectByName("grappleLauncher");
 
-        if (heldRifle && backRifle) {
-          heldRifle.visible = !inShip && activeWep === "rifle";
-          backRifle.visible = !inShip && activeWep !== "rifle" && activeWep !== "none";
+        if (backRifle) {
+          backRifle.visible = !inShip && activeWep === "rifle";
         }
-        if (heldCamera && hipCamera) {
-          heldCamera.visible = !inShip && activeWep === "camera";
-          hipCamera.visible = !inShip && activeWep !== "camera" && activeWep !== "none";
-        }
-        if (grappleLauncher) {
-          grappleLauncher.visible = !inShip && (activeWep === "grapple" || !!p.grapple);
+        if (hipCamera) {
+          hipCamera.visible = !inShip && activeWep === "camera";
         }
 
         if (p.skate) {
@@ -1723,33 +1692,6 @@ export class GameView {
             anim.armR.rotation.z = THREE.MathUtils.damp(anim.armR.rotation.z, 0.4, 8, dt);
             anim.armR.rotation.x = THREE.MathUtils.damp(anim.armR.rotation.x, -0.2, 8, dt);
           }
-        } else if (activeWep === "rifle" && !inShip) {
-          // Two-handed tactical rifle aiming posture only when actively equipped and outside ship
-          if (anim.armR) {
-            anim.armR.rotation.x = THREE.MathUtils.damp(anim.armR.rotation.x, -1.05 - p.pitch * 0.4, 12, dt);
-            anim.armR.rotation.y = THREE.MathUtils.damp(anim.armR.rotation.y, -0.15, 12, dt);
-            anim.armR.rotation.z = THREE.MathUtils.damp(anim.armR.rotation.z, 0.1, 12, dt);
-          }
-          if (anim.armL && !p.grapple) {
-            anim.armL.rotation.x = THREE.MathUtils.damp(anim.armL.rotation.x, -0.95 - p.pitch * 0.4, 12, dt);
-            anim.armL.rotation.y = THREE.MathUtils.damp(anim.armL.rotation.y, 0.35, 12, dt);
-            anim.armL.rotation.z = THREE.MathUtils.damp(anim.armL.rotation.z, 0.42, 12, dt);
-          }
-          if (anim.torso) {
-            anim.torso.rotation.y = THREE.MathUtils.damp(anim.torso.rotation.y, -0.15, 8, dt);
-          }
-        } else if (activeWep === "camera" && !inShip) {
-          // Two-handed camera inspection/shooting posture
-          if (anim.armR) {
-            anim.armR.rotation.x = THREE.MathUtils.damp(anim.armR.rotation.x, -0.85 - p.pitch * 0.4, 12, dt);
-            anim.armR.rotation.y = THREE.MathUtils.damp(anim.armR.rotation.y, -0.25, 12, dt);
-          }
-          if (anim.armL) {
-            anim.armL.rotation.x = THREE.MathUtils.damp(anim.armL.rotation.x, -0.85 - p.pitch * 0.4, 12, dt);
-            anim.armL.rotation.y = THREE.MathUtils.damp(anim.armL.rotation.y, 0.25, 12, dt);
-          }
-        } else {
-          // Default empty-handed natural posture: arms follow natural animation without manual overrides
         }
         if (p.grapple && anim.armL) {
           anim.armL.rotation.x = -1.35 - p.pitch * 0.5;
