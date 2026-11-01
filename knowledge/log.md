@@ -24,3 +24,4 @@
 | 2026-10-31 17:00 | PR #27 (70d1c52) | moonhotline | 渲染管线与 LOD | fix(space): preserve Kepler and solar planets with frustum culling and dock spac |
 | 2026-10-31 17:01 | Commit d36c367 | moonhotline | 渲染管线与 LOD | fix(space): preserve Kepler and solar planets with frustum culling and dock spac |
 | 2026-11-01 21:33 | Commit 3e4c200 | developer | 网络架构与服务, 天体物理与大气, 权威多人仿真, 渲染管线与 LOD | chore(okf): update OKF knowledge bundle on push (d36c367e42e612cae3c67ef454696dc |
+| 2026-11-01 13:36 | PR #28 (6c96427) | moonhotline | 网络架构与服务, 天体物理与大气, 权威多人仿真, 渲染管线与 LOD | feat(space): character unarmed posture, clean ship text labels, celestial blendi |
