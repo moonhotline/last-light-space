@@ -26,3 +26,4 @@
 | 2026-11-01 21:33 | Commit 3e4c200 | developer | 网络架构与服务, 天体物理与大气, 权威多人仿真, 渲染管线与 LOD | chore(okf): update OKF knowledge bundle on push (d36c367e42e612cae3c67ef454696dc |
 | 2026-11-01 13:36 | PR #28 (6c96427) | moonhotline | 网络架构与服务, 天体物理与大气, 权威多人仿真, 渲染管线与 LOD | feat(space): character unarmed posture, clean ship text labels, celestial blendi |
 | 2026-11-01 13:39 | Commit ec9f903 | moonhotline | 全库/配置同步 | chore(okf): dynamically update OKF knowledge bundle for PR #28 |
+| 2026-11-01 14:49 | Commit 6c5506a | moonhotline | 网络架构与服务 | Merge pull request #1 from moonhotline/feat/partykit-multiplayer |
