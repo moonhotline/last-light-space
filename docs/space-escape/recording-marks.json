@@ -1,0 +1,21 @@
+{
+  "recording": "/Users/alexander/develop/github/tokener/docs/space-escape/recordings/page@cbd927199cda934e5f0effb0ea4ffd02.webm",
+  "marks": [
+    {
+      "label": "mission start",
+      "seconds": 0.002
+    },
+    {
+      "label": "power restored",
+      "seconds": 10.171
+    },
+    {
+      "label": "core recovered",
+      "seconds": 18.467
+    },
+    {
+      "label": "extraction complete",
+      "seconds": 33.099
+    }
+  ]
+}

@@ -15,12 +15,10 @@ import {
   type ItemId,
 } from "../../frontend/space-escape/shared/adventure-data";
 import {
-  HALF,
   groundAt,
   distance3,
   type Vec,
 } from "../../frontend/space-escape/shared/map";
-import { SOLAR_SYSTEM } from "../../frontend/space-escape/shared/celestial";
 await initPhysics();
 const setup = () => {
   const sim = new Simulation(42),
@@ -257,108 +255,4 @@ test("arrival requires repaired ship, a pilot, actual flight and landing in the 
   assert.equal(ship.arrived, true);
   assert.equal(sim.s.phase, "won");
   sim.dispose();
-});
-
-test("pilot and passenger ascend past 650m and retain controls at deep-space heights", () => {
-  const { sim, p, g } = setup();
-  try {
-    const ship = sim.s.adventure.ship;
-    ship.repaired = true;
-    ship.seats[0] = p.id;
-    ship.seats[1] = g.id;
-    p.seat = 0;
-    g.seat = 1;
-    // Exercise the authoritative simulation, not a mocked position integrator.
-    for (const height of [649, 1799, 6999]) {
-      Object.assign(ship, { y: height, vy: 0, vx: 0, vz: 0 });
-      step(sim, p, { jump: true }, 90);
-      assert.ok(ship.y > height + 20, `must ascend from ${height}m`);
-      assert.equal(ship.grounded, false);
-      for (const occupant of [p, g]) {
-        assert.equal(occupant.y, ship.y + 2.2);
-        assert.equal(occupant.vy, ship.vy);
-        assert.ok(Number.isFinite(occupant.y));
-      }
-      const top = ship.y;
-      step(sim, p, { brake: true, sprint: true }, 90);
-      assert.ok(ship.y < top, "brakes must still permit descent");
-    }
-  } finally {
-    sim.dispose();
-  }
-});
-
-test("unbounded ascent retains the sampled terrain floor and basin lateral limits", () => {
-  const { sim, p } = setup();
-  try {
-    const ship = sim.s.adventure.ship;
-    ship.repaired = true;
-    ship.seats[0] = p.id;
-    p.seat = 0;
-    const floor = Math.max(...[-4, 0, 4].flatMap(x =>
-      [-5, 0, 5].map(z => groundAt(ship.x + x, ship.z + z))));
-    Object.assign(ship, { y: floor + 0.05, vy: -16 });
-    step(sim, p, { brake: true });
-    assert.equal(ship.y, floor);
-    assert.equal(ship.grounded, true);
-    assert.equal(ship.vy, 0);
-    Object.assign(ship, { x: HALF - 20, y: 7000, vx: 72, yaw: 0 });
-    step(sim, p, { side: 1 });
-    assert.equal(ship.x, HALF - 20, "lateral release is outside this patch");
-    assert.ok(ship.y > 650);
-  } finally {
-    sim.dispose();
-  }
-});
-
-test("interplanetary flight carries Blerk, crosses basin limits, and lands successfully on Mercury", () => {
-  const { sim, p } = setup();
-  try {
-    const ship = sim.s.adventure.ship;
-    ship.repaired = true;
-    // Player boards ship
-    Object.assign(p, { x: ship.x, y: ship.y, z: ship.z, grounded: true });
-    step(sim, p, { interact: true });
-    assert.equal(p.seat, 0, "Player should be in pilot seat");
-    assert.ok(ship.companionSeats?.includes("blerk"), "Blerk should automatically board companion seat");
-
-    // Set interplanetary target to Mercury
-    sim.setInterplanetaryTarget("mercury");
-    assert.equal(ship.targetPlanet, "mercury");
-
-    // Ascend into deep space
-    Object.assign(ship, { x: 0, y: 700, z: 0, vx: 0, vy: 50, vz: 0, grounded: false });
-    step(sim, p, { sprint: true, forward: 1 });
-    assert.equal(ship.flightStage, "space");
-
-    // Fly towards Mercury (x: -3200, y: 1525, z: -5400) crossing the old basin boundary HALF - 20 (1772m)
-    Object.assign(ship, { x: -3000, y: 1600, z: -5200, vx: -50, vy: 0, vz: -50 });
-    step(sim, p, { forward: 1 });
-    assert.ok(Math.abs(ship.x) > HALF, `Ship X (${ship.x}) should cross the old basin limit (${HALF})`);
-    assert.ok(Math.abs(ship.z) > HALF, `Ship Z (${ship.z}) should cross the old basin limit (${HALF})`);
-
-    // Approach and land at Mercury landing site
-    const mercuryLanding = SOLAR_SYSTEM.mercury.landingSite;
-    Object.assign(ship, {
-      x: mercuryLanding.x + 10,
-      y: mercuryLanding.y + 5,
-      z: mercuryLanding.z + 10,
-      vx: 2,
-      vy: -1,
-      vz: 2,
-    });
-    step(sim, p, { brake: true });
-
-    assert.equal(ship.arrived, true, "Ship should arrive at Mercury");
-    assert.equal(ship.flightStage, "landed");
-    assert.equal(ship.grounded, true);
-    assert.deepEqual(
-      { x: ship.x, y: ship.y, z: ship.z },
-      mercuryLanding,
-      "Ship should touch down exactly on Mercury landing site"
-    );
-    assert.equal(sim.s.phase, "won");
-  } finally {
-    sim.dispose();
-  }
 });

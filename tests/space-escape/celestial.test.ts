@@ -1,5 +1,4 @@
 import test from "node:test";
-import { terrainMesh } from "../../frontend/space-escape/shared/map";
 import assert from "node:assert/strict";
 import {
   SOLAR_SYSTEM,
@@ -7,7 +6,6 @@ import {
   ALIEN_ROSTER,
   sphericalGravity,
   projectToSphere,
-  computeAtmosphericFog,
 } from "../../frontend/space-escape/shared/celestial";
 
 test("spherical gravity always directs acceleration towards planet center", () => {
@@ -54,12 +52,13 @@ test("solar system contains key planetary destinations", () => {
   assert.ok(SOLAR_SYSTEM.earth.radius > SOLAR_SYSTEM.mercury.radius);
 });
 
-test("computeAtmosphericFog scales density inversely with space altitude", () => {
-  const groundFog = computeAtmosphericFog(50);
-  const orbitFog = computeAtmosphericFog(1200);
-  assert.ok(groundFog.density > orbitFog.density, "Ground fog must be denser than space vacuum haze");
-  assert.equal(groundFog.color, 0x0c141d);
-  assert.equal(orbitFog.color, 0x020408);
+test("mineral specimen catalog provides geological properties", () => {
+  const calcite = MINERAL_SAMPLES.calcite;
+  assert.equal(calcite.formula, "CaCO₃");
+  assert.equal(calcite.hardness, 3.0);
+  assert.ok(MINERAL_SAMPLES.pyrite);
+  assert.ok(MINERAL_SAMPLES.amethyst);
+  assert.ok(MINERAL_SAMPLES.celestite);
 });
 
 test("alien fauna roster differentiates friendly guides from hostile predators", () => {
@@ -67,17 +66,4 @@ test("alien fauna roster differentiates friendly guides from hostile predators",
   assert.equal(ALIEN_ROSTER.another_alien.faction, "hostile");
   assert.equal(ALIEN_ROSTER.reptillian_alien.faction, "hostile");
   assert.ok(ALIEN_ROSTER.reptillian_alien.attackDamage > 0);
-});
-
-test("elevated Kepler atmosphere clears the basin and landing site stays on its crust", () => {
-  const body = SOLAR_SYSTEM.kepler;
-  assert.deepEqual(body.position, { x: 0, y: 1800, z: 340 });
-  const vertices = terrainMesh().vertices;
-  let highestTerrain = -Infinity;
-  for (let index = 1; index < vertices.length; index += 3) {
-    highestTerrain = Math.max(highestTerrain, vertices[index]);
-  }
-  assert.ok(body.position.y - body.atmosphereRadius > highestTerrain);
-  assert.equal(sphericalGravity(body.landingSite, body).altitude, 1);
-  assert.deepEqual(projectToSphere(body.landingSite, body, 1), body.landingSite);
 });

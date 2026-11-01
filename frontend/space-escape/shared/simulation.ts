@@ -229,9 +229,6 @@ export class Simulation {
       this.emit(`${p.name} 标记了探索路线`);
     }
   }
-  setInterplanetaryTarget(planetId: string) {
-    this.s.adventure.ship.targetPlanet = planetId;
-  }
   tick() {
     const s = this.s;
     s.tick++;
@@ -251,7 +248,7 @@ export class Simulation {
     for (const p of s.players) {
       const i = inputs.get(p.id)!;
       if (p.seat < 0) this.physics.move(p, i);
-      if (p.planet === null) interactAdventure(this, p, i);
+      if (p.planet === null || p.planet === "mercury") interactAdventure(this, p, i);
       if (i.fire) tool(this, p);
       if (i.interact && p.seat < 0) interactions.add(p.id);
     }
@@ -266,7 +263,7 @@ export class Simulation {
         this.emit("发现 · 地球正在升起");
       }
       for (const c of s.crystals)
-        if (c.readyAt <= s.time && distance3(p, c) < 4.2) {
+        if (c.readyAt <= s.time && distance3(p, c) < 4.8) {
           c.readyAt = s.time + 32;
           p.crystals++;
           p.combo = Math.min(12, p.combo + 1);

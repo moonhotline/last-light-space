@@ -1,0 +1,17 @@
+{
+  "testPassed": true,
+  "timestamp": "2026-11-01T08:29:37.137Z",
+  "fps": {
+    "samples": 295,
+    "min": 12,
+    "avg": 47.7,
+    "p99": 12
+  },
+  "render": {
+    "drawCalls": 40,
+    "triangles": 190899,
+    "camera": "third",
+    "downloadedModels": 17
+  },
+  "errors": []
+}

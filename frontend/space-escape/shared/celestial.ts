@@ -30,13 +30,13 @@ export const SOLAR_SYSTEM: Record<string, CelestialBody> = {
     name: "开普勒-07 (母星)",
     subtitle: "KEPLER / HOME BASIN",
     radius: 420,
-    atmosphereRadius: 850,
+    atmosphereRadius: 650,
     gravity: 7.5,
-    position: { x: 0, y: 1800, z: 340 },
+    position: { x: 200, y: 3200, z: -2800 },
     color: 0x243b55,
     atmosphereColor: 0x38bdf8,
     unlocked: true,
-    landingSite: { x: 0, y: 2221, z: 340 },
+    landingSite: { x: 200, y: 3621, z: -2800 },
   },
   mercury: {
     id: "mercury",
@@ -292,4 +292,35 @@ export function computeAtmosphericFog(altitude: number): { color: number; densit
   } else {
     return { color: 0x020408, density: 0.000008 };
   }
+}
+
+/**
+ * Spherical Geodesic Arc Distance:
+ * Calculates the great-circle surface distance across a high-curvature sphere (e.g. Mercury radius 320m):
+ * d = R * arccos(clamp(u_player · u_ship, -1, 1))
+ */
+export function geodesicArcDistance(
+  posA: Vec3,
+  posB: Vec3,
+  planet: CelestialBody,
+): { arcDistance: number; heightDiff: number } {
+  const dxA = posA.x - planet.position.x;
+  const dyA = posA.y - planet.position.y;
+  const dzA = posA.z - planet.position.z;
+  const distA = Math.hypot(dxA, dyA, dzA) || 1;
+
+  const dxB = posB.x - planet.position.x;
+  const dyB = posB.y - planet.position.y;
+  const dzB = posB.z - planet.position.z;
+  const distB = Math.hypot(dxB, dyB, dzB) || 1;
+
+  const uAx = dxA / distA, uAy = dyA / distA, uAz = dzA / distA;
+  const uBx = dxB / distB, uBy = dyB / distB, uBz = dzB / distB;
+
+  const dot = Math.max(-1, Math.min(1, uAx * uBx + uAy * uBy + uAz * uBz));
+  const arcAngle = Math.acos(dot);
+  const arcDistance = planet.radius * arcAngle;
+  const heightDiff = Math.abs(distA - distB);
+
+  return { arcDistance, heightDiff };
 }

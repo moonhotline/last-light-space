@@ -1,11 +1,16 @@
 import "./style.css";
+import * as THREE from "three";
 import {
   ITEMS,
   REPAIR,
   LORE,
   RESOURCE_SITES,
+  SHIP1_POS,
+  SHIP2_POS,
   type ItemId,
 } from "../shared/adventure-data";
+import { shipBoardingDistance } from "../shared/adventure";
+import { SOLAR_SYSTEM } from "../shared/celestial";
 import { missionObjective } from "../shared/objectives";
 import { distance3 } from "../shared/map";
 import {
@@ -101,6 +106,8 @@ let pending: Input[] = [],
   sequence = 0,
   yaw = 0,
   pitch = 0,
+  playerAmmo = 24,
+  playerReloadTime = 0,
   accumulator = 0,
   lastFrame = performance.now(),
   spaceAt = 0;
@@ -274,6 +281,7 @@ async function loadSimulation() {
 }
 function receive(next: Snapshot) {
   const previous = state?.phase;
+  const previousCompleted = state?.completedAt ?? -1;
   state = next;
   me = state.players.find((p) => p.id === (room?.sessionId || "local")) || null;
   if (mode === "coop" && me && next.phase !== "lobby") {
@@ -328,6 +336,11 @@ function receive(next: Snapshot) {
       renderResult();
     }
   }
+  if (next.completedAt > 0 && previousCompleted <= 0 && next.phase !== "won") {
+    $("journal").hidden = false;
+    show("result");
+    renderResult();
+  }
   if (next.eventId !== lastEvent) {
     lastEvent = next.eventId;
     if (next.eventId) notice(next.event);
@@ -381,6 +394,7 @@ async function connect(create: boolean) {
       endpoint,
       create ? roomCode() : code,
       callsign(),
+      create,
     );
     room = joined;
     joined.onMessage("snapshot", receive);
@@ -540,7 +554,11 @@ function makeInput(): Input {
         ((keys.has("Space") || pulses.has("Space")) &&
           performance.now() - spaceAt > 220)),
     dash: active && (keys.has("KeyC") || pulses.has("KeyC")),
-    grapple: active && (keys.has("KeyQ") || pulses.has("KeyQ")),
+    grapple:
+      active &&
+      (keys.has("KeyQ") ||
+        pulses.has("KeyQ") ||
+        (view.activeWeapon === "grapple" && keys.has("Mouse0"))),
     fire: active && (keys.has("Mouse0") || keys.has("KeyT")),
     brake: active && keys.has("KeyX"),
     interact: active && (keys.has("KeyE") || pulses.has("KeyE")),
@@ -557,13 +575,27 @@ function step() {
         Number(keys.has("ArrowRight") || keys.has("KeyL"))) *
       DT *
       1.5;
-    pitch = Math.max(
-      -1.3,
-      Math.min(
-        1.3,
-        pitch + (Number(keys.has("KeyI")) - Number(keys.has("ArrowDown") && !keys.has("KeyS"))) * DT,
-      ),
-    );
+    const pitchDelta =
+      (Number(keys.has("KeyI")) -
+        Number(keys.has("ArrowDown") && !keys.has("KeyS")) -
+        (keys.has("KeyK") ? 3.0 : 0)) * DT;
+    pitch = Math.max(-1.3, Math.min(1.3, pitch + pitchDelta));
+  }
+  if (playerReloadTime > 0) {
+    playerReloadTime = Math.max(0, playerReloadTime - DT);
+    if (playerReloadTime === 0) {
+      playerAmmo = 24;
+    }
+  }
+  if (
+    view.activeWeapon === "rifle" &&
+    (keys.has("Mouse0") || keys.has("KeyT")) &&
+    playerReloadTime <= 0
+  ) {
+    if (playerAmmo > 0) {
+      playerAmmo = Math.max(0, playerAmmo - 1);
+      if (playerAmmo === 0) playerReloadTime = 2.0;
+    }
   }
   if (sim) {
     if (panel) return;
@@ -573,12 +605,15 @@ function step() {
       notice(guideFollowing ? "Blerk 已加入队伍" : "Blerk 暂时停留在原地");
     if (input.interact && state) {
       const ship = state.adventure.ship;
-      if (me.seat < 0 && distance3(me, { ...ship, y: ship.y + 1 }) < 15 && (ship.grounded || view.interplanetary.inCorridor)) {
+      if (me.seat < 0 && shipBoardingDistance(me, ship) < 18 && (ship.grounded || view.interplanetary.inCorridor)) {
         if (!nearCorridorHeld) {
           nearCorridorHeld = true;
           if (view.interplanetary.inCorridor) {
             view.interplanetary.toggleCorridor(false);
             recordTrick("返回母星地表", 120);
+          } else {
+            const nearCruiser = distance3(me, SHIP2_POS) < distance3(me, ship);
+            view.interplanetary.switchShip(nearCruiser ? "cruiser" : "light_fighter");
           }
         }
       } else {
@@ -597,12 +632,15 @@ function step() {
       notice(guideFollowing ? "Blerk 已加入队伍" : "Blerk 暂时停留在原地");
     if (i.interact && state) {
       const ship = state.adventure.ship;
-      if (me.seat < 0 && distance3(me, { ...ship, y: ship.y + 1 }) < 15 && (ship.grounded || view.interplanetary.inCorridor)) {
+      if (me.seat < 0 && shipBoardingDistance(me, ship) < 18 && (ship.grounded || view.interplanetary.inCorridor)) {
         if (!nearCorridorHeld) {
           nearCorridorHeld = true;
           if (view.interplanetary.inCorridor) {
             view.interplanetary.toggleCorridor(false);
             recordTrick("返回母星地表", 120);
+          } else {
+            const nearCruiser = distance3(me, SHIP2_POS) < distance3(me, ship);
+            view.interplanetary.switchShip(nearCruiser ? "cruiser" : "light_fighter");
           }
         }
       } else {
@@ -632,14 +670,13 @@ function prompt() {
     ship = a.ship;
   if (me.seat >= 0)
     return { label: ship.grounded ? "E · 已着陆，可以离舱" : "", progress: 0 };
-  if (distance3(me, { ...ship, y: ship.y + 1 }) < 15) {
+  const boardingDist = shipBoardingDistance(me, ship);
+  if (boardingDist < 18) {
     if (view.interplanetary.inCorridor) {
       return { label: "E · 离开飞船走廊返回地表", progress: 0 };
     }
     return {
-      label: ship.repaired
-        ? "E · 登上游隼号 / 进入飞船走廊"
-        : "长按 E · 存入材料 / 修复游隼号 · Tab 查看配方",
+      label: "",
       progress: ship.progress,
     };
   }
@@ -842,10 +879,38 @@ function hud() {
     $("combo").classList.toggle("visible", me.combo >= 2);
   }
   text("dashStatus", p.grapple ? "牵引中 · Q 松开" : "瞄准岩壁");
+  text("weaponAmmo", playerReloadTime > 0 ? "换弹中... (R)" : `${playerAmmo} / 24`);
   const anchor = p.seat < 0 ? (sim?.physics || prediction)?.aim(p, 85) : null;
-  document
-    .querySelector(".reticle")
-    ?.classList.toggle("grapple-ready", !!anchor);
+  const reticleEl = document.querySelector(".reticle");
+  reticleEl?.classList.toggle("grapple-ready", !!anchor);
+
+  // Reticle minimal boarding crosshair (.reticle.board-ready)
+  const a = state.adventure;
+  const ship = a.ship;
+  const merc = SOLAR_SYSTEM.mercury;
+  const isMercury =
+    me.planet === "mercury" ||
+    Math.hypot(
+      me.x - merc.position.x,
+      me.y - merc.position.y,
+      me.z - merc.position.z,
+    ) < merc.radius + 60;
+  const boardingDist = shipBoardingDistance(me, ship);
+  let isAimingAtShip = false;
+  const targetPos = new THREE.Vector3(ship.x, ship.y + 1.2, ship.z);
+  const camPos = view.camera.position;
+  const toShip = targetPos.clone().sub(camPos);
+  const shipDist = toShip.length();
+  if (shipDist > 0.1) {
+    toShip.normalize();
+    const camDir = new THREE.Vector3();
+    view.camera.getWorldDirection(camDir);
+    isAimingAtShip = camDir.dot(toShip) > 0.52;
+  }
+  const boardReady =
+    me.seat < 0 && boardingDist < 18 && (ship.grounded || isMercury) && isAimingAtShip;
+  reticleEl?.classList.toggle("board-ready", boardReady);
+
   if (!p.grapple && anchor)
     text("dashStatus", `${Math.round(distance3(p, anchor))} m 可挂接`);
   text("viewMode", view.thirdPerson ? "第三人称" : "第一人称");
@@ -858,7 +923,15 @@ function hud() {
     text("objectiveIndex", target.index);
     text("objective", target.title);
     text("objectiveDetail", target.detail);
-    const point = view.project(target.p);
+    const isShipTarget =
+      target.title.includes("游隼号") ||
+      target.title.includes("飞船") ||
+      target.title.includes("战舰") ||
+      target.title.includes("巡航") ||
+      target.title.toLowerCase().includes("cruiser") ||
+      target.title.toLowerCase().includes("skiff") ||
+      target.title.includes("登舰");
+    const point = !isShipTarget ? view.project(target.p) : null;
     $("targetMarker").hidden = !point;
     if (point) {
       $("targetMarker").style.left = `${point.x}px`;
@@ -1057,7 +1130,7 @@ function keyDown(key: string) {
   }
   keys.add(key);
 }
-function selectWeapon(w: "rifle" | "grapple" | "camera") {
+function selectWeapon(w: "none" | "rifle" | "grapple" | "camera") {
   view.setWeapon(w);
   const slots: Record<"rifle" | "grapple" | "camera", string> = {
     rifle: "wepRifle",
@@ -1118,18 +1191,25 @@ addEventListener("keydown", (e) => {
     e.preventDefault();
   keyDown(e.code);
   if (e.repeat) return;
-  if (e.code === "Digit1") selectWeapon("rifle");
-  if (e.code === "Digit2") selectWeapon("grapple");
-  if (e.code === "Digit3") selectWeapon("camera");
-  if (e.code === "KeyQ") selectWeapon("grapple");
-  if (e.code === "KeyT" && view.activeWeapon !== "rifle") selectWeapon("rifle");
+  if (e.code === "Digit1") selectWeapon(view.activeWeapon === "rifle" ? "none" : "rifle");
+  if (e.code === "Digit2") selectWeapon(view.activeWeapon === "grapple" ? "none" : "grapple");
+  if (e.code === "Digit3") selectWeapon(view.activeWeapon === "camera" ? "none" : "camera");
+  if (e.code === "Digit0" || e.code === "Backquote") selectWeapon("none");
+  if (e.code === "KeyQ") selectWeapon(view.activeWeapon === "grapple" ? "none" : "grapple");
+  if (e.code === "KeyT") command("mark");
   if (e.code === "KeyV") camera();
   if (e.code === "KeyP") {
     selectWeapon("camera");
     takeSnapshot(view);
   }
   if (e.code === "KeyK") toggleHoverboard();
-  if (e.code === "KeyR") command("mark");
+  if (e.code === "KeyR") {
+    if (view.activeWeapon === "rifle" || playerAmmo < 24) {
+      playerReloadTime = 2.0;
+    } else {
+      command("mark");
+    }
+  }
   if (e.code === "KeyB") command("respawn");
   if (e.code === "KeyG") command("heal");
   if (e.code === "KeyH") {
@@ -1150,19 +1230,20 @@ addEventListener(
       view.cameraZoom = Math.max(1.0, Math.min(4.5, view.cameraZoom + delta));
       return;
     }
-    const weapons: ("rifle" | "grapple" | "camera")[] = [
+    const weapons: ("none" | "rifle" | "grapple" | "camera")[] = [
+      "none",
       "rifle",
       "grapple",
       "camera",
     ];
     const idx = weapons.indexOf(view.activeWeapon);
-    if (idx !== -1) {
-      const nextIdx =
-        e.deltaY > 0
+    const nextIdx =
+      idx === -1
+        ? (e.deltaY > 0 ? 1 : weapons.length - 1)
+        : e.deltaY > 0
           ? (idx + 1) % weapons.length
           : (idx - 1 + weapons.length) % weapons.length;
-      selectWeapon(weapons[nextIdx]);
-    }
+    selectWeapon(weapons[nextIdx]);
   },
   { passive: true },
 );
@@ -1173,20 +1254,19 @@ document.addEventListener("mousemove", (e) => {
   pitch = Math.max(-1.35, Math.min(1.35, pitch - e.movementY * s));
 });
 canvas.addEventListener("mousedown", (e) => {
-  if (e.button === 0 && !panel && document.pointerLockElement === canvas) {
+  if (e.button === 0 && !panel) {
+    if (view.activeWeapon === "none" && !view.thirdPerson) {
+      selectWeapon("rifle");
+    }
     if (view.activeWeapon === "camera") {
       takeSnapshot(view);
     } else {
       keys.add("Mouse0");
     }
+    if (!mobile() && document.pointerLockElement !== canvas) {
+      lock();
+    }
   }
-  if (
-    e.button === 0 &&
-    !panel &&
-    !mobile() &&
-    document.pointerLockElement !== canvas
-  )
-    lock();
 });
 addEventListener("mouseup", () => keys.delete("Mouse0"));
 function holdKey(el: HTMLElement, key: string) {
@@ -1227,13 +1307,11 @@ function toggleCorridorView() {
   const inside = view.interplanetary.toggleCorridor();
   const el = $("btnCorridor");
   if (el) el.classList.toggle("active", inside);
-  recordTrick(inside ? "进入战术飞船走廊" : "返回母星地表", 120);
 }
 function switchSpacecraft() {
   const current = view.interplanetary.activeShip;
   const next = current === "light_fighter" ? "cruiser" : "light_fighter";
   view.interplanetary.switchShip(next);
-  recordTrick(next === "cruiser" ? "跃迁旗舰: 重型星舰" : "穿梭战机: 轻型战机", 150);
 }
 
 $("snapshot") && ($("snapshot").onclick = () => takeSnapshot(view));
@@ -1241,9 +1319,9 @@ $("snapPhoto") && ($("snapPhoto").onclick = () => takeSnapshot(view));
 $("toggleSkate") && ($("toggleSkate").onclick = toggleHoverboard);
 $("btnCorridor") && ($("btnCorridor").onclick = toggleCorridorView);
 $("btnSwitchShip") && ($("btnSwitchShip").onclick = switchSpacecraft);
-$("wepRifle") && ($("wepRifle").onclick = () => selectWeapon("rifle"));
-$("wepGrapple") && ($("wepGrapple").onclick = () => selectWeapon("grapple"));
-$("wepCamera") && ($("wepCamera").onclick = () => selectWeapon("camera"));
+$("wepRifle") && ($("wepRifle").onclick = () => selectWeapon(view.activeWeapon === "rifle" ? "none" : "rifle"));
+$("wepGrapple") && ($("wepGrapple").onclick = () => selectWeapon(view.activeWeapon === "grapple" ? "none" : "grapple"));
+$("wepCamera") && ($("wepCamera").onclick = () => selectWeapon(view.activeWeapon === "camera" ? "none" : "camera"));
 
 // 4 Standalone Prop GLB Exports
 $("downloadBoard") && ($("downloadBoard").onclick = exportHoverboardGlb);
@@ -1376,9 +1454,95 @@ function addChatMessage(data: { name: string; color?: number; text: string }) {
   setTimeout(() => item.remove(), 7000);
 }
 
+function handleChatCommand(cmdText: string) {
+  const parts = cmdText.trim().split(/\s+/);
+  const cmd = parts[0].toLowerCase();
+  if (cmd === "/boost" || cmd === "/warp" || cmd === "/speed") {
+    if (sim) {
+      const s = sim.s.adventure.ship;
+      s.repaired = true;
+      s.progress = 1;
+      s.thrust = 1.5;
+      const isPiloting = (me && me.seat >= 0) || s.seats.some(Boolean);
+      if (isPiloting) {
+        s.grounded = false;
+        const speed = Math.hypot(s.vx, s.vy, s.vz);
+        if (speed < 2) {
+          s.vz = -120;
+        } else {
+          s.vx *= 2.5;
+          s.vy *= 2.5;
+          s.vz *= 2.5;
+        }
+        notice("🚀 战舰曲率引擎过载加速");
+      } else if (me) {
+        me.vx *= 2.5;
+        me.vz *= 2.5;
+        notice("⚡ 喷气推进动力超频");
+      }
+    } else {
+      notice("联机模式暂仅房主可调试");
+    }
+    return;
+  }
+  if (cmd === "/mercury" || cmd === "/goal") {
+    if (sim) {
+      const merc = SOLAR_SYSTEM.mercury;
+      const s = sim.s.adventure.ship;
+      s.x = merc.position.x;
+      s.y = merc.position.y + merc.radius + 0.3;
+      s.z = merc.position.z;
+      s.vx = 0;
+      s.vy = 0;
+      s.vz = 0;
+      s.repaired = true;
+      s.progress = 1;
+      s.grounded = true;
+      if (me) {
+        if (me.seat >= 0) {
+          me.x = s.x;
+          me.y = s.y;
+          me.z = s.z;
+          me.planet = null;
+        } else {
+          me.x = merc.position.x + 6;
+          me.y = merc.position.y + merc.radius + 0.85;
+          me.z = merc.position.z;
+          me.planet = "mercury";
+          sim.physics.reset(me.id, me);
+        }
+      }
+      notice("🪐 已降落停靠至水星表面高曲率空域");
+    }
+    return;
+  }
+  if (cmd === "/repair") {
+    if (sim) {
+      sim.s.adventure.ship.repaired = true;
+      sim.s.adventure.ship.progress = 1;
+      notice("🛠️ 飞船已完成修复与动力检定");
+    }
+    return;
+  }
+  if (cmd === "/corridor") {
+    view.interplanetary.toggleCorridor(!view.interplanetary.inCorridor);
+    notice(view.interplanetary.inCorridor ? "🚪 已进入飞船内部走廊" : "🚪 已返回外部空间");
+    return;
+  }
+  if (cmd === "/help") {
+    notice("可用指令: /boost (加速), /mercury (跃迁水星), /repair (修复飞船), /corridor (走廊)");
+    return;
+  }
+  notice(`未知指令: ${cmd} · 输入 /help 查看`);
+}
+
 function sendChatMessage(text: string) {
   const trimmed = text.trim().slice(0, 100);
   if (!trimmed) return;
+  if (trimmed.startsWith("/")) {
+    handleChatCommand(trimmed);
+    return;
+  }
   if (room) {
     room.send("chat", { text: trimmed });
   } else {
@@ -1423,11 +1587,12 @@ show("landing");
 requestAnimationFrame(frame);
 void Promise.all([
   view.load(),
+  loadSimulation().catch(() => {}),
   fetch("/connection.json")
     .then((r) => r.json())
     .catch(() => ({ url: "" })),
 ])
-  .then(([, config]) => {
+  .then(([,, config]: [unknown, unknown, any]) => {
     const url =
       import.meta.env.VITE_ROOM_URL ||
       config.url ||
@@ -1435,7 +1600,7 @@ void Promise.all([
         ? `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}`
         : "") ||
       (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)
-        ? "http://127.0.0.1:1999"
+        ? "ws://127.0.0.1:2567"
         : "");
     try {
       const p = new URL(url);
@@ -1475,14 +1640,25 @@ void Promise.all([
   });
 Object.assign(window, {
   __lastLight: {
+    command: (cmd: string) => handleChatCommand(cmd),
     sim: () => sim,
     setViewRotation: (y: number, p: number) => { yaw = y; pitch = p; },
     snapshot: () => (state ? structuredClone(state) : null),
-    player: () => (me ? { ...me } : null),
+    player: () =>
+      me
+        ? {
+            ...me,
+            weapon: view.activeWeapon,
+            ammo: playerAmmo,
+            reloadTime: playerReloadTime,
+            hook: me.grapple,
+          }
+        : null,
     position: () => (predicted ? { ...predicted } : me ? { ...me } : null),
     room: () => room?.roomId,
     endpoint: () => endpoint,
     view: () => view,
+    solarSystem: SOLAR_SYSTEM,
     rendering: () => ({
       frames: view.frames,
       fps: Math.round(fps),
@@ -1507,12 +1683,33 @@ Object.assign(window, {
         });
         return names;
       })(),
+      joints: (() => {
+        const a = me ? view.avatars.get(me.id) : null;
+        const leg =
+          a?.getObjectByName("mixamorig:LeftUpLeg") ||
+          a?.getObjectByName("LeftUpLeg");
+        const shin =
+          a?.getObjectByName("mixamorig:LeftLeg") ||
+          a?.getObjectByName("LeftLeg");
+        const getRotX = (bone: THREE.Object3D | null | undefined) => {
+          if (!bone) return 0;
+          const e = new THREE.Euler().setFromQuaternion(bone.quaternion);
+          return Math.abs(e.x) > 0.0001 ? e.x : bone.rotation.x;
+        };
+        return {
+          leg_L: getRotX(leg),
+          shin_L: getRotX(shin),
+        };
+      })(),
+      equipment: {
+        firstPerson: !view.thirdPerson,
+        cables: me?.grapple ? 1 : 0,
+      },
       earthY: view.earth.position.y,
       moonY: view.moon.position.y,
       thermalCount: view.thermalGroups.filter((g) => g.visible).length,
       downloadedModels: view.interplanetary.downloadedAssets.size,
       assetErrors: [...view.interplanetary.assetErrors],
-      assetStatus: Object.fromEntries(view.interplanetary.assetStatus),
     }),
   },
 });

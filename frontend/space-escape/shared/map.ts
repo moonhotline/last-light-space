@@ -209,7 +209,7 @@ for (let i = 0; i < ROUTE.length - 1; i++) {
       x = a.x + (b.x - a.x) * t,
       z = a.z + (b.z - a.z) * t;
     const h = groundAt(x, z),
-      arch = i === 3 ? Math.sin(t * Math.PI) * 13 + 4 : j % 4 === 0 ? 8 : 2;
+      arch = i === 3 ? Math.sin(t * Math.PI) * 13 + 4 : (i > 0 && j % 4 === 0 ? 8 : 2);
     if (distance({ x, z }, SPAWN) > 9)
       CRYSTALS.push({
         id: CRYSTALS.length,
