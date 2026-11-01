@@ -1,7 +1,7 @@
 import { weatherMaterials } from "./weathering";
 import { AdventureView, optimizeModel } from "./adventure-view";
 import { missionObjective } from "../shared/objectives";
-import { InterplanetarySystem } from "./interplanetary";
+import { InterplanetarySystem, computeMercuryAlignment } from "./interplanetary";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
@@ -36,11 +36,7 @@ import { FOOT_OFFSET, playerUp, surfaceOrientation, eyePosition, viewOrientation
 import { createHandRig, equipmentModel, attachHeldModel } from "./hand-rig";
 const COLORS = [0x9eeafa, 0xffc98b, 0xff9f81, 0xa6baff];
 const v3 = (v: Vec) => new THREE.Vector3(v.x, v.y, v.z);
-const vertex = `#include <common>
-#include <logdepthbuf_pars_vertex>
-varying vec2 vUv; varying vec3 vNormal; varying vec3 vPosition; void main(){vUv=uv;vNormal=normal;vPosition=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);
-#include <logdepthbuf_vertex>
-}`;
+const vertex = `varying vec2 vUv; varying vec3 vNormal; varying vec3 vPosition; void main(){vUv=uv;vNormal=normal;vPosition=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`;
 const glowMaterial = (color: number, opacity = 0.5) =>
   new THREE.MeshBasicMaterial({
     color,
@@ -57,6 +53,123 @@ interface Particle {
   max: number;
   size: number;
   color: THREE.Color;
+}
+
+/**
+ * Near-field Stardust Parallax Stream:
+ * Multi-layered particle field surrounding the camera view frustum.
+ * Particles stream backward at varying relative speeds (1.8x, 1.0x, 0.5x),
+ * creating an unmistakable cinematic speed frame of reference.
+ */
+export class StardustParallaxStream {
+  group = new THREE.Group();
+  layers: {
+    points: THREE.Points;
+    speedMult: number;
+    count: number;
+  }[] = [];
+
+  private createMoteTexture(): THREE.CanvasTexture | null {
+    if (typeof document === "undefined") return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    g.addColorStop(0, "rgba(255, 255, 255, 1)");
+    g.addColorStop(0.25, "rgba(200, 235, 255, 0.8)");
+    g.addColorStop(0.55, "rgba(100, 190, 255, 0.3)");
+    g.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 64, 64);
+    const tex = new THREE.CanvasTexture(canvas);
+    return tex;
+  }
+
+  constructor() {
+    const moteTex = this.createMoteTexture();
+    const layerConfigs = [
+      { count: 320, speedMult: 1.8, size: 1.8, color: 0x93c5fd, boxRadius: 36, depth: 85 }, // Layer 1: Fast warp streaks
+      { count: 480, speedMult: 1.0, size: 1.4, color: 0x38bdf8, boxRadius: 45, depth: 100 }, // Layer 2: Mid-speed stardust
+      { count: 360, speedMult: 0.5, size: 1.0, color: 0xa78bfa, boxRadius: 55, depth: 120 }, // Layer 3: Distant motes
+    ];
+
+    for (const cfg of layerConfigs) {
+      const positions = new Float32Array(cfg.count * 3);
+      for (let i = 0; i < cfg.count; i++) {
+        const i3 = i * 3;
+        positions[i3] = (Math.random() - 0.5) * cfg.boxRadius * 2;
+        positions[i3 + 1] = (Math.random() - 0.5) * cfg.boxRadius * 1.5;
+        positions[i3 + 2] = -Math.random() * cfg.depth;
+      }
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+
+      const mat = new THREE.PointsMaterial({
+        color: cfg.color,
+        size: cfg.size,
+        ...(moteTex ? { map: moteTex } : {}),
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+
+      const points = new THREE.Points(geo, mat);
+      points.frustumCulled = false;
+      this.group.add(points);
+
+      this.layers.push({
+        points,
+        speedMult: cfg.speedMult,
+        count: cfg.count,
+      });
+    }
+  }
+
+  update(
+    cameraPos: THREE.Vector3,
+    cameraQuat: THREE.Quaternion,
+    velocity: THREE.Vector3,
+    thrust: number,
+    isDriving: boolean,
+    dt: number,
+  ) {
+    this.group.position.copy(cameraPos);
+    this.group.quaternion.copy(cameraQuat);
+
+    const speed = velocity.length();
+    const effectiveSpeed = isDriving ? Math.max(speed, thrust * 25) : speed;
+    const isFlightAtSpeed = isDriving && effectiveSpeed > 10;
+    const flightSpeedRatio = isFlightAtSpeed ? clamp((effectiveSpeed - 10) / 60, 0, 1) : 0;
+    const baseOpacity = isFlightAtSpeed ? (0.2 + 0.65 * flightSpeedRatio) : 0;
+
+    const speedFactor = Math.max(10, effectiveSpeed);
+
+    for (const layer of this.layers) {
+      const mat = layer.points.material as THREE.PointsMaterial;
+      mat.opacity = baseOpacity * (layer.speedMult > 1.2 ? 1.0 : 0.7);
+
+      const posAttr = layer.points.geometry.getAttribute("position") as THREE.BufferAttribute;
+      const posArray = posAttr.array as Float32Array;
+
+      const step = speedFactor * layer.speedMult * dt;
+
+      for (let i = 0; i < layer.count; i++) {
+        const i3 = i * 3;
+        posArray[i3 + 2] += step;
+
+        if (posArray[i3 + 2] > -6) {
+          posArray[i3] = (Math.random() - 0.5) * 60;
+          posArray[i3 + 1] = (Math.random() - 0.5) * 45;
+          posArray[i3 + 2] = -85 - Math.random() * 35;
+        }
+      }
+      posAttr.needsUpdate = true;
+    }
+  }
 }
 function createNameplateSprite(name: string, colorHex: number): THREE.Sprite {
   const canvas = document.createElement("canvas");
@@ -112,7 +225,7 @@ export class GameView {
   scene = new THREE.Scene();
   skyScene = new THREE.Scene();
   skyCamera = new THREE.PerspectiveCamera(66, 1, 100, 22000);
-  camera = new THREE.PerspectiveCamera(66, 1, 0.1, 30000);
+  camera = new THREE.PerspectiveCamera(66, 1, 0.1, 18000);
   renderer: THREE.WebGLRenderer;
   composer: EffectComposer;
   bloom: UnrealBloomPass;
@@ -152,7 +265,7 @@ export class GameView {
   grappleAsset: THREE.Group | null = null;
   cameraAsset: THREE.Group | null = null;
   obeliskAsset: THREE.Group | null = null;
-  activeWeapon: "rifle" | "grapple" | "camera" = "rifle";
+  activeWeapon: "none" | "rifle" | "grapple" | "camera" = "none";
   weaponSwitchTime = 0;
   cameraZoom = 1.0;
   fpRifle: THREE.Group | null = null;
@@ -165,12 +278,50 @@ export class GameView {
   private rifleEnvironment: THREE.WebGLRenderTarget | null = null;
   private rifleFill = new THREE.PointLight(0xfff5e8, 0.45, 2, 2);
   interplanetary: InterplanetarySystem;
+  stardustStream: StardustParallaxStream;
+  flightSpringArm = {
+    focus: new THREE.Vector3(),
+    position: new THREE.Vector3(),
+    roll: 0,
+    pitch: 0,
+    initialized: false,
+  };
+  private compiling = false;
 
-  setWeapon(w: "rifle" | "grapple" | "camera") {
+  async compilePipeline() {
+    if (this.compiling) return;
+    this.compiling = true;
+    try {
+      const compilePromises: Promise<any>[] = [
+        this.renderer.compileAsync(this.scene, this.camera),
+        this.renderer.compileAsync(this.skyScene, this.skyCamera),
+      ];
+      if (this.toolModel) {
+        compilePromises.push(
+          this.renderer.compileAsync(this.toolModel, this.camera, this.scene),
+        );
+      }
+      await Promise.all(compilePromises);
+    } catch {
+      /* Fallback if compileAsync is not supported */
+    } finally {
+      this.compiling = false;
+    }
+  }
+
+  setWeapon(w: "none" | "rifle" | "grapple" | "camera") {
     if (this.activeWeapon === w) return;
     this.activeWeapon = w;
     this.weaponSwitchTime = 0.25;
-    this.sound("tool", 1.35);
+    if (w !== "none") this.sound("tool", 1.35);
+    if (w === "none") {
+      for (const anim of this.avatarMixers.values()) {
+        if (anim.armR) anim.armR.quaternion.identity();
+        if (anim.armL) anim.armL.quaternion.identity();
+        if (anim.torso) anim.torso.quaternion.identity();
+      }
+    }
+    void this.compilePipeline();
   }
   private brightenRifle(root: THREE.Object3D) {
     // Metallic surfaces need broad reflections as well as a small local fill.
@@ -250,8 +401,6 @@ export class GameView {
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: true,
-      // Preserve the 10cm near plane for first-person hands at deep-space ranges.
-      logarithmicDepthBuffer: true,
       powerPreference: "high-performance",
       preserveDrawingBuffer: true,
     });
@@ -280,6 +429,8 @@ export class GameView {
     this.rifleFill.name = "rifle_point_light";
     this.rifleFill.position.set(-0.3, 0.15, 0.05);
     this.toolModel.add(this.rifleFill);
+    this.stardustStream = new StardustParallaxStream();
+    this.scene.add(this.stardustStream.group);
     this.buildSky();
     this.buildTerrain();
     const crystalMat = new THREE.MeshStandardMaterial({
@@ -325,15 +476,8 @@ export class GameView {
         transparent: true,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
-        vertexShader: `#include <common>
-#include <logdepthbuf_pars_vertex>
-attribute float size; varying vec3 vColor; void main(){vColor=color;vec4 p=modelViewMatrix*vec4(position,1.);gl_Position=projectionMatrix*p;gl_PointSize=clamp(size*420./max(1.,-p.z),0.,85.);
-#include <logdepthbuf_vertex>
-}`,
-        fragmentShader: `#include <logdepthbuf_pars_fragment>
-varying vec3 vColor;void main(){float d=length(gl_PointCoord-.5)*2.;if(d>1.)discard;gl_FragColor=vec4(vColor,pow(1.-d,2.));
-#include <logdepthbuf_fragment>
-}`,
+        vertexShader: `attribute float size; varying vec3 vColor; void main(){vColor=color;vec4 p=modelViewMatrix*vec4(position,1.);gl_Position=projectionMatrix*p;gl_PointSize=clamp(size*420./max(1.,-p.z),0.,85.);}`,
+        fragmentShader: `varying vec3 vColor;void main(){float d=length(gl_PointCoord-.5)*2.;if(d>1.)discard;gl_FragColor=vec4(vColor,pow(1.-d,2.));}`,
       }),
     );
     this.particlePoints.frustumCulled = false;
@@ -468,7 +612,6 @@ varying vec3 vColor;void main(){float d=length(gl_PointCoord-.5)*2.;if(d>1.)disc
     });
     rocks.castShadow = true;
     rocks.receiveShadow = true;
-    this.scene.add(rocks);
     // Distant peaks extend the basin beyond its walkable boundary, without streaming.
     const far = new THREE.Group();
     const farMat = new THREE.MeshStandardMaterial({
@@ -512,7 +655,15 @@ varying vec3 vColor;void main(){float d=length(gl_PointCoord-.5)*2.;if(d>1.)disc
     rangeGeometry.setIndex(rangeIndices);
     rangeGeometry.computeVertexNormals();
     far.add(new THREE.Mesh(rangeGeometry, farMat));
-    this.scene.add(far);
+
+    // Progressive frame-sliced mounting to eliminate single-frame synchronous upload stalls
+    requestAnimationFrame(() => {
+      this.scene.add(rocks);
+      requestAnimationFrame(() => {
+        this.scene.add(far);
+        void this.compilePipeline();
+      });
+    });
   }
   buildSky() {
     this.skyScene.add(this.sky);
@@ -520,10 +671,7 @@ varying vec3 vColor;void main(){float d=length(gl_PointCoord-.5)*2.;if(d>1.)disc
       side: THREE.BackSide,
       depthWrite: false,
       vertexShader: vertex,
-      fragmentShader: `#include <logdepthbuf_pars_fragment>
-varying vec3 vPosition;void main(){vec3 d=normalize(vPosition);float h=max(0.,d.y);vec3 c=mix(vec3(.24,.32,.39),vec3(.009,.020,.041),pow(h,.38));float s=pow(max(0.,dot(d,normalize(vec3(-.65,.19,-.5)))),28.);c+=vec3(.24,.13,.045)*s;gl_FragColor=vec4(c,1.);
-#include <logdepthbuf_fragment>
-}`,
+      fragmentShader: `varying vec3 vPosition;void main(){vec3 d=normalize(vPosition);float h=max(0.,d.y);vec3 c=mix(vec3(.24,.32,.39),vec3(.009,.020,.041),pow(h,.38));float s=pow(max(0.,dot(d,normalize(vec3(-.65,.19,-.5)))),28.);c+=vec3(.24,.13,.045)*s;gl_FragColor=vec4(c,1.);}`,
     });
     const dome = new THREE.Mesh(
       new THREE.SphereGeometry(18000, 40, 24),
@@ -560,34 +708,7 @@ varying vec3 vPosition;void main(){vec3 d=normalize(vPosition);float h=max(0.,d.
       }),
     );
     this.sky.add(starfield);
-    this.sky.add(this.earth, this.giant, this.moon);
-    this.giant.position.set(4800, 4500, -9200);
-    this.earth.position.set(-900, 1600, -8000);
-    this.moon.position.set(-3600, -700, -8500);
-    const gas = new THREE.Mesh(
-      new THREE.SphereGeometry(1350, 96, 64),
-      new THREE.ShaderMaterial({
-        vertexShader: vertex,
-        fragmentShader: `varying vec2 vUv;varying vec3 vNormal;void main(){float q=vUv.y+sin(vUv.x*22.+vUv.y*45.)*.003;float b=.5+.13*sin(q*94.)+.065*sin(q*210.+sin(vUv.x*31.))+.04*sin(q*470.);vec3 c=mix(vec3(.28,.19,.12),vec3(.78,.62,.40),b);float l=smoothstep(-.25,.7,dot(normalize(vNormal),normalize(vec3(-.9,.22,.32))));c*=.035+l;gl_FragColor=vec4(c,1.);}`,
-      }),
-    );
-    this.giant.add(gas);
-    const ringGeo = new THREE.RingGeometry(1770, 3440, 240, 10);
-    const ring = new THREE.Mesh(
-      ringGeo,
-      new THREE.ShaderMaterial({
-        side: THREE.DoubleSide,
-        transparent: true,
-        depthWrite: false,
-        vertexShader: vertex,
-        fragmentShader: `varying vec3 vPosition;void main(){float r=length(vPosition.xy);float t=(r-1770.)/1670.;float bands=.62+.08*sin(r*.19)+.12*sin(r*.048)+.045*sin(r*.81);float gap=1.-.91*exp(-pow((t-.45)/.018,2.));gap*=1.-.5*exp(-pow((t-.73)/.015,2.));vec3 c=mix(vec3(.39,.29,.18),vec3(.92,.76,.47),bands);float shadow=smoothstep(600.,1800.,vPosition.x+abs(vPosition.y)*1.3);c*=mix(.23,1.,shadow);float edge=smoothstep(0.,.04,t)*(1.-smoothstep(.90,1.,t));gl_FragColor=vec4(c,bands*gap*edge*.93);}`,
-      }),
-    );
-    ring.rotation.x = 1.42;
-    ring.rotation.z = 0;
-    this.giant.rotation.z = 0.42;
-    this.giant.add(ring);
-    this.atmosphere(this.giant, 1356, 0xe3c197, 0.24);
+    // Removed old procedural billboard giant and old meshes so real high-detail solar system planets shine in sky.
     // A distant sun with a soft optical halo.
     const sun = new THREE.Mesh(
       new THREE.SphereGeometry(75, 24, 16),
@@ -612,8 +733,40 @@ varying vec3 vPosition;void main(){vec3 d=normalize(vPosition);float h=max(0.,d.
     halo.position.copy(sun.position);
     halo.scale.set(2100, 2100, 1);
     this.sky.add(halo);
+
+    // The rising moon (unlocked upon completing all 3 beacons / star map constellation)
+    this.moon.position.set(0, -350, -6500);
+    const moonTex = typeof document !== "undefined"
+      ? new THREE.TextureLoader().load("/assets/moon.jpg")
+      : null;
+    const moonMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(180, 32, 24),
+      new THREE.MeshBasicMaterial({
+        ...(moonTex ? { map: moonTex } : { color: 0xcccccc }),
+        fog: false,
+      }),
+    );
+    this.moon.add(moonMesh);
+    const moonHaloTex = this.radialTexture();
+    if (moonHaloTex) {
+      const moonHalo = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: moonHaloTex,
+          color: 0x93c5fd,
+          transparent: true,
+          opacity: 0.35,
+          depthWrite: false,
+          fog: false,
+          blending: THREE.AdditiveBlending,
+        }),
+      );
+      moonHalo.scale.set(1200, 1200, 1);
+      this.moon.add(moonHalo);
+    }
+    this.sky.add(this.moon);
   }
   radialTexture() {
+    if (typeof document === "undefined") return null;
     const c = document.createElement("canvas");
     c.width = c.height = 128;
     const ctx = c.getContext("2d")!,
@@ -632,15 +785,8 @@ varying vec3 vPosition;void main(){vec3 d=normalize(vPosition);float h=max(0.,d.
         tint: { value: new THREE.Color(color) },
         strength: { value: strength },
       },
-      vertexShader: `#include <common>
-#include <logdepthbuf_pars_vertex>
-varying vec3 n;varying vec3 eye;void main(){vec4 p=modelViewMatrix*vec4(position,1.);eye=-p.xyz;n=normalize(normalMatrix*normal);gl_Position=projectionMatrix*p;
-#include <logdepthbuf_vertex>
-}`,
-      fragmentShader: `#include <logdepthbuf_pars_fragment>
-uniform vec3 tint;uniform float strength;varying vec3 n;varying vec3 eye;void main(){float rim=pow(1.-max(0.,dot(normalize(n),normalize(eye))),4.);gl_FragColor=vec4(tint,rim*strength);
-#include <logdepthbuf_fragment>
-}`,
+      vertexShader: `varying vec3 n;varying vec3 eye;void main(){vec4 p=modelViewMatrix*vec4(position,1.);eye=-p.xyz;n=normalize(normalMatrix*normal);gl_Position=projectionMatrix*p;}`,
+      fragmentShader: `uniform vec3 tint;uniform float strength;varying vec3 n;varying vec3 eye;void main(){float rim=pow(1.-max(0.,dot(normalize(n),normalize(eye))),4.);gl_FragColor=vec4(tint,rim*strength);}`,
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
@@ -666,15 +812,8 @@ uniform vec3 tint;uniform float strength;varying vec3 n;varying vec3 eye;void ma
       geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
       const mat = new THREE.ShaderMaterial({
         uniforms: { time: { value: 0 }, height: { value: t.height } },
-        vertexShader: `#include <common>
-#include <logdepthbuf_pars_vertex>
-uniform float time;uniform float height;varying float alpha;void main(){vec3 p=position;float a=time*.4+p.y*.04;mat2 rot=mat2(cos(a),-sin(a),sin(a),cos(a));p.xz=rot*p.xz;p.y=mod(p.y+time*16.,height);alpha=sin(p.y/height*3.14159);vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;gl_PointSize=clamp(130./max(1.,-mv.z),1.,5.);
-#include <logdepthbuf_vertex>
-}`,
-        fragmentShader: `#include <logdepthbuf_pars_fragment>
-varying float alpha;void main(){float d=length(gl_PointCoord-.5)*2.;gl_FragColor=vec4(.6,.88,1.,(1.-d)*alpha*.7);
-#include <logdepthbuf_fragment>
-}`,
+        vertexShader: `uniform float time;uniform float height;varying float alpha;void main(){vec3 p=position;float a=time*.4+p.y*.04;mat2 rot=mat2(cos(a),-sin(a),sin(a),cos(a));p.xz=rot*p.xz;p.y=mod(p.y+time*16.,height);alpha=sin(p.y/height*3.14159);vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;gl_PointSize=clamp(130./max(1.,-mv.z),1.,5.);}`,
+        fragmentShader: `varying float alpha;void main(){float d=length(gl_PointCoord-.5)*2.;gl_FragColor=vec4(.6,.88,1.,(1.-d)*alpha*.7);}`,
         transparent: true,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
@@ -693,6 +832,7 @@ varying float alpha;void main(){float d=length(gl_PointCoord-.5)*2.;gl_FragColor
     }
   }
   async load() {
+    THREE.DefaultLoadingManager.onError = () => {};
     const loader = new GLTFLoader(),
       textureLoader = new THREE.TextureLoader();
     const loadGltf = async (url: string, fallback?: string) => {
@@ -729,8 +869,6 @@ varying float alpha;void main(){float d=length(gl_PointCoord-.5)*2.;gl_FragColor
       grappleGltf,
       cameraGltf,
       obeliskGltf,
-      earthTex,
-      moonTex,
     ] = await Promise.all([
       loadGltf("/assets/explorer-v4.glb", "/assets/explorer-v3.glb"),
       loadGltf("/assets/beacon.glb"),
@@ -740,8 +878,6 @@ varying float alpha;void main(){float d=length(gl_PointCoord-.5)*2.;gl_FragColor
       loadGltf("/assets/echo-grapple.glb"),
       loadGltf("/assets/survey-camera.glb"),
       loadGltf("/assets/obelisk.glb"),
-      loadTexture("/assets/earth.jpg"),
-      loadTexture("/assets/moon.jpg"),
     ]);
     this.astronaut = explorer.scene;
     this.astronautAnimations = explorer.animations;
@@ -752,23 +888,6 @@ varying float alpha;void main(){float d=length(gl_PointCoord-.5)*2.;gl_FragColor
     this.grappleAsset = equipmentModel(grappleGltf.scene, 0.55, 0);
     this.cameraAsset = equipmentModel(cameraGltf.scene, 0.35, 0);
     this.setupFirstPersonHands();
-    earthTex.colorSpace = moonTex.colorSpace = THREE.SRGBColorSpace;
-    const planetMat = (map: THREE.Texture) =>
-      new THREE.ShaderMaterial({
-        uniforms: { map: { value: map } },
-        vertexShader: vertex,
-        fragmentShader: `uniform sampler2D map;varying vec2 vUv;varying vec3 vNormal;void main(){vec3 c=texture2D(map,vUv).rgb;float d=dot(normalize(vNormal),normalize(vec3(.2,.35,.85)));float light=smoothstep(-.12,.75,d);c*=.025+light*.97;gl_FragColor=vec4(c,1.);}`,
-      });
-    const e = new THREE.Mesh(
-      new THREE.SphereGeometry(890, 96, 64),
-      planetMat(earthTex),
-    );
-    e.rotation.y = -0.6;
-    this.earth.add(e);
-    this.atmosphere(this.earth, 890, 0x73bfff, 0.78);
-    this.moon.add(
-      new THREE.Mesh(new THREE.SphereGeometry(490, 64, 48), planetMat(moonTex)),
-    );
     this.obeliskAsset = obeliskGltf.scene;
 
     for (const m of [
@@ -783,7 +902,7 @@ varying float alpha;void main(){float d=length(gl_PointCoord-.5)*2.;gl_FragColor
           if (o instanceof THREE.Mesh) {
             o.castShadow = true;
             o.receiveShadow = true;
-            o.frustumCulled = (m !== this.obeliskAsset) ? false : true;
+            o.frustumCulled = false;
           }
         });
         weatherMaterials(m);
@@ -810,11 +929,11 @@ varying float alpha;void main(){float d=length(gl_PointCoord-.5)*2.;gl_FragColor
       console.warn("Background planetary hydration:", err);
     });
 
-    // Background upgrade to high-fidelity HMG-379 rifle model
-    void loader
-      .loadAsync("/assets/models/hmg-379/scene.gltf")
-      .then((hmgGltf) => {
-        if (hmgGltf && hmgGltf.scene) {
+    // Background upgrade to weapons sequentially
+    void (async () => {
+      try {
+        const hmgGltf = await loader.loadAsync("/assets/models/hmg-379/scene.gltf");
+        if (hmgGltf?.scene) {
           this.interplanetary.downloadedAssets.set("hmg-379", hmgGltf.scene);
           weatherMaterials(hmgGltf.scene);
           this.brightenRifle(hmgGltf.scene);
@@ -823,27 +942,15 @@ varying float alpha;void main(){float d=length(gl_PointCoord-.5)*2.;gl_FragColor
           this.fpRifle = this.mountFirstPerson(this.rifleAsset, "rifle");
           for (const avatar of this.avatars.values()) avatar.userData.equipmentDirty = true;
         }
-      })
-      .catch(() => {});
-
-    // Background upgrade to high-fidelity hoverboard model
-    void loader
-      .loadAsync("/assets/models/hoverboard/scene.gltf")
-      .then((hoverGltf) => {
-        if (hoverGltf && hoverGltf.scene) {
+        const hoverGltf = await loader.loadAsync("/assets/models/hoverboard/scene.gltf");
+        if (hoverGltf?.scene) {
           this.interplanetary.downloadedAssets.set("hoverboard", hoverGltf.scene);
           weatherMaterials(hoverGltf.scene);
           this.hoverboardAsset = equipmentModel(hoverGltf.scene, 1.3, 0);
           for (const avatar of this.avatars.values()) avatar.userData.equipmentDirty = true;
         }
-      })
-      .catch(() => {});
-
-    // Background upgrade to high-fidelity DX5 mobility rifle grapple model
-    void loader
-      .loadAsync("/assets/models/dx5-mobility-rifle/scene.gltf")
-      .then((dx5Gltf) => {
-        if (dx5Gltf && dx5Gltf.scene) {
+        const dx5Gltf = await loader.loadAsync("/assets/models/dx5-mobility-rifle/scene.gltf");
+        if (dx5Gltf?.scene) {
           this.interplanetary.downloadedAssets.set("dx5-mobility-rifle", dx5Gltf.scene);
           weatherMaterials(dx5Gltf.scene);
           this.grappleAsset = equipmentModel(dx5Gltf.scene, 0.55, 0);
@@ -851,8 +958,10 @@ varying float alpha;void main(){float d=length(gl_PointCoord-.5)*2.;gl_FragColor
           this.fpGrapple = this.mountFirstPerson(this.grappleAsset, "grapple", this.fpLeftHand);
           for (const avatar of this.avatars.values()) avatar.userData.equipmentDirty = true;
         }
-      })
-      .catch(() => {});
+      } catch (err) {
+        console.warn("Optional weapon model hydration:", err);
+      }
+    })();
     if (this.rifleAsset) {
       this.fpRifle = this.mountFirstPerson(this.rifleAsset, "rifle");
     }
@@ -893,10 +1002,7 @@ varying float alpha;void main(){float d=length(gl_PointCoord-.5)*2.;gl_FragColor
           blending: THREE.AdditiveBlending,
           side: THREE.DoubleSide,
           vertexShader: vertex,
-          fragmentShader: `#include <logdepthbuf_pars_fragment>
-uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*(.055+activation*.16);gl_FragColor=vec4(.25,.75,1.,a);
-#include <logdepthbuf_fragment>
-}`,
+          fragmentShader: `uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*(.055+activation*.16);gl_FragColor=vec4(.25,.75,1.,a);}`,
         }),
       );
       beam.position.y = 130;
@@ -925,9 +1031,8 @@ uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*
       }
     });
     this.ready = true;
-    this.canvas.dataset.assetsLoaded = "4";
-    void this.renderer.compileAsync(this.scene, this.camera).catch(() => {});
-    void this.renderer.compileAsync(this.skyScene, this.skyCamera).catch(() => {});
+    this.interplanetary.onModelLoaded = () => void this.compilePipeline();
+    void this.compilePipeline();
   }
   async audio() {
     if (this.listener) {
@@ -1024,6 +1129,7 @@ uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*
   }
   toggleCamera() {
     this.thirdPerson = !this.thirdPerson;
+    void this.compilePipeline();
   }
   burst(pos: Vec, count: number, color: number, power = 3) {
     for (let i = 0; i < count; i++) {
@@ -1054,14 +1160,11 @@ uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*
     this.adventure.update(s, me, dt, t);
     this.interplanetary.step(dt, me || { x: 0, y: 0, z: 0 });
     this.interplanetary.setShipState(s?.adventure.ship || null);
-    if (this.interplanetary.activeShip !== "skiff" && this.interplanetary.shipMeshes.has(this.interplanetary.activeShip)) {
-      this.adventure.ship.visible = false;
-    }
-    this.toolModel.visible = !!me && !this.thirdPerson && me.seat < 0;
+    this.toolModel.visible = !!me && !this.thirdPerson && me.seat < 0 && this.activeWeapon !== "none";
     this.rifleFill.visible = this.toolModel.visible && this.activeWeapon === "rifle";
     if (this.fpHandRig) this.fpHandRig.visible = this.toolModel.visible;
     const leftViewArm = this.fpHandRig?.getObjectByName("left_view_arm");
-    if (leftViewArm) leftViewArm.visible = this.toolModel.visible && this.activeWeapon !== "rifle";
+    if (leftViewArm) leftViewArm.visible = this.toolModel.visible && this.activeWeapon !== "rifle" && this.activeWeapon !== "none";
     if (me) {
       if (this.weaponSwitchTime > 0) this.weaponSwitchTime -= dt;
       const switchDrop = Math.sin(Math.max(0, this.weaponSwitchTime) / 0.25 * Math.PI) * 0.14;
@@ -1091,51 +1194,118 @@ uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*
         this.lastMe = me.id;
       }
       const speed = Math.hypot(me.vx, me.vz);
-      let fov = 66 + clamp(speed / 43) * 8 * this.effects;
-      if (this.activeWeapon === "camera") {
-        fov = fov / Math.max(1, this.cameraZoom);
+      if (me.seat >= 0 && s) {
+        const ship = s.adventure.ship;
+        const shipSpeed = Math.hypot(ship.vx, ship.vy, ship.vz);
+        const speedRatio = clamp(shipSpeed / 130, 0, 1.0);
+        let fov = 60 + speedRatio * 18; // smooth 60° -> 78°
+        if (this.activeWeapon === "camera") {
+          fov = fov / Math.max(1, this.cameraZoom);
+        }
+        this.camera.fov = THREE.MathUtils.damp(this.camera.fov, fov, 6, dt);
+        this.camera.updateProjectionMatrix();
+      } else {
+        let fov = 66 + clamp(speed / 43) * 8 * this.effects;
+        if (this.activeWeapon === "camera") {
+          fov = fov / Math.max(1, this.cameraZoom);
+        }
+        this.camera.fov = THREE.MathUtils.damp(this.camera.fov, fov, 10, dt);
+        this.camera.updateProjectionMatrix();
       }
-      this.camera.fov = THREE.MathUtils.damp(this.camera.fov, fov, 10, dt);
-      this.camera.updateProjectionMatrix();
       const target = eyePosition(me), up = playerUp(me);
       const orientation = viewOrientation(me);
       this.camera.up.copy(up);
       this.camera.quaternion.copy(orientation);
       this.cameraObstructed = false;
-      if (this.thirdPerson) {
-        const offset = new THREE.Vector3(
-            0,
-            me.seat >= 0 ? 6 : 0,
-            me.seat >= 0 ? 23 : 8,
-          ).applyQuaternion(orientation),
-          desired = target.clone().add(offset);
-        let range = offset.length();
-        if (physics)
-          range = Math.min(range, physics.cameraDistance(target, desired));
-        // Check the complete camera segment against terrain, including its safety margin.
-        for (let f = 0.08; f <= 1; f += 0.035) {
-          const q = target.clone().addScaledVector(offset, f);
-          if (!me.planet && q.y < groundAt(q.x, q.z) + 0.55) {
-            range = Math.min(range, offset.length() * Math.max(0.06, f - 0.04));
-            break;
+      if (me.seat >= 0 && s && this.thirdPerson) {
+        // Flight Spring Arm Lag & Roll/Pitch Linkage
+        const ship = s.adventure.ship;
+        const mercAlign = computeMercuryAlignment(ship, ship.yaw, ship.bank);
+        const localUp = mercAlign.captureWeight > 0.05 ? mercAlign.up.clone() : new THREE.Vector3(0, 1, 0);
+
+        const shipPos = new THREE.Vector3(ship.x, ship.y, ship.z);
+        let shipForward = new THREE.Vector3(-Math.sin(ship.yaw), 0, -Math.cos(ship.yaw));
+        shipForward.addScaledVector(localUp, -shipForward.dot(localUp));
+        if (shipForward.lengthSq() < 0.0001) {
+          shipForward.set(1, 0, 0).addScaledVector(localUp, -localUp.x);
+        }
+        shipForward.normalize();
+
+        const idealFocus = shipPos.clone().addScaledVector(localUp, 1.8).addScaledVector(shipForward, 4.0);
+
+        if (!this.flightSpringArm.initialized) {
+          this.flightSpringArm.focus.copy(idealFocus);
+        } else {
+          this.flightSpringArm.focus.lerp(idealFocus, 1 - Math.exp(-dt * 10));
+        }
+
+        const baseDist = 22.0;
+        const baseH = 6.5;
+        const shipSpeed = Math.hypot(ship.vx, ship.vy, ship.vz);
+        const lagDist = clamp(shipSpeed * 0.12, 0, 8.0);
+
+        const idealCamPos = shipPos.clone()
+          .addScaledVector(localUp, baseH)
+          .addScaledVector(shipForward, -(baseDist + lagDist));
+
+        if (!this.flightSpringArm.initialized) {
+          this.flightSpringArm.position.copy(idealCamPos);
+          this.flightSpringArm.initialized = true;
+        } else {
+          this.flightSpringArm.position.lerp(idealCamPos, 1 - Math.exp(-dt * 8));
+        }
+
+        const targetRoll = -ship.bank * 0.65;
+        this.flightSpringArm.roll = THREE.MathUtils.damp(this.flightSpringArm.roll, targetRoll, 7, dt);
+        const targetPitch = clamp(ship.vy / 28, -0.3, 0.3) * 0.18;
+        this.flightSpringArm.pitch = THREE.MathUtils.damp(this.flightSpringArm.pitch, targetPitch, 6, dt);
+
+        this.camera.position.copy(this.flightSpringArm.position);
+        this.camera.up.copy(localUp);
+        this.camera.lookAt(this.flightSpringArm.focus);
+        this.camera.rotateZ(this.flightSpringArm.roll);
+        this.camera.rotateX(this.flightSpringArm.pitch);
+      } else {
+        this.flightSpringArm.initialized = false;
+        if (this.thirdPerson) {
+          const offset = new THREE.Vector3(
+              0,
+              me.seat >= 0 ? 6 : 0,
+              me.seat >= 0 ? 23 : 8,
+            ).applyQuaternion(orientation),
+            desired = target.clone().add(offset);
+          let range = offset.length();
+          if (physics)
+            range = Math.min(range, physics.cameraDistance(target, desired));
+          // Check the complete camera segment against terrain, including its safety margin.
+          for (let f = 0.08; f <= 1; f += 0.035) {
+            const q = target.clone().addScaledVector(offset, f);
+            if (!me.planet && q.y < groundAt(q.x, q.z) + 0.55) {
+              range = Math.min(range, offset.length() * Math.max(0.06, f - 0.04));
+              break;
+            }
+          }
+          this.cameraObstructed = range < offset.length() - 0.2;
+          this.cameraRange = range;
+          this.camera.position
+            .copy(target)
+            .addScaledVector(offset, range / offset.length());
+        } else {
+          this.cameraRange = 0;
+          this.camera.position.copy(target);
+          if (me.seat >= 0 && s) {
+            this.camera.position.set(
+              s.adventure.ship.x - Math.sin(s.adventure.ship.yaw) * 4.7,
+              s.adventure.ship.y + 3.9,
+              s.adventure.ship.z - Math.cos(s.adventure.ship.yaw) * 4.7,
+            );
           }
         }
-        this.cameraObstructed = range < offset.length() - 0.2;
-        this.cameraRange = range;
-        this.camera.position
-          .copy(target)
-          .addScaledVector(offset, range / offset.length());
-      } else {
-        this.cameraRange = 0;
-        this.camera.position.copy(target);
-        if (me.seat >= 0 && s) {
-          this.camera.position.set(
-            s.adventure.ship.x - Math.sin(s.adventure.ship.yaw) * 4.7,
-            s.adventure.ship.y + 3.9,
-            s.adventure.ship.z - Math.cos(s.adventure.ship.yaw) * 4.7,
-          );
-        }
       }
+      const isDriving = me.seat >= 0;
+      const vShip = s && isDriving ? new THREE.Vector3(s.adventure.ship.vx, s.adventure.ship.vy, s.adventure.ship.vz) : new THREE.Vector3(me.vx, me.vy, me.vz);
+      const shipThrust = isDriving ? (s?.adventure.ship.thrust || 0) : (me.jetting ? 1 : 0);
+      this.stardustStream.update(this.camera.position, this.camera.quaternion, vShip, shipThrust, isDriving, dt);
       if (this.cameraOverride) {
         this.camera.position.copy(this.cameraOverride.position);
         this.camera.lookAt(this.cameraOverride.lookAt);
@@ -1217,16 +1387,6 @@ uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*
     this.skyCamera.fov = this.camera.fov;
     this.skyCamera.aspect = this.camera.aspect;
     this.skyCamera.updateProjectionMatrix();
-    const earthAge = s ? (s.earthAt < 0 ? 0 : s.time - s.earthAt) : 55;
-    this.earth.position.y = -420 + 2320 * smooth(earthAge / 45);
-    this.earth.rotation.y = worldTime * 0.002;
-    const moonAge = s && s.completedAt >= 0 ? s.time - s.completedAt : 0;
-    this.moon.position.y = -600 + 2600 * smooth(moonAge / 40);
-    this.moon.rotation.y = worldTime * 0.001;
-    this.giant.rotation.y = Math.sin(worldTime * 0.001) * 0.05;
-    this.earth.visible = true;
-    this.giant.visible = true;
-    this.moon.visible = true;
     this.musicLayers.forEach((a, i) => {
       const goal =
         i === 0
@@ -1238,6 +1398,8 @@ uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*
               : 0;
       a.setVolume(THREE.MathUtils.damp(a.getVolume(), goal, 1, dt));
     });
+    const moonTargetY = (s && (s.completedAt > 0 || level >= 3)) ? 1400 : -350;
+    this.moon.position.y = THREE.MathUtils.damp(this.moon.position.y, moonTargetY, 0.8, dt);
     for (const [index, b] of this.beacons.entries()) {
       const data = s?.beacons[index],
         active = data?.active || false,
@@ -1311,6 +1473,7 @@ uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*
         a.add(lamp);
 
         const nameplate = createNameplateSprite(p.name, COLORS[p.color]);
+        if (own) nameplate.visible = false;
         a.add(nameplate);
         a.userData.name = p.name;
         a.position.set(p.x, p.y - 0.82, p.z);
@@ -1358,6 +1521,7 @@ uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*
           heldRifle.scale.setScalar(17.2);
           heldRifle.position.set(0.015, -0.045, 0.095);
           heldRifle.rotation.set(-Math.PI / 2, 0, Math.PI);
+          heldRifle.visible = false;
           if (rightHand) rightHand.add(heldRifle);
 
           const backRifle = this.rifleAsset.clone(true);
@@ -1376,6 +1540,7 @@ uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*
           grapple.scale.setScalar(0.68);
           grapple.position.set(0.025, 0.16, 0.045);
           grapple.rotation.set(0.12, 0, -0.08);
+          grapple.visible = false;
           if (leftForeArm) leftForeArm.add(grapple);
         }
 
@@ -1430,6 +1595,7 @@ uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*
         const old = a.getObjectByName("nameplate");
         if (old) a.remove(old);
         const nameplate = createNameplateSprite(p.name, COLORS[p.color]);
+        if (own) nameplate.visible = false;
         a.add(nameplate);
         a.userData.name = p.name;
       }
@@ -1443,29 +1609,8 @@ uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*
           new THREE.Vector3(p.x, p.y - 0.82, p.z),
           1 - Math.exp(-dt * 14),
         );
-      const speed = Math.hypot(p.vx, p.vz);
-      // Skate steering: face the velocity, not the camera. Camera yaw can
-      // jump / wrap, while velocity changes continuously, so using it stops
-      // the "turn once, then snap back the other way" flip. The continuous
-      // yaw in userData is unwrapped, so a turn past PI never reverses.
-      let targetYaw = p.yaw + Math.PI;
-      if (p.skate && speed > 3) {
-        targetYaw = Math.atan2(-p.vx, -p.vz) + Math.PI;
-        const prev = (a.userData.skateYaw ?? targetYaw) as number;
-        const delta = Math.atan2(
-          Math.sin(targetYaw - prev),
-          Math.cos(targetYaw - prev),
-        );
-        const next = prev + delta * (1 - Math.exp(-dt * 10));
-        a.userData.skateYaw = next;
-        a.userData.skateTurnRate = dt > 0 ? (next - prev) / dt : 0;
-        if (!p.planet) a.rotation.y = next;
-        targetYaw = next;
-      } else {
-        a.userData.skateYaw = undefined;
-        a.userData.skateTurnRate = 0;
-      }
-      if (!p.planet && !(p.skate && speed > 3)) {
+      const targetYaw = p.yaw + Math.PI;
+      if (!p.planet) {
         a.rotation.y +=
           Math.atan2(
             Math.sin(targetYaw - a.rotation.y),
@@ -1473,6 +1618,7 @@ uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*
           ) *
           (1 - Math.exp(-dt * 12));
       }
+      const speed = Math.hypot(p.vx, p.vz);
       const targetPitch = p.skate
         ? 0
         : p.jetting
@@ -1489,13 +1635,13 @@ uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*
       );
 
       if (p.skate) {
-        // Lean from actual turn rate, not from the remaining yaw error.
-        // Remaining-error lean flips sign the moment the error crosses
-        // zero, which is the visible "lean one way, then lean back" flick.
-        const turnRate = (a.userData.skateTurnRate ?? 0) as number;
+        const turnDelta = Math.atan2(
+          Math.sin(targetYaw - a.rotation.y),
+          Math.cos(targetYaw - a.rotation.y),
+        );
         a.rotation.z = THREE.MathUtils.damp(
           a.rotation.z,
-          Math.max(-0.25, Math.min(0.25, -turnRate * 0.12)),
+          Math.max(-0.25, Math.min(0.25, -turnDelta * 0.35)),
           8,
           dt,
         );
@@ -1544,19 +1690,24 @@ uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*
           );
         }
 
-        const activeWep = own ? this.activeWeapon : (p.grapple ? "grapple" : "rifle");
+        const inShip = p.seat >= 0 || this.interplanetary.inCorridor;
+        const activeWep = own ? this.activeWeapon : (p.grapple ? "grapple" : "none");
         const heldRifle = a.getObjectByName("heldRifle");
         const backRifle = a.getObjectByName("backRifle");
         const heldCamera = a.getObjectByName("heldCamera");
         const hipCamera = a.getObjectByName("hipCamera");
+        const grappleLauncher = a.getObjectByName("grappleLauncher");
 
         if (heldRifle && backRifle) {
-          heldRifle.visible = activeWep === "rifle";
-          backRifle.visible = activeWep !== "rifle";
+          heldRifle.visible = !inShip && activeWep === "rifle";
+          backRifle.visible = !inShip && activeWep !== "rifle" && activeWep !== "none";
         }
         if (heldCamera && hipCamera) {
-          heldCamera.visible = activeWep === "camera";
-          hipCamera.visible = activeWep !== "camera";
+          heldCamera.visible = !inShip && activeWep === "camera";
+          hipCamera.visible = !inShip && activeWep !== "camera" && activeWep !== "none";
+        }
+        if (grappleLauncher) {
+          grappleLauncher.visible = !inShip && (activeWep === "grapple" || !!p.grapple);
         }
 
         if (p.skate) {
@@ -1572,8 +1723,8 @@ uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*
             anim.armR.rotation.z = THREE.MathUtils.damp(anim.armR.rotation.z, 0.4, 8, dt);
             anim.armR.rotation.x = THREE.MathUtils.damp(anim.armR.rotation.x, -0.2, 8, dt);
           }
-        } else if (activeWep === "rifle") {
-          // Two-handed tactical rifle aiming posture
+        } else if (activeWep === "rifle" && !inShip) {
+          // Two-handed tactical rifle aiming posture only when actively equipped and outside ship
           if (anim.armR) {
             anim.armR.rotation.x = THREE.MathUtils.damp(anim.armR.rotation.x, -1.05 - p.pitch * 0.4, 12, dt);
             anim.armR.rotation.y = THREE.MathUtils.damp(anim.armR.rotation.y, -0.15, 12, dt);
@@ -1587,7 +1738,7 @@ uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*
           if (anim.torso) {
             anim.torso.rotation.y = THREE.MathUtils.damp(anim.torso.rotation.y, -0.15, 8, dt);
           }
-        } else if (activeWep === "camera") {
+        } else if (activeWep === "camera" && !inShip) {
           // Two-handed camera inspection/shooting posture
           if (anim.armR) {
             anim.armR.rotation.x = THREE.MathUtils.damp(anim.armR.rotation.x, -0.85 - p.pitch * 0.4, 12, dt);
@@ -1597,13 +1748,8 @@ uniform float activation;varying vec2 vUv;void main(){float a=pow(1.-vUv.y,1.8)*
             anim.armL.rotation.x = THREE.MathUtils.damp(anim.armL.rotation.x, -0.85 - p.pitch * 0.4, 12, dt);
             anim.armL.rotation.y = THREE.MathUtils.damp(anim.armL.rotation.y, 0.25, 12, dt);
           }
-          if (anim.torso) {
-            anim.torso.rotation.y = THREE.MathUtils.damp(anim.torso.rotation.y, 0, 8, dt);
-          }
         } else {
-          if (anim.torso) {
-            anim.torso.rotation.y = THREE.MathUtils.damp(anim.torso.rotation.y, 0, 8, dt);
-          }
+          // Default empty-handed natural posture: arms follow natural animation without manual overrides
         }
         if (p.grapple && anim.armL) {
           anim.armL.rotation.x = -1.35 - p.pitch * 0.5;

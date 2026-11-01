@@ -9,7 +9,10 @@ import {
   OUTPOST,
   DESTINATION,
   SHIP_HOME,
+  SHIP1_POS,
+  SHIP2_POS,
 } from "../shared/adventure-data";
+import { alignShipToGround, clean3DEntityText, computeMercuryAlignment } from "./interplanetary";
 import { groundAt, hash, type Vec } from "../shared/map";
 import type { Player, Snapshot } from "../shared/types";
 const v = (p: Vec) => new THREE.Vector3(p.x, p.y, p.z);
@@ -114,10 +117,12 @@ export class AdventureView {
       optimizeModel(root);
       weatherMaterials(root);
     });
+    clean3DEntityText(ship.scene);
     this.ship.add(ship.scene);
-    this.ship.position.copy(v(SHIP_HOME));
-    this.ship.rotation.y = Math.PI;
+    clean3DEntityText(this.ship);
     this.scene.add(this.ship);
+    alignShipToGround(this.ship, SHIP1_POS.x, SHIP1_POS.z, Math.PI, 3.8, 5.5, 0.05);
+    this.ship.visible = true;
     lab.scene.position.copy(v(LAB));
     this.scene.add(lab.scene);
     const lamp = new THREE.PointLight(0x83cfcd, 22, 20, 2);
@@ -412,8 +417,26 @@ export class AdventureView {
     if (!s) return;
     const a = s.adventure,
       ship = a.ship;
-    this.ship.position.lerp(v(ship), 1 - Math.exp(-dt * 16));
-    this.ship.rotation.set(0, ship.yaw + Math.PI, -ship.bank);
+    const isCruiserFlying =
+      (window as any).__activeShip === "cruiser" &&
+      (ship.seats.some(Boolean) || (ship.flightTime || 0) > 0);
+
+    if (isCruiserFlying) {
+      alignShipToGround(this.ship, SHIP1_POS.x, SHIP1_POS.z, Math.PI, 3.8, 5.5, 0.05);
+      this.ship.visible = true;
+    } else {
+      const mercAlign = computeMercuryAlignment(ship, ship.yaw, ship.bank);
+      if (mercAlign.captureWeight > 0.05) {
+        this.ship.position.lerp(v(ship), 1 - Math.exp(-dt * 16));
+        this.ship.quaternion.slerp(mercAlign.quaternion, 1 - Math.exp(-dt * 12));
+      } else if (ship.grounded && ship.seats.every((v) => !v) && (ship.flightTime || 0) === 0) {
+        alignShipToGround(this.ship, SHIP1_POS.x, SHIP1_POS.z, Math.PI, 3.8, 5.5, 0.05);
+      } else {
+        this.ship.position.lerp(v(ship), 1 - Math.exp(-dt * 16));
+        this.ship.rotation.set(0, ship.yaw + Math.PI, -ship.bank);
+      }
+      this.ship.visible = true;
+    }
     for (const side of [-1, 1]) {
       const gear = this.ship.getObjectByName("gear_" + side);
       if (gear)

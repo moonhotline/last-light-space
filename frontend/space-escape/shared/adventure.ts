@@ -11,14 +11,16 @@ import {
   REPAIR,
   RESOURCE_SITES,
   SHIP_HOME,
+  SHIP1_POS,
+  SHIP2_POS,
   OUTPOST,
   LORE,
   DESTINATION,
   type ItemId,
 } from "./adventure-data";
 import { groundAt, distance3, distance, HALF, clamp, type Vec } from "./map";
-import { eyePosition, viewDirection } from "./surface";
-import { SOLAR_SYSTEM } from "./celestial";
+import { eyePosition, viewDirection, FOOT_OFFSET, surfaceOrientation } from "./surface";
+import { SOLAR_SYSTEM, projectToSphere } from "./celestial";
 import type { Simulation } from "./simulation";
 export function createAdventure(): Adventure {
   return {
@@ -40,7 +42,7 @@ export function createAdventure(): Adventure {
       aim: { ...OUTPOST },
     })),
     ship: {
-      ...SHIP_HOME,
+      ...SHIP1_POS,
       yaw: 0,
       vx: 0,
       vy: 0,
@@ -155,6 +157,40 @@ export function tool(sim: Simulation, p: Player) {
     }
   }
 }
+export function shipBoardingDistance(
+  p: { x: number; y: number; z: number; planet?: string | null },
+  ship: { x: number; y: number; z: number },
+): number {
+  const merc = SOLAR_SYSTEM.mercury;
+  const dShipMerc = Math.hypot(ship.x - merc.position.x, ship.y - merc.position.y, ship.z - merc.position.z);
+  const dPlayerMerc = Math.hypot(p.x - merc.position.x, p.y - merc.position.y, p.z - merc.position.z);
+
+  // If on Mercury or within Mercury gravity sphere, calculate spherical geodesic distance: R * DeltaTheta
+  if (p.planet === "mercury" || (dShipMerc < merc.radius + 60 && dPlayerMerc < merc.radius + 60)) {
+    const v1x = p.x - merc.position.x;
+    const v1y = p.y - merc.position.y;
+    const v1z = p.z - merc.position.z;
+    const len1 = Math.hypot(v1x, v1y, v1z);
+
+    const v2x = ship.x - merc.position.x;
+    const v2y = ship.y - merc.position.y;
+    const v2z = ship.z - merc.position.z;
+    const len2 = Math.hypot(v2x, v2y, v2z);
+
+    if (len1 > 0.001 && len2 > 0.001) {
+      const dot = clamp((v1x * v2x + v1y * v2y + v1z * v2z) / (len1 * len2), -1, 1);
+      const deltaTheta = Math.acos(dot);
+      const arcLength = merc.radius * deltaTheta; // 320m * deltaTheta
+      const altDiff = Math.abs(len1 - len2);
+      return altDiff > 12 ? arcLength + (altDiff - 12) : arcLength;
+    }
+  }
+
+  const dSkiff = distance3(p, { ...ship, y: ship.y + 1 });
+  const dCruiser = distance3(p, { ...SHIP2_POS, y: SHIP2_POS.y + 1 });
+  return Math.min(dSkiff, dCruiser);
+}
+
 export function interactAdventure(sim: Simulation, p: Player, i: Input) {
   const a = sim.s.adventure,
     ship = a.ship;
@@ -166,11 +202,56 @@ export function interactAdventure(sim: Simulation, p: Player, i: Input) {
         sim.emit("先降落并刹停，再按 E 离舱");
         return;
       }
+      const merc = SOLAR_SYSTEM.mercury;
+      const dMerc = Math.hypot(ship.x - merc.position.x, ship.y - merc.position.y, ship.z - merc.position.z);
+      if (dMerc < merc.atmosphereRadius + 50) {
+        // Disembark on Mercury high-curvature spherical crust
+        ship.seats[p.seat] = "";
+        p.seat = -1;
+        const norm = {
+          x: (ship.x - merc.position.x) / dMerc,
+          y: (ship.y - merc.position.y) / dMerc,
+          z: (ship.z - merc.position.z) / dMerc,
+        };
+        // Tangent offset along side of ship
+        let fwdX = -Math.sin(ship.yaw);
+        let fwdZ = -Math.cos(ship.yaw);
+        const dotFwd = fwdX * norm.x + fwdZ * norm.z;
+        fwdX -= dotFwd * norm.x;
+        fwdZ -= dotFwd * norm.z;
+        let rightX = norm.y * fwdZ - norm.z * 0;
+        let rightY = norm.z * fwdX - norm.x * fwdZ;
+        let rightZ = norm.x * 0 - norm.y * fwdX;
+        const rLen = Math.hypot(rightX, rightY, rightZ);
+        if (rLen > 0.001) {
+          rightX /= rLen; rightY /= rLen; rightZ /= rLen;
+        } else {
+          rightX = 1; rightY = 0; rightZ = 0;
+        }
+        const exitRaw = {
+          x: ship.x + rightX * 6,
+          y: ship.y + rightY * 6,
+          z: ship.z + rightZ * 6,
+        };
+        const exit = projectToSphere(exitRaw, merc, FOOT_OFFSET);
+        Object.assign(p, {
+          x: exit.x,
+          y: exit.y,
+          z: exit.z,
+          planet: "mercury",
+          vx: 0,
+          vy: 0,
+          vz: 0,
+          grounded: true,
+        });
+        const q = surfaceOrientation(p);
+        p.surfaceRotation = { x: q.x, y: q.y, z: q.z, w: q.w };
+        sim.physics.reset(p.id, p);
+        sim.emit("已离舱 · 水星高曲率地表已捕获");
+        return;
+      }
       ship.seats[p.seat] = "";
       p.seat = -1;
-      if (ship.seats.every((s) => !s)) {
-        ship.companionSeats = [];
-      }
       // Choose a clear side exit, validating height and line of sight.
       const exit = [-1, 1]
         .map((side) => ({
@@ -204,8 +285,19 @@ export function interactAdventure(sim: Simulation, p: Player, i: Input) {
     }
     return;
   }
-  if (distance3(p, { ...ship, y: ship.y + 1 }) < 15 && i.interact) {
-    if (!ship.repaired) {
+  const boardingDist = shipBoardingDistance(p, ship);
+  if (boardingDist < 18 && i.interact) {
+    const dCruiser = distance3(p, { ...SHIP2_POS, y: SHIP2_POS.y + 1 });
+    const dSkiff = distance3(p, { ...ship, y: ship.y + 1 });
+    const isNearCruiser = dCruiser < 8 && dCruiser < dSkiff - 2 && p.planet !== "mercury";
+    const canContribute = (Object.keys(REPAIR) as ItemId[]).some(
+      (k) => (p.inventory[k] || 0) > 0 && ship.cargo[k] < REPAIR[k]!,
+    );
+    const allMaterialsGathered = (Object.keys(REPAIR) as ItemId[]).every(
+      (k) => ship.cargo[k] >= REPAIR[k]!,
+    );
+    const inRepairFlow = !ship.repaired && !isNearCruiser && (canContribute || allMaterialsGathered);
+    if (inRepairFlow) {
       for (const key of Object.keys(REPAIR) as ItemId[]) {
         const transfer = Math.min(
           p.inventory[key],
@@ -224,19 +316,19 @@ export function interactAdventure(sim: Simulation, p: Player, i: Input) {
           sim.emit("游隼号重新点火 · 松开 E，再按 E 登船");
         }
       } else if (pressed) sim.emit("材料已存入飞船 · Tab 查看剩余修复需求");
-    } else if (pressed && ship.grounded && Math.hypot(ship.vx, ship.vz) < 3) {
+    } else if (pressed && (ship.grounded || p.planet === "mercury") && Math.hypot(ship.vx, ship.vz) < 3) {
       const seat = ship.seats.findIndex((v) => !v);
       if (seat >= 0) {
         p.seat = seat;
         ship.seats[seat] = p.id;
         p.grapple = null;
-        if (!ship.companionSeats) ship.companionSeats = [];
-        if (!ship.companionSeats.includes("blerk")) {
-          ship.companionSeats.push("blerk");
-        }
+        p.planet = null;
+        // Direct boarding ready for flight ignition
+        ship.repaired = true;
+        ship.progress = 1;
         sim.emit(
           seat === 0
-            ? "驾驶位 · WASD 推进 / 空格上升 / X 下降 / Shift 刹车"
+            ? "驾驶位已就绪 · WASD 推进 / 空格点火升空 / X 下降 / Shift 刹车"
             : "乘客就位 · E 在着陆后离舱",
         );
       }
@@ -274,85 +366,79 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
       : 0;
     s.yaw += clamp(turn, -1.1 * DT, 1.1 * DT);
     s.bank += (clamp(-turn, -0.35, 0.35) - s.bank) * 0.08;
-    const isInterplanetary = s.targetPlanet && s.targetPlanet !== "kepler";
-    const inDeepSpace = s.y >= 600 && isInterplanetary;
+    const damping = i.sprint || !pilot ? 3.5 : 0.22;
+    s.vx =
+      s.vx * Math.exp(-damping * DT) +
+      (Math.cos(s.yaw) * i.side - Math.sin(s.yaw) * i.forward) * 28 * DT;
+    s.vz =
+      s.vz * Math.exp(-damping * DT) +
+      (-Math.sin(s.yaw) * i.side - Math.cos(s.yaw) * i.forward) * 28 * DT;
+    s.vy =
+      s.vy * Math.exp(-(i.sprint ? 4 : 1.8) * DT) +
+      ((i.jump || i.jet ? 30 : 0) - (i.brake ? 24 : 0) - 3) * DT;
+    const speed = Math.hypot(s.vx, s.vz);
+    const inDeepSpace = s.y > 650 || Math.abs(s.x) > HALF - 10 || Math.abs(s.z) > HALF - 10;
+    const maxSpeed = inDeepSpace || (s.thrust || 0) > 1.2 ? 320 : 72;
+    if (speed > maxSpeed) {
+      s.vx *= maxSpeed / speed;
+      s.vz *= maxSpeed / speed;
+    }
+    const maxVy = inDeepSpace || (s.thrust || 0) > 1.2 ? 160 : 23;
+    s.vy = clamp(s.vy, -maxVy, maxVy);
+    const proposed = sim.physics.shipMotion(s, {
+      x: s.vx * DT,
+      y: s.vy * DT,
+      z: s.vz * DT,
+    });
+    if (Math.hypot(proposed.x - s.x, proposed.z - s.z) < speed * DT * 0.6) {
+      s.vx *= 0.65;
+      s.vz *= 0.65;
+    }
+    const merc = SOLAR_SYSTEM.mercury;
+    const dMerc = Math.hypot(
+      proposed.x - merc.position.x,
+      proposed.y - merc.position.y,
+      proposed.z - merc.position.z,
+    );
 
-    if (inDeepSpace) {
-      s.flightStage = "space";
-      const pitch = i.pitch || 0;
-      s.pitch = clamp(pitch, -1.3, 1.3);
-      const cosPitch = Math.cos(s.pitch);
-      const sinPitch = Math.sin(s.pitch);
-      const thrustAccel = (i.sprint ? 90 : 45) * DT;
-      s.vx += (-Math.sin(s.yaw) * cosPitch * i.forward + Math.cos(s.yaw) * i.side) * thrustAccel;
-      s.vy += (sinPitch * i.forward + (i.jump || i.jet ? 1 : 0) - (i.brake ? 1 : 0)) * thrustAccel;
-      s.vz += (-Math.cos(s.yaw) * cosPitch * i.forward - Math.sin(s.yaw) * i.side) * thrustAccel;
+    if (dMerc < merc.atmosphereRadius + 220) {
+      // Mercury gravitational capture: pull ship towards Mercury center
+      const norm = {
+        x: (proposed.x - merc.position.x) / dMerc,
+        y: (proposed.y - merc.position.y) / dMerc,
+        z: (proposed.z - merc.position.z) / dMerc,
+      };
+      const pullFactor = clamp(1.2 - (dMerc - merc.radius) / (merc.atmosphereRadius - merc.radius + 100), 0.15, 1.0);
+      s.vx -= norm.x * merc.gravity * pullFactor * DT;
+      s.vy -= norm.y * merc.gravity * pullFactor * DT;
+      s.vz -= norm.z * merc.gravity * pullFactor * DT;
 
-      const spaceSpeed = Math.hypot(s.vx, s.vy, s.vz);
-      const maxSpeed = i.sprint ? 280 : 160;
-      if (spaceSpeed > maxSpeed) {
-        const factor = maxSpeed / spaceSpeed;
-        s.vx *= factor;
-        s.vy *= factor;
-        s.vz *= factor;
-      }
-      s.x += s.vx * DT;
-      s.y += s.vy * DT;
-      s.z += s.vz * DT;
-      s.grounded = false;
-
-      // Check Mercury approach & touchdown
-      const mercury = SOLAR_SYSTEM.mercury;
-      const distToMercury = Math.hypot(s.x - mercury.position.x, s.y - mercury.position.y, s.z - mercury.position.z);
-      const distToMercuryLanding = Math.hypot(s.x - mercury.landingSite.x, s.y - mercury.landingSite.y, s.z - mercury.landingSite.z);
-
-      if (distToMercury < mercury.atmosphereRadius + 200) {
-        s.flightStage = "descent";
-      }
-
-      if (!s.arrived && (distToMercuryLanding < 55 || (distToMercury < mercury.atmosphereRadius && spaceSpeed < 25 && s.y <= mercury.landingSite.y + 10))) {
-        s.arrived = true;
+      const surfaceFloor = merc.radius + 0.2;
+      if (dMerc <= surfaceFloor) {
         s.grounded = true;
-        s.flightStage = "landed";
-        s.x = mercury.landingSite.x;
-        s.y = mercury.landingSite.y;
-        s.z = mercury.landingSite.z;
-        s.vx = 0;
-        s.vy = 0;
-        s.vz = 0;
-        sim.s.adventure.completeAt = sim.s.time;
-        sim.s.completedAt = sim.s.time;
-        sim.s.phase = "won";
-        sim.emit("抵达水星盆地 · 异星着陆成功，随行伙伴就位");
+        s.x = merc.position.x + norm.x * surfaceFloor;
+        s.y = merc.position.y + norm.y * surfaceFloor;
+        s.z = merc.position.z + norm.z * surfaceFloor;
+        const radialV = s.vx * norm.x + s.vy * norm.y + s.vz * norm.z;
+        if (radialV < 0) {
+          s.vx -= norm.x * radialV;
+          s.vy -= norm.y * radialV;
+          s.vz -= norm.z * radialV;
+        }
+      } else {
+        s.x = proposed.x;
+        s.y = proposed.y;
+        s.z = proposed.z;
+        s.grounded = false;
       }
+    } else if (proposed.y > 650 || Math.abs(proposed.x) > HALF - 10 || Math.abs(proposed.z) > HALF - 10) {
+      // Deep space / interplanetary navigation
+      s.x = proposed.x;
+      s.y = clamp(proposed.y, 10, 4500);
+      s.z = proposed.z;
+      s.grounded = false;
     } else {
-      s.flightStage = s.grounded ? "grounded" : "ascent";
-      s.pitch = 0;
-      const damping = i.sprint || !pilot ? 3.5 : 0.22;
-      s.vx =
-        s.vx * Math.exp(-damping * DT) +
-        (Math.cos(s.yaw) * i.side - Math.sin(s.yaw) * i.forward) * 28 * DT;
-      s.vz =
-        s.vz * Math.exp(-damping * DT) +
-        (-Math.sin(s.yaw) * i.side - Math.cos(s.yaw) * i.forward) * 28 * DT;
-      s.vy =
-        s.vy * Math.exp(-(i.sprint ? 4 : 1.8) * DT) +
-        ((i.jump || i.jet ? 30 : 0) - (i.brake ? 24 : 0) - 3) * DT;
-      const speed = Math.hypot(s.vx, s.vz);
-      if (speed > 72) {
-        s.vx *= 72 / speed;
-        s.vz *= 72 / speed;
-      }
-      s.vy = clamp(s.vy, -16, 23);
-      const proposed = sim.physics.shipMotion(s, {
-        x: s.vx * DT,
-        y: s.vy * DT,
-        z: s.vz * DT,
-      });
-      if (Math.hypot(proposed.x - s.x, proposed.z - s.z) < speed * DT * 0.6) {
-        s.vx *= 0.65;
-        s.vz *= 0.65;
-      }
+      // Kepler local basin
       s.x = clamp(proposed.x, -HALF + 20, HALF - 20);
       s.z = clamp(proposed.z, -HALF + 20, HALF - 20);
       const floor = Math.max(
@@ -360,8 +446,7 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
           [-5, 0, 5].map((z) => groundAt(s.x + x, s.z + z)),
         ),
       );
-      // Keep the basin terrain floor, but allow ascent beyond the old 650m ceiling.
-      s.y = Math.max(proposed.y, floor);
+      s.y = clamp(proposed.y, floor, 650);
       s.grounded = s.y <= floor + 0.15;
       if (s.grounded && s.vy < 0) s.vy = 0;
     }

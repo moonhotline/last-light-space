@@ -93,8 +93,6 @@ export interface Drone extends Vec {
 }
 export interface Ship extends Vec {
   yaw: number;
-  pitch?: number;
-  roll?: number;
   vx: number;
   vy: number;
   vz: number;
@@ -103,9 +101,6 @@ export interface Ship extends Vec {
   progress: number;
   cargo: Inventory;
   seats: string[];
-  companionSeats?: string[];
-  flightStage?: "grounded" | "ascent" | "space" | "descent" | "landed";
-  targetPlanet?: string;
   grounded: boolean;
   thrust: number;
   flightTime: number;

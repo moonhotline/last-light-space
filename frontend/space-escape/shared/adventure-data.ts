@@ -54,7 +54,9 @@ export const REPAIR: Partial<Inventory> = {
   circuit: 1,
   core: 1,
 };
-export const SHIP_HOME = atGround(-11, 347);
+export const SHIP_HOME = atGround(-11, 344);
+export const SHIP1_POS = atGround(-2, 344);  // 1号探索艇 (Skiff)
+export const SHIP2_POS = atGround(-20, 344); // 2号星际战舰 (Cruiser), 18m apart
 export const LAB = atGround(12, 192);
 export const OUTPOST = atGround(176, -68);
 export const DESTINATION = atGround(-310, -210);

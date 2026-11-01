@@ -1415,6 +1415,27 @@ body[data-paused="true"] .reticle {
   border-color: #a8efda;
   box-shadow: 0 0 12px #a8efda88;
 }
+.reticle.board-ready {
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  border: 1.5px solid #38bdf8;
+  border-radius: 50%;
+  background: rgba(56, 189, 248, 0.15);
+  box-shadow: 0 0 10px #38bdf8cc, inset 0 0 5px #38bdf888;
+  transition: transform 0.15s ease-out, border-color 0.15s ease-out;
+}
+.weapon-ammo {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: #a7f3d0;
+  background: #0f231edd;
+  border: 1px solid #10b98144;
+  padding: 3px 8px;
+  border-radius: 4px;
+  margin-left: 6px;
+  letter-spacing: 0.05em;
+}
 .enemy-label {
   position: fixed;
   transform: translate(-50%, -50%);

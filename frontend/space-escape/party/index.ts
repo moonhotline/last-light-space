@@ -139,7 +139,11 @@ export default class GameRoom implements Party.Server {
   }
 
   private restart(id: string) {
-    if (id !== this.sim.s.host || this.sim.s.phase !== "won") return;
+    if (
+      id !== this.sim.s.host ||
+      (this.sim.s.phase !== "won" && this.sim.s.completedAt <= 0)
+    )
+      return;
     const players = this.sim.s.players.map((player) => ({
       id: player.id,
       name: player.name,
