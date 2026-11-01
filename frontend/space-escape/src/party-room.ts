@@ -166,4 +166,3 @@ export const connectPartyRoom = (
   }
   return openColyseusRoom(endpoint, roomId, name, create);
 };
-

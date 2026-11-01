@@ -16,7 +16,7 @@ if (typeof (globalThis as any).performance === "undefined") {
 async function loadWasmModule() {
   try {
     const mod = await import("./rapier.wasm");
-    return mod.default || mod;
+    return (mod as any).default || mod;
   } catch {
     return undefined;
   }
@@ -41,7 +41,7 @@ export default class GameRoom implements Party.Server {
     if (this.timer) return;
     this.timer = setInterval(() => {
       this.sim.tick();
-      this.broadcastSnapshot();
+      if (this.sim.s.tick % 2 === 0) this.broadcastSnapshot();
     }, DT * 1000);
   }
 
