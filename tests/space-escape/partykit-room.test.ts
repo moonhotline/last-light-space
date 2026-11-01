@@ -48,6 +48,7 @@ test("PartyKit room supports four explorers, rejects a fifth and transfers host"
   assert.equal(server.sim.s.players.length, 4);
   assert.equal(server.sim.s.host, "p1");
   assert.deepEqual(players[4].closed, { code: 4001, reason: "room full" });
+  room.connections.delete(players[4].id);
 
   server.onMessage(JSON.stringify({ type: "start" }), players[0] as unknown as Party.Connection);
   assert.equal(server.sim.s.phase, "active");
@@ -57,7 +58,15 @@ test("PartyKit room supports four explorers, rejects a fifth and transfers host"
   assert.equal(server.sim.s.host, "p2");
   assert.equal(server.sim.s.players.length, 3);
 
-  for (const connection of players.slice(1, 4)) {
+  // Mid-game join: another explorer joins an ongoing active expedition
+  const midGameJoiner = new FakeConnection("p6");
+  room.connections.set("p6", midGameJoiner);
+  server.onConnect(midGameJoiner as unknown as Party.Connection, context("Explorer 6"));
+  assert.equal(server.sim.s.players.length, 4);
+  assert.equal(midGameJoiner.closed, undefined);
+  assert.equal(server.sim.player("p6")?.name, "Explorer 6");
+
+  for (const connection of [...players.slice(1, 4), midGameJoiner]) {
     room.connections.delete(connection.id);
     server.onClose(connection as unknown as Party.Connection);
   }

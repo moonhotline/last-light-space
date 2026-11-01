@@ -1,8 +1,11 @@
 import { weatherMaterials } from "./weathering";
 import { AdventureView, optimizeModel } from "./adventure-view";
 import { missionObjective } from "../shared/objectives";
+import { InterplanetarySystem, computeMercuryAlignment } from "./interplanetary";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
@@ -28,6 +31,9 @@ import {
 } from "../shared/map";
 import type { Snapshot, Player } from "../shared/types";
 import type { MovementWorld } from "../shared/physics";
+import { SOLAR_SYSTEM } from "../shared/celestial";
+import { FOOT_OFFSET, playerUp, surfaceOrientation, eyePosition, viewOrientation } from "../shared/surface";
+import { createHandRig, equipmentModel, attachHeldModel } from "./hand-rig";
 const COLORS = [0x9eeafa, 0xffc98b, 0xff9f81, 0xa6baff];
 const v3 = (v: Vec) => new THREE.Vector3(v.x, v.y, v.z);
 const vertex = `varying vec2 vUv; varying vec3 vNormal; varying vec3 vPosition; void main(){vUv=uv;vNormal=normal;vPosition=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`;
@@ -48,11 +54,178 @@ interface Particle {
   size: number;
   color: THREE.Color;
 }
+
+/**
+ * Near-field Stardust Parallax Stream:
+ * Multi-layered particle field surrounding the camera view frustum.
+ * Particles stream backward at varying relative speeds (1.8x, 1.0x, 0.5x),
+ * creating an unmistakable cinematic speed frame of reference.
+ */
+export class StardustParallaxStream {
+  group = new THREE.Group();
+  layers: {
+    points: THREE.Points;
+    speedMult: number;
+    count: number;
+  }[] = [];
+
+  private createMoteTexture(): THREE.CanvasTexture | null {
+    if (typeof document === "undefined") return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    g.addColorStop(0, "rgba(255, 255, 255, 1)");
+    g.addColorStop(0.25, "rgba(200, 235, 255, 0.8)");
+    g.addColorStop(0.55, "rgba(100, 190, 255, 0.3)");
+    g.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 64, 64);
+    const tex = new THREE.CanvasTexture(canvas);
+    return tex;
+  }
+
+  constructor() {
+    const moteTex = this.createMoteTexture();
+    const layerConfigs = [
+      { count: 320, speedMult: 1.8, size: 1.8, color: 0x93c5fd, boxRadius: 36, depth: 85 }, // Layer 1: Fast warp streaks
+      { count: 480, speedMult: 1.0, size: 1.4, color: 0x38bdf8, boxRadius: 45, depth: 100 }, // Layer 2: Mid-speed stardust
+      { count: 360, speedMult: 0.5, size: 1.0, color: 0xa78bfa, boxRadius: 55, depth: 120 }, // Layer 3: Distant motes
+    ];
+
+    for (const cfg of layerConfigs) {
+      const positions = new Float32Array(cfg.count * 3);
+      for (let i = 0; i < cfg.count; i++) {
+        const i3 = i * 3;
+        positions[i3] = (Math.random() - 0.5) * cfg.boxRadius * 2;
+        positions[i3 + 1] = (Math.random() - 0.5) * cfg.boxRadius * 1.5;
+        positions[i3 + 2] = -Math.random() * cfg.depth;
+      }
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+
+      const mat = new THREE.PointsMaterial({
+        color: cfg.color,
+        size: cfg.size,
+        ...(moteTex ? { map: moteTex } : {}),
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+
+      const points = new THREE.Points(geo, mat);
+      points.frustumCulled = false;
+      this.group.add(points);
+
+      this.layers.push({
+        points,
+        speedMult: cfg.speedMult,
+        count: cfg.count,
+      });
+    }
+  }
+
+  update(
+    cameraPos: THREE.Vector3,
+    cameraQuat: THREE.Quaternion,
+    velocity: THREE.Vector3,
+    thrust: number,
+    isDriving: boolean,
+    dt: number,
+  ) {
+    this.group.position.copy(cameraPos);
+    this.group.quaternion.copy(cameraQuat);
+
+    const speed = velocity.length();
+    const effectiveSpeed = isDriving ? Math.max(speed, thrust * 25) : speed;
+    const isFlightAtSpeed = isDriving && effectiveSpeed > 10;
+    const flightSpeedRatio = isFlightAtSpeed ? clamp((effectiveSpeed - 10) / 60, 0, 1) : 0;
+    const baseOpacity = isFlightAtSpeed ? (0.2 + 0.65 * flightSpeedRatio) : 0;
+
+    const speedFactor = Math.max(10, effectiveSpeed);
+
+    for (const layer of this.layers) {
+      const mat = layer.points.material as THREE.PointsMaterial;
+      mat.opacity = baseOpacity * (layer.speedMult > 1.2 ? 1.0 : 0.7);
+
+      const posAttr = layer.points.geometry.getAttribute("position") as THREE.BufferAttribute;
+      const posArray = posAttr.array as Float32Array;
+
+      const step = speedFactor * layer.speedMult * dt;
+
+      for (let i = 0; i < layer.count; i++) {
+        const i3 = i * 3;
+        posArray[i3 + 2] += step;
+
+        if (posArray[i3 + 2] > -6) {
+          posArray[i3] = (Math.random() - 0.5) * 60;
+          posArray[i3 + 1] = (Math.random() - 0.5) * 45;
+          posArray[i3 + 2] = -85 - Math.random() * 35;
+        }
+      }
+      posAttr.needsUpdate = true;
+    }
+  }
+}
+function createNameplateSprite(name: string, colorHex: number): THREE.Sprite {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d")!;
+  ctx.clearRect(0, 0, 256, 64);
+
+  // Background rounded rect pill
+  ctx.fillStyle = "rgba(8, 14, 24, 0.78)";
+  const x = 12, y = 10, w = 232, h = 44, r = 16;
+  ctx.beginPath();
+  if (ctx.roundRect) {
+    ctx.roundRect(x, y, w, h, r);
+  } else {
+    ctx.rect(x, y, w, h);
+  }
+  ctx.fill();
+
+  // Team color border
+  const hex = "#" + colorHex.toString(16).padStart(6, "0");
+  ctx.lineWidth = 3.5;
+  ctx.strokeStyle = hex;
+  ctx.stroke();
+
+  // Small glowing indicator dot
+  ctx.fillStyle = hex;
+  ctx.beginPath();
+  ctx.arc(36, 32, 6, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Text
+  ctx.font = "bold 22px ui-sans-serif, system-ui, -apple-system, sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText((name || "探索员").slice(0, 10), 52, 33);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+  });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(1.4, 0.35, 1);
+  sprite.position.set(0, 2.15, 0);
+  sprite.name = "nameplate";
+  return sprite;
+}
 export class GameView {
   scene = new THREE.Scene();
   skyScene = new THREE.Scene();
   skyCamera = new THREE.PerspectiveCamera(66, 1, 100, 22000);
-  camera = new THREE.PerspectiveCamera(66, 1, 0.1, 6500);
+  camera = new THREE.PerspectiveCamera(66, 1, 0.1, 18000);
   renderer: THREE.WebGLRenderer;
   composer: EffectComposer;
   bloom: UnrealBloomPass;
@@ -64,6 +237,7 @@ export class GameView {
   ready = false;
   frames = 0;
   thirdPerson = true;
+  cameraOverride: { position: THREE.Vector3; lookAt: THREE.Vector3 } | null = null;
   effects = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 0.55;
   listener: THREE.AudioListener | null = null;
   music: THREE.Audio | null = null;
@@ -73,7 +247,128 @@ export class GameView {
   jetGain: GainNode | null = null;
   jetFilter: BiquadFilterNode | null = null;
   astronaut = new THREE.Group();
+  astronautAnimations: THREE.AnimationClip[] = [];
+  avatarMixers = new Map<
+    string,
+    {
+      mixer: THREE.AnimationMixer;
+      actions: Record<string, THREE.AnimationAction>;
+      currentAction: string;
+      head?: THREE.Object3D;
+      torso?: THREE.Object3D;
+      armL?: THREE.Object3D;
+      armR?: THREE.Object3D;
+    }
+  >();
+  hoverboardAsset: THREE.Group | null = null;
+  rifleAsset: THREE.Group | null = null;
+  grappleAsset: THREE.Group | null = null;
+  cameraAsset: THREE.Group | null = null;
+  obeliskAsset: THREE.Group | null = null;
+  activeWeapon: "none" | "rifle" | "grapple" | "camera" = "none";
+  weaponSwitchTime = 0;
+  cameraZoom = 1.0;
+  fpRifle: THREE.Group | null = null;
+  fpGrapple: THREE.Group | null = null;
+  fpCamera: THREE.Group | null = null;
+  fpHandRig: THREE.Object3D | null = null;
+  fpRightHand: THREE.Object3D | null = null;
+  fpLeftHand: THREE.Object3D | null = null;
   toolModel = new THREE.Group();
+  private rifleEnvironment: THREE.WebGLRenderTarget | null = null;
+  private rifleFill = new THREE.PointLight(0xfff5e8, 0.45, 2, 2);
+  interplanetary: InterplanetarySystem;
+  stardustStream: StardustParallaxStream;
+  flightSpringArm = {
+    focus: new THREE.Vector3(),
+    position: new THREE.Vector3(),
+    roll: 0,
+    pitch: 0,
+    initialized: false,
+  };
+  private compiling = false;
+
+  async compilePipeline() {
+    if (this.compiling) return;
+    this.compiling = true;
+    try {
+      const compilePromises: Promise<any>[] = [
+        this.renderer.compileAsync(this.scene, this.camera),
+        this.renderer.compileAsync(this.skyScene, this.skyCamera),
+      ];
+      if (this.toolModel) {
+        compilePromises.push(
+          this.renderer.compileAsync(this.toolModel, this.camera, this.scene),
+        );
+      }
+      await Promise.all(compilePromises);
+    } catch {
+      /* Fallback if compileAsync is not supported */
+    } finally {
+      this.compiling = false;
+    }
+  }
+
+  setWeapon(w: "none" | "rifle" | "grapple" | "camera") {
+    if (this.activeWeapon === w) return;
+    this.activeWeapon = w;
+    this.weaponSwitchTime = 0.25;
+    if (w !== "none") this.sound("tool", 1.35);
+    if (w === "none") {
+      for (const anim of this.avatarMixers.values()) {
+        if (anim.armR) anim.armR.quaternion.identity();
+        if (anim.armL) anim.armL.quaternion.identity();
+        if (anim.torso) anim.torso.quaternion.identity();
+      }
+    }
+    void this.compilePipeline();
+  }
+  private brightenRifle(root: THREE.Object3D) {
+    // Metallic surfaces need broad reflections as well as a small local fill.
+    if (!this.rifleEnvironment) {
+      const room = new RoomEnvironment();
+      const pmrem = new THREE.PMREMGenerator(this.renderer);
+      this.rifleEnvironment = pmrem.fromScene(room, 0.04, 0.1, 100, { size: 64 });
+      room.dispose();
+      pmrem.dispose();
+    }
+    root.traverse((o) => {
+      if (!(o instanceof THREE.Mesh)) return;
+      for (const material of Array.isArray(o.material) ? o.material : [o.material]) {
+        if (material instanceof THREE.MeshStandardMaterial) {
+          material.envMap = this.rifleEnvironment!.texture;
+          material.envMapIntensity = 1.0;
+          material.needsUpdate = true;
+        }
+      }
+    });
+  }
+  private setupFirstPersonHands() {
+    const right = createHandRig(this.astronaut, "Right", new THREE.Vector3(0.34, -0.23, -0.5));
+    const left = createHandRig(this.astronaut, "Left", new THREE.Vector3(0.12, -0.25, -0.85));
+    this.fpHandRig = new THREE.Group();
+    if (right) { this.fpHandRig.add(right.root); this.fpRightHand = right.joint; }
+    if (left) { this.fpHandRig.add(left.root); this.fpLeftHand = left.joint; }
+    this.toolModel.add(this.fpHandRig);
+  }
+  private mountFirstPerson(source: THREE.Group, kind: "rifle" | "grapple" | "camera", hand = this.fpRightHand) {
+    const size = kind === "rifle" ? 1.12 : kind === "grapple" ? 0.62 : 0.4;
+    const model = equipmentModel(source, size);
+    model.name = `first_person_${kind}`;
+    model.userData.asset = kind === "rifle" ? "hmg-379" : kind;
+    const pos = kind === "camera"
+      ? new THREE.Vector3(0.3, -0.17, -0.52)
+      : new THREE.Vector3(0.34, -0.22, kind === "rifle" ? -0.85 : -0.68);
+    attachHeldModel(this.toolModel, hand, model, pos);
+    if (kind === "grapple") {
+      const light = new THREE.PointLight(0x65e6ff, 1.5, 2.4, 2);
+      light.name = "grapple_point_light";
+      light.position.set(0, 0.08, 0.2);
+      model.add(light);
+    }
+    model.visible = this.activeWeapon === kind;
+    return model;
+  }
   avatars = new Map<string, THREE.Group>();
   beacons: THREE.Group[] = [];
   beaconBeams: THREE.Mesh[] = [];
@@ -114,8 +409,8 @@ export class GameView {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
-    this.scene.fog = new THREE.FogExp2(0x667f91, 0.00052);
+    // Ultra-subtle deep cosmic dust haze instead of thick blue fog overlay
+    this.scene.fog = new THREE.FogExp2(0x0c141d, 0.00004);
     this.scene.add(new THREE.HemisphereLight(0x8db4d8, 0x222f3a, 1.8));
     this.sun.position.set(-240, 190, -140);
     this.sun.castShadow = true;
@@ -131,6 +426,11 @@ export class GameView {
     this.sun.shadow.bias = -0.00025;
     this.sun.shadow.normalBias = 0.22;
     this.scene.add(this.sun, this.sun.target, this.camera);
+    this.rifleFill.name = "rifle_point_light";
+    this.rifleFill.position.set(-0.3, 0.15, 0.05);
+    this.toolModel.add(this.rifleFill);
+    this.stardustStream = new StardustParallaxStream();
+    this.scene.add(this.stardustStream.group);
     this.buildSky();
     this.buildTerrain();
     const crystalMat = new THREE.MeshStandardMaterial({
@@ -161,6 +461,7 @@ export class GameView {
       (p, n, c, s) => this.burst(p, n, c, s),
       (n, p) => this.sound(n, p),
     );
+    this.interplanetary = new InterplanetarySystem(this.scene, this.camera);
     const pg = new THREE.BufferGeometry();
     pg.setAttribute(
       "position",
@@ -311,7 +612,6 @@ export class GameView {
     });
     rocks.castShadow = true;
     rocks.receiveShadow = true;
-    this.scene.add(rocks);
     // Distant peaks extend the basin beyond its walkable boundary, without streaming.
     const far = new THREE.Group();
     const farMat = new THREE.MeshStandardMaterial({
@@ -355,69 +655,15 @@ export class GameView {
     rangeGeometry.setIndex(rangeIndices);
     rangeGeometry.computeVertexNormals();
     far.add(new THREE.Mesh(rangeGeometry, farMat));
-    this.scene.add(far);
-    const scenic = new THREE.Group();
-    const towerMat = new THREE.MeshStandardMaterial({
-      color: 0x354b56,
-      roughness: 0.72,
-      metalness: 0.52,
-      emissive: 0x0d3441,
-      emissiveIntensity: 0.28,
+
+    // Progressive frame-sliced mounting to eliminate single-frame synchronous upload stalls
+    requestAnimationFrame(() => {
+      this.scene.add(rocks);
+      requestAnimationFrame(() => {
+        this.scene.add(far);
+        void this.compilePipeline();
+      });
     });
-    const redMat = new THREE.MeshStandardMaterial({
-      color: 0x7d3e32,
-      roughness: 0.9,
-      metalness: 0.08,
-    });
-    for (const site of SCENIC_SITES) {
-      const g = new THREE.Group();
-      g.position.set(site.x, site.y, site.z);
-      g.scale.setScalar(site.scale);
-      if (site.kind === "tower") {
-        const shaft = new THREE.Mesh(
-          new THREE.CylinderGeometry(5.5, 13, 86, 6),
-          towerMat,
-        );
-        shaft.position.y = 43;
-        shaft.castShadow = true;
-        g.add(shaft);
-        const cap = new THREE.Mesh(
-          new THREE.ConeGeometry(12, 28, 6),
-          towerMat,
-        );
-        cap.position.y = 100;
-        cap.castShadow = true;
-        g.add(cap);
-        const light = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.9, 1.8, 36, 12),
-          glowMaterial(0x65dcff, 0.82),
-        );
-        light.position.y = 112;
-        g.add(light);
-      } else if (site.kind === "spire") {
-        for (let j = 0; j < 5; j++) {
-          const rock = new THREE.Mesh(
-            new THREE.ConeGeometry(7 - j * 0.8, 34 + j * 10, 5),
-            redMat,
-          );
-          rock.position.set((j - 2) * 8, (34 + j * 10) / 2, (j % 2) * 8 - 4);
-          rock.rotation.z = (j - 2) * 0.08;
-          rock.castShadow = true;
-          g.add(rock);
-        }
-      } else {
-        const arch = new THREE.Mesh(
-          new THREE.TorusGeometry(18, 4, 10, 6, Math.PI),
-          towerMat,
-        );
-        arch.rotation.z = Math.PI / 2;
-        arch.position.y = 18;
-        arch.castShadow = true;
-        g.add(arch);
-      }
-      scenic.add(g);
-    }
-    this.scene.add(scenic);
   }
   buildSky() {
     this.skyScene.add(this.sky);
@@ -462,35 +708,8 @@ export class GameView {
       }),
     );
     this.sky.add(starfield);
-    this.sky.add(this.earth, this.giant, this.moon);
-    this.giant.position.set(4800, 4500, -9200);
-    this.earth.position.set(-900, 1600, -8000);
-    this.moon.position.set(-3600, -700, -8500);
-    const gas = new THREE.Mesh(
-      new THREE.SphereGeometry(1350, 96, 64),
-      new THREE.ShaderMaterial({
-        vertexShader: vertex,
-        fragmentShader: `varying vec2 vUv;varying vec3 vNormal;void main(){float q=vUv.y+sin(vUv.x*22.+vUv.y*45.)*.003;float b=.5+.13*sin(q*94.)+.065*sin(q*210.+sin(vUv.x*31.))+.04*sin(q*470.);vec3 c=mix(vec3(.28,.19,.12),vec3(.78,.62,.40),b);float l=smoothstep(-.25,.7,dot(normalize(vNormal),normalize(vec3(-.9,.22,.32))));c*=.035+l;gl_FragColor=vec4(c,1.);}`,
-      }),
-    );
-    this.giant.add(gas);
-    const ringGeo = new THREE.RingGeometry(1770, 3440, 240, 10);
-    const ring = new THREE.Mesh(
-      ringGeo,
-      new THREE.ShaderMaterial({
-        side: THREE.DoubleSide,
-        transparent: true,
-        depthWrite: false,
-        vertexShader: vertex,
-        fragmentShader: `varying vec3 vPosition;void main(){float r=length(vPosition.xy);float t=(r-1770.)/1670.;float bands=.62+.08*sin(r*.19)+.12*sin(r*.048)+.045*sin(r*.81);float gap=1.-.91*exp(-pow((t-.45)/.018,2.));gap*=1.-.5*exp(-pow((t-.73)/.015,2.));vec3 c=mix(vec3(.39,.29,.18),vec3(.92,.76,.47),bands);float shadow=smoothstep(600.,1800.,vPosition.x+abs(vPosition.y)*1.3);c*=mix(.23,1.,shadow);float edge=smoothstep(0.,.04,t)*(1.-smoothstep(.90,1.,t));gl_FragColor=vec4(c,bands*gap*edge*.93);}`,
-      }),
-    );
-    ring.rotation.x = 1.42;
-    ring.rotation.z = 0;
-    this.giant.rotation.z = 0.42;
-    this.giant.add(ring);
-    this.atmosphere(this.giant, 1356, 0xe3c197, 0.24);
-    // A distant sun with a soft optical halo, kept below the ring composition.
+    // Removed old procedural billboard giant and old meshes so real high-detail solar system planets shine in sky.
+    // A distant sun with a soft optical halo.
     const sun = new THREE.Mesh(
       new THREE.SphereGeometry(75, 24, 16),
       new THREE.MeshBasicMaterial({
@@ -514,8 +733,40 @@ export class GameView {
     halo.position.copy(sun.position);
     halo.scale.set(2100, 2100, 1);
     this.sky.add(halo);
+
+    // The rising moon (unlocked upon completing all 3 beacons / star map constellation)
+    this.moon.position.set(0, -350, -6500);
+    const moonTex = typeof document !== "undefined"
+      ? new THREE.TextureLoader().load("/assets/moon.jpg")
+      : null;
+    const moonMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(180, 32, 24),
+      new THREE.MeshBasicMaterial({
+        ...(moonTex ? { map: moonTex } : { color: 0xcccccc }),
+        fog: false,
+      }),
+    );
+    this.moon.add(moonMesh);
+    const moonHaloTex = this.radialTexture();
+    if (moonHaloTex) {
+      const moonHalo = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: moonHaloTex,
+          color: 0x93c5fd,
+          transparent: true,
+          opacity: 0.35,
+          depthWrite: false,
+          fog: false,
+          blending: THREE.AdditiveBlending,
+        }),
+      );
+      moonHalo.scale.set(1200, 1200, 1);
+      this.moon.add(moonHalo);
+    }
+    this.sky.add(this.moon);
   }
   radialTexture() {
+    if (typeof document === "undefined") return null;
     const c = document.createElement("canvas");
     c.width = c.height = 128;
     const ctx = c.getContext("2d")!,
@@ -581,30 +832,152 @@ export class GameView {
     }
   }
   async load() {
+    THREE.DefaultLoadingManager.onError = () => {};
     const loader = new GLTFLoader(),
       textureLoader = new THREE.TextureLoader();
-    const [explorer, beacon, observatory, earth, moon] = await Promise.all([
-      loader.loadAsync("/assets/explorer-v3.glb"),
-      loader.loadAsync("/assets/beacon.glb"),
-      loader.loadAsync("/assets/observatory.glb"),
-      textureLoader.loadAsync("/assets/earth.jpg"),
-      textureLoader.loadAsync("/assets/moon.jpg"),
+    const loadGltf = async (url: string, fallback?: string) => {
+      let error: unknown;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          return await loader.loadAsync(url);
+        } catch (e) {
+          error = e;
+          await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+        }
+      }
+      if (fallback) return loadGltf(fallback);
+      throw error;
+    };
+    const loadTexture = async (url: string) => {
+      let error: unknown;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          return await textureLoader.loadAsync(url);
+        } catch (e) {
+          error = e;
+          await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+        }
+      }
+      throw error;
+    };
+    const [
+      explorer,
+      beacon,
+      observatory,
+      hoverboardGltf,
+      rifleGltf,
+      grappleGltf,
+      cameraGltf,
+      obeliskGltf,
+    ] = await Promise.all([
+      loadGltf("/assets/explorer-v4.glb", "/assets/explorer-v3.glb"),
+      loadGltf("/assets/beacon.glb"),
+      loadGltf("/assets/observatory.glb"),
+      loadGltf("/assets/hoverboard.glb"),
+      loadGltf("/assets/kinetic-rifle.glb"),
+      loadGltf("/assets/echo-grapple.glb"),
+      loadGltf("/assets/survey-camera.glb"),
+      loadGltf("/assets/obelisk.glb"),
     ]);
     this.astronaut = explorer.scene;
-    optimizeModel(this.astronaut);
+    this.astronautAnimations = explorer.animations;
     weatherMaterials(this.astronaut);
+    this.hoverboardAsset = equipmentModel(hoverboardGltf.scene, 1.3, 0);
+    this.rifleAsset = equipmentModel(rifleGltf.scene, 0.95, 0);
+    this.brightenRifle(this.rifleAsset);
+    this.grappleAsset = equipmentModel(grappleGltf.scene, 0.55, 0);
+    this.cameraAsset = equipmentModel(cameraGltf.scene, 0.35, 0);
+    this.setupFirstPersonHands();
+    this.obeliskAsset = obeliskGltf.scene;
+
+    for (const m of [
+      this.hoverboardAsset,
+      this.rifleAsset,
+      this.grappleAsset,
+      this.cameraAsset,
+      this.obeliskAsset,
+    ]) {
+      if (m) {
+        m.traverse((o) => {
+          if (o instanceof THREE.Mesh) {
+            o.castShadow = true;
+            o.receiveShadow = true;
+            o.frustumCulled = false;
+          }
+        });
+        weatherMaterials(m);
+      }
+    }
+
+    if (this.obeliskAsset) {
+      const scenic = new THREE.Group();
+      for (const site of SCENIC_SITES) {
+        const m = this.obeliskAsset.clone(true);
+        m.position.set(site.x, site.y, site.z);
+        const s = site.scale * 0.18;
+        m.scale.set(s, s, s);
+        m.rotation.y = hash(site.x, site.z) * Math.PI * 2;
+        scenic.add(m);
+      }
+      this.scene.add(scenic);
+    }
+
     await this.adventure.load();
-    const tool = await loader.loadAsync("/assets/tool.glb");
-    optimizeModel(tool.scene);
-    this.toolModel.add(tool.scene);
-    this.toolModel.rotation.y = Math.PI;
-    this.toolModel.position.set(0.32, -0.3, -0.58);
+
+    // Background progressive hydration: never block initial launch
+    void this.interplanetary.loadAssets(loader).catch((err) => {
+      console.warn("Background planetary hydration:", err);
+    });
+
+    // Background upgrade to weapons sequentially
+    void (async () => {
+      try {
+        const hmgGltf = await loader.loadAsync("/assets/models/hmg-379/scene.gltf");
+        if (hmgGltf?.scene) {
+          this.interplanetary.downloadedAssets.set("hmg-379", hmgGltf.scene);
+          weatherMaterials(hmgGltf.scene);
+          this.brightenRifle(hmgGltf.scene);
+          this.rifleAsset = hmgGltf.scene;
+          this.fpRifle?.removeFromParent();
+          this.fpRifle = this.mountFirstPerson(this.rifleAsset, "rifle");
+          for (const avatar of this.avatars.values()) avatar.userData.equipmentDirty = true;
+        }
+        const hoverGltf = await loader.loadAsync("/assets/models/hoverboard/scene.gltf");
+        if (hoverGltf?.scene) {
+          this.interplanetary.downloadedAssets.set("hoverboard", hoverGltf.scene);
+          weatherMaterials(hoverGltf.scene);
+          this.hoverboardAsset = equipmentModel(hoverGltf.scene, 1.3, 0);
+          for (const avatar of this.avatars.values()) avatar.userData.equipmentDirty = true;
+        }
+        const dx5Gltf = await loader.loadAsync("/assets/models/dx5-mobility-rifle/scene.gltf");
+        if (dx5Gltf?.scene) {
+          this.interplanetary.downloadedAssets.set("dx5-mobility-rifle", dx5Gltf.scene);
+          weatherMaterials(dx5Gltf.scene);
+          this.grappleAsset = equipmentModel(dx5Gltf.scene, 0.55, 0);
+          this.fpGrapple?.removeFromParent();
+          this.fpGrapple = this.mountFirstPerson(this.grappleAsset, "grapple", this.fpLeftHand);
+          for (const avatar of this.avatars.values()) avatar.userData.equipmentDirty = true;
+        }
+      } catch (err) {
+        console.warn("Optional weapon model hydration:", err);
+      }
+    })();
+    if (this.rifleAsset) {
+      this.fpRifle = this.mountFirstPerson(this.rifleAsset, "rifle");
+    }
+    if (this.grappleAsset) {
+      this.fpGrapple = this.mountFirstPerson(this.grappleAsset, "grapple", this.fpLeftHand);
+    }
+    if (this.cameraAsset) {
+      this.fpCamera = this.mountFirstPerson(this.cameraAsset, "camera");
+    }
     this.camera.add(this.toolModel);
     this.toolModel.visible = false;
     this.astronaut.traverse((o) => {
       if (o instanceof THREE.Mesh) {
         o.castShadow = true;
         o.receiveShadow = true;
+        o.frustumCulled = false;
       }
     });
     BEACON_SITES.forEach((b, i) => {
@@ -657,27 +1030,9 @@ export class GameView {
         this.scene.add(arch);
       }
     });
-    earth.colorSpace = moon.colorSpace = THREE.SRGBColorSpace;
-    const planetMat = (map: THREE.Texture) =>
-      new THREE.ShaderMaterial({
-        uniforms: { map: { value: map } },
-        vertexShader: vertex,
-        fragmentShader: `uniform sampler2D map;varying vec2 vUv;varying vec3 vNormal;void main(){vec3 c=texture2D(map,vUv).rgb;float d=dot(normalize(vNormal),normalize(vec3(.2,.35,.85)));float light=smoothstep(-.12,.75,d);c*=.025+light*.97;gl_FragColor=vec4(c,1.);}`,
-      });
-    const e = new THREE.Mesh(
-      new THREE.SphereGeometry(890, 96, 64),
-      planetMat(earth),
-    );
-    e.rotation.y = -0.6;
-    this.earth.add(e);
-    this.atmosphere(this.earth, 890, 0x73bfff, 0.78);
-    this.moon.add(
-      new THREE.Mesh(new THREE.SphereGeometry(490, 64, 48), planetMat(moon)),
-    );
     this.ready = true;
-    this.canvas.dataset.assetsLoaded = "4";
-    await this.renderer.compileAsync(this.scene, this.camera);
-    await this.renderer.compileAsync(this.skyScene, this.skyCamera);
+    this.interplanetary.onModelLoaded = () => void this.compilePipeline();
+    void this.compilePipeline();
   }
   async audio() {
     if (this.listener) {
@@ -741,10 +1096,12 @@ export class GameView {
       kill: [160, 32, 0.65],
       hurt: [110, 42, 0.35],
       enemy: [340, 70, 0.22],
+      shutter: [1600, 380, 0.09],
+      trick: [440 * pitch, 880 * pitch, 0.22],
     };
     const [a, b, d] = sounds[name] || sounds.mark;
     o.type =
-      name === "land" || name === "dash" || name === "step"
+      name === "land" || name === "dash" || name === "step" || name === "shutter"
         ? "triangle"
         : "sine";
     o.frequency.setValueAtTime(a, now);
@@ -772,6 +1129,7 @@ export class GameView {
   }
   toggleCamera() {
     this.thirdPerson = !this.thirdPerson;
+    void this.compilePipeline();
   }
   burst(pos: Vec, count: number, color: number, power = 3) {
     for (let i = 0; i < count; i++) {
@@ -800,13 +1158,26 @@ export class GameView {
     physics?: MovementWorld | null,
   ) {
     this.adventure.update(s, me, dt, t);
-    this.toolModel.visible = !!me && !this.thirdPerson && me.seat < 0;
+    this.interplanetary.step(dt, me || { x: 0, y: 0, z: 0 });
+    this.interplanetary.setShipState(s?.adventure.ship || null);
+    this.toolModel.visible = !!me && !this.thirdPerson && me.seat < 0 && this.activeWeapon !== "none";
+    this.rifleFill.visible = this.toolModel.visible && this.activeWeapon === "rifle";
+    if (this.fpHandRig) this.fpHandRig.visible = this.toolModel.visible;
+    const leftViewArm = this.fpHandRig?.getObjectByName("left_view_arm");
+    if (leftViewArm) leftViewArm.visible = this.toolModel.visible && this.activeWeapon !== "rifle" && this.activeWeapon !== "none";
     if (me) {
+      if (this.weaponSwitchTime > 0) this.weaponSwitchTime -= dt;
+      const switchDrop = Math.sin(Math.max(0, this.weaponSwitchTime) / 0.25 * Math.PI) * 0.14;
+      const recoilKick = Math.max(0, me.toolCooldown - 0.12) * 0.22;
       this.toolModel.position.y =
-        -0.3 +
+        0 -
+        switchDrop +
         Math.sin(t * 7) * Math.min(0.012, Math.hypot(me.vx, me.vz) * 0.001);
-      this.toolModel.position.z =
-        -0.58 + Math.max(0, me.toolCooldown - 0.15) * 0.45;
+      this.toolModel.position.z = recoilKick;
+
+      if (this.fpRifle) this.fpRifle.visible = this.activeWeapon === "rifle";
+      if (this.fpGrapple) this.fpGrapple.visible = this.activeWeapon === "grapple";
+      if (this.fpCamera) this.fpCamera.visible = this.activeWeapon === "camera";
     }
     const worldTime = s ? s.time : t * 0.4 + 80,
       level = s?.beacons.filter((b) => b.active).length || 0;
@@ -822,54 +1193,127 @@ export class GameView {
         this.lastLevel = me.level;
         this.lastMe = me.id;
       }
-      const speed = Math.hypot(me.vx, me.vz),
-        fov = 66 + clamp(speed / 43) * 8 * this.effects;
-      this.camera.fov = THREE.MathUtils.damp(this.camera.fov, fov, 5, dt);
-      this.camera.updateProjectionMatrix();
-      const target = new THREE.Vector3(me.x, me.y + 0.9, me.z),
-        rotation = new THREE.Euler(me.pitch, me.yaw, 0, "YXZ");
-      this.camera.rotation.copy(rotation);
+      const speed = Math.hypot(me.vx, me.vz);
+      if (me.seat >= 0 && s) {
+        const ship = s.adventure.ship;
+        const shipSpeed = Math.hypot(ship.vx, ship.vy, ship.vz);
+        const speedRatio = clamp(shipSpeed / 130, 0, 1.0);
+        let fov = 60 + speedRatio * 18; // smooth 60° -> 78°
+        if (this.activeWeapon === "camera") {
+          fov = fov / Math.max(1, this.cameraZoom);
+        }
+        this.camera.fov = THREE.MathUtils.damp(this.camera.fov, fov, 6, dt);
+        this.camera.updateProjectionMatrix();
+      } else {
+        let fov = 66 + clamp(speed / 43) * 8 * this.effects;
+        if (this.activeWeapon === "camera") {
+          fov = fov / Math.max(1, this.cameraZoom);
+        }
+        this.camera.fov = THREE.MathUtils.damp(this.camera.fov, fov, 10, dt);
+        this.camera.updateProjectionMatrix();
+      }
+      const target = eyePosition(me), up = playerUp(me);
+      const orientation = viewOrientation(me);
+      this.camera.up.copy(up);
+      this.camera.quaternion.copy(orientation);
       this.cameraObstructed = false;
-      if (this.thirdPerson) {
-        const offset = new THREE.Vector3(
-            0,
-            me.seat >= 0 ? 6 : 0,
-            me.seat >= 0 ? 23 : 8,
-          ).applyEuler(rotation),
-          desired = target.clone().add(offset);
-        let range = offset.length();
-        if (physics)
-          range = Math.min(range, physics.cameraDistance(target, desired));
-        // Check the complete camera segment against terrain, including its safety margin.
-        for (let f = 0.08; f <= 1; f += 0.035) {
-          const q = target.clone().addScaledVector(offset, f);
-          if (q.y < groundAt(q.x, q.z) + 0.55) {
-            range = Math.min(range, offset.length() * Math.max(0.06, f - 0.04));
-            break;
+      if (me.seat >= 0 && s && this.thirdPerson) {
+        // Flight Spring Arm Lag & Roll/Pitch Linkage
+        const ship = s.adventure.ship;
+        const mercAlign = computeMercuryAlignment(ship, ship.yaw, ship.bank);
+        const localUp = mercAlign.captureWeight > 0.05 ? mercAlign.up.clone() : new THREE.Vector3(0, 1, 0);
+
+        const shipPos = new THREE.Vector3(ship.x, ship.y, ship.z);
+        let shipForward = new THREE.Vector3(-Math.sin(ship.yaw), 0, -Math.cos(ship.yaw));
+        shipForward.addScaledVector(localUp, -shipForward.dot(localUp));
+        if (shipForward.lengthSq() < 0.0001) {
+          shipForward.set(1, 0, 0).addScaledVector(localUp, -localUp.x);
+        }
+        shipForward.normalize();
+
+        const idealFocus = shipPos.clone().addScaledVector(localUp, 1.8).addScaledVector(shipForward, 4.0);
+
+        if (!this.flightSpringArm.initialized) {
+          this.flightSpringArm.focus.copy(idealFocus);
+        } else {
+          this.flightSpringArm.focus.lerp(idealFocus, 1 - Math.exp(-dt * 10));
+        }
+
+        const baseDist = 22.0;
+        const baseH = 6.5;
+        const shipSpeed = Math.hypot(ship.vx, ship.vy, ship.vz);
+        const lagDist = clamp(shipSpeed * 0.12, 0, 8.0);
+
+        const idealCamPos = shipPos.clone()
+          .addScaledVector(localUp, baseH)
+          .addScaledVector(shipForward, -(baseDist + lagDist));
+
+        if (!this.flightSpringArm.initialized) {
+          this.flightSpringArm.position.copy(idealCamPos);
+          this.flightSpringArm.initialized = true;
+        } else {
+          this.flightSpringArm.position.lerp(idealCamPos, 1 - Math.exp(-dt * 8));
+        }
+
+        const targetRoll = -ship.bank * 0.65;
+        this.flightSpringArm.roll = THREE.MathUtils.damp(this.flightSpringArm.roll, targetRoll, 7, dt);
+        const targetPitch = clamp(ship.vy / 28, -0.3, 0.3) * 0.18;
+        this.flightSpringArm.pitch = THREE.MathUtils.damp(this.flightSpringArm.pitch, targetPitch, 6, dt);
+
+        this.camera.position.copy(this.flightSpringArm.position);
+        this.camera.up.copy(localUp);
+        this.camera.lookAt(this.flightSpringArm.focus);
+        this.camera.rotateZ(this.flightSpringArm.roll);
+        this.camera.rotateX(this.flightSpringArm.pitch);
+      } else {
+        this.flightSpringArm.initialized = false;
+        if (this.thirdPerson) {
+          const offset = new THREE.Vector3(
+              0,
+              me.seat >= 0 ? 6 : 0,
+              me.seat >= 0 ? 23 : 8,
+            ).applyQuaternion(orientation),
+            desired = target.clone().add(offset);
+          let range = offset.length();
+          if (physics)
+            range = Math.min(range, physics.cameraDistance(target, desired));
+          // Check the complete camera segment against terrain, including its safety margin.
+          for (let f = 0.08; f <= 1; f += 0.035) {
+            const q = target.clone().addScaledVector(offset, f);
+            if (!me.planet && q.y < groundAt(q.x, q.z) + 0.55) {
+              range = Math.min(range, offset.length() * Math.max(0.06, f - 0.04));
+              break;
+            }
+          }
+          this.cameraObstructed = range < offset.length() - 0.2;
+          this.cameraRange = range;
+          this.camera.position
+            .copy(target)
+            .addScaledVector(offset, range / offset.length());
+        } else {
+          this.cameraRange = 0;
+          this.camera.position.copy(target);
+          if (me.seat >= 0 && s) {
+            this.camera.position.set(
+              s.adventure.ship.x - Math.sin(s.adventure.ship.yaw) * 4.7,
+              s.adventure.ship.y + 3.9,
+              s.adventure.ship.z - Math.cos(s.adventure.ship.yaw) * 4.7,
+            );
           }
         }
-        this.cameraObstructed = range < offset.length() - 0.2;
-        this.cameraRange = range;
-        this.camera.position
-          .copy(target)
-          .addScaledVector(offset, range / offset.length());
-      } else {
-        this.cameraRange = 0;
-        this.camera.position.copy(target);
-        if (me.seat >= 0 && s) {
-          this.camera.position.set(
-            s.adventure.ship.x - Math.sin(s.adventure.ship.yaw) * 4.7,
-            s.adventure.ship.y + 3.9,
-            s.adventure.ship.z - Math.cos(s.adventure.ship.yaw) * 4.7,
-          );
-        }
+      }
+      const isDriving = me.seat >= 0;
+      const vShip = s && isDriving ? new THREE.Vector3(s.adventure.ship.vx, s.adventure.ship.vy, s.adventure.ship.vz) : new THREE.Vector3(me.vx, me.vy, me.vz);
+      const shipThrust = isDriving ? (s?.adventure.ship.thrust || 0) : (me.jetting ? 1 : 0);
+      this.stardustStream.update(this.camera.position, this.camera.quaternion, vShip, shipThrust, isDriving, dt);
+      if (this.cameraOverride) {
+        this.camera.position.copy(this.cameraOverride.position);
+        this.camera.lookAt(this.cameraOverride.lookAt);
       }
       this.shake *= Math.exp(-dt * 12);
       if (playing && this.effects > 0) {
-        this.camera.position.y +=
-          Math.sin(t * 48) * this.shake * this.effects * 0.09;
-        this.camera.rotation.z =
-          Math.sin(t * 33) * this.shake * this.effects * 0.003;
+        this.camera.position.addScaledVector(up, Math.sin(t * 48) * this.shake * this.effects * 0.09);
+        this.camera.rotateZ(Math.sin(t * 33) * this.shake * this.effects * 0.003);
       }
       if (me.crystals > this.lastCollected) {
         this.sound("pickup", 1 + Math.min(me.combo, 8) * 0.09);
@@ -901,7 +1345,7 @@ export class GameView {
       this.jetTimer += dt;
       if (me.jetting && this.jetTimer > 0.045) {
         this.jetTimer = 0;
-        this.burst({ x: me.x, y: me.y - 0.25, z: me.z }, 3, 0x5dcfff, 2);
+        this.burst({ x: me.x, y: me.y + 0.35, z: me.z }, 3, 0x5dcfff, 2);
       }
       this.footTimer += dt;
       if (
@@ -943,13 +1387,6 @@ export class GameView {
     this.skyCamera.fov = this.camera.fov;
     this.skyCamera.aspect = this.camera.aspect;
     this.skyCamera.updateProjectionMatrix();
-    const earthAge = s ? (s.earthAt < 0 ? 0 : s.time - s.earthAt) : 55;
-    this.earth.position.y = -420 + 2320 * smooth(earthAge / 45);
-    this.earth.rotation.y = worldTime * 0.002;
-    const moonAge = s && s.completedAt >= 0 ? s.time - s.completedAt : 0;
-    this.moon.position.y = -600 + 2600 * smooth(moonAge / 40);
-    this.moon.rotation.y = worldTime * 0.001;
-    this.giant.rotation.y = Math.sin(worldTime * 0.001) * 0.05;
     this.musicLayers.forEach((a, i) => {
       const goal =
         i === 0
@@ -961,6 +1398,8 @@ export class GameView {
               : 0;
       a.setVolume(THREE.MathUtils.damp(a.getVolume(), goal, 1, dt));
     });
+    const moonTargetY = (s && (s.completedAt > 0 || level >= 3)) ? 1400 : -350;
+    this.moon.position.y = THREE.MathUtils.damp(this.moon.position.y, moonTargetY, 0.8, dt);
     for (const [index, b] of this.beacons.entries()) {
       const data = s?.beacons[index],
         active = data?.active || false,
@@ -1011,133 +1450,352 @@ export class GameView {
       if (!ids.has(id)) {
         this.scene.remove(a);
         this.avatars.delete(id);
+        const anim = this.avatarMixers.get(id);
+        if (anim) {
+          anim.mixer.stopAllAction();
+          this.avatarMixers.delete(id);
+        }
       }
     for (const remote of s?.players || []) {
       const own = remote.id === me?.id,
         p = own ? me! : remote;
       let a = this.avatars.get(p.id);
+      let anim = this.avatarMixers.get(p.id);
       if (!a) {
-        a = this.astronaut.clone(true);
+        const cloned = SkeletonUtils.clone(this.astronaut);
+        a = new THREE.Group();
+        a.add(cloned);
         const lamp = new THREE.Mesh(
           new THREE.SphereGeometry(0.06, 12, 8),
           new THREE.MeshBasicMaterial({ color: COLORS[p.color] }),
         );
-        lamp.position.set(0, 1.48, 0.23);
+        lamp.position.set(0, 1.76, 0.14);
         a.add(lamp);
+
+        const nameplate = createNameplateSprite(p.name, COLORS[p.color]);
+        if (own) nameplate.visible = false;
+        a.add(nameplate);
+        a.userData.name = p.name;
         a.position.set(p.x, p.y - 0.82, p.z);
         for (const side of [-1, 1]) {
+          const coneGeo = new THREE.ConeGeometry(0.045, 0.35, 12, 1, true);
+          coneGeo.rotateZ(Math.PI);
+          coneGeo.translate(0, -0.175, 0);
           const jet = new THREE.Mesh(
-            new THREE.ConeGeometry(0.06, 0.9, 10, 1, true),
-            glowMaterial(0x81e6ff, 0.7),
+            coneGeo,
+            glowMaterial(0x62dbff, 0.85),
           );
           jet.name = "jet-" + side;
-          jet.rotation.z = Math.PI;
-          jet.position.set(side * 0.18, 0.46, -0.31);
+          jet.position.set(side * 0.22, 1.18, -0.26);
+          jet.rotation.x = 0.14;
           a.add(jet);
         }
+
+        const board = this.hoverboardAsset
+          ? this.hoverboardAsset.clone(true)
+          : new THREE.Group();
+        board.position.set(0, -0.38, 0.0);
+        board.name = "hoverboard";
+        board.visible = false;
+        a.add(board);
+
+        const rightHand =
+          cloned.getObjectByName("mixamorig:RightHand") ||
+          cloned.getObjectByName("RightHand") ||
+          cloned.getObjectByName("mixamorig:RightForeArm");
+        const upperBack =
+          cloned.getObjectByName("mixamorig:Spine2") ||
+          cloned.getObjectByName("mixamorig:Spine1");
+        const leftForeArm =
+          cloned.getObjectByName("mixamorig:LeftForeArm") ||
+          cloned.getObjectByName("LeftForeArm") ||
+          cloned.getObjectByName("mixamorig:LeftArm");
+        const hips =
+          cloned.getObjectByName("mixamorig:Hips") ||
+          cloned.getObjectByName("Hips");
+
+        if (this.rifleAsset) {
+          const heldRifle = this.rifleAsset.clone(true);
+          heldRifle.name = "heldRifle";
+          // Accurately calibrated weapon scale and grip socket offset aligned with right hand palms
+          heldRifle.scale.setScalar(17.2);
+          heldRifle.position.set(0.015, -0.045, 0.095);
+          heldRifle.rotation.set(-Math.PI / 2, 0, Math.PI);
+          heldRifle.visible = false;
+          if (rightHand) rightHand.add(heldRifle);
+
+          const backRifle = this.rifleAsset.clone(true);
+          backRifle.name = "backRifle";
+          backRifle.scale.setScalar(17.2);
+          backRifle.position.set(0.12, 0.15, -0.22);
+          backRifle.rotation.set(0.2, 0.1, 2.35);
+          backRifle.visible = false;
+          if (upperBack) upperBack.add(backRifle);
+        }
+
+        if (this.grappleAsset) {
+          const grapple = this.grappleAsset.clone(true);
+          grapple.name = "grappleLauncher";
+          // Fixed forearm bracket socket aligned to outer forearm plane, eliminating forearm clipping
+          grapple.scale.setScalar(0.68);
+          grapple.position.set(0.025, 0.16, 0.045);
+          grapple.rotation.set(0.12, 0, -0.08);
+          grapple.visible = false;
+          if (leftForeArm) leftForeArm.add(grapple);
+        }
+
+        if (this.cameraAsset) {
+          const hipCamera = this.cameraAsset.clone(true);
+          hipCamera.name = "hipCamera";
+          hipCamera.scale.setScalar(100);
+          hipCamera.position.set(0.18, -0.06, 0.08);
+          hipCamera.rotation.set(0.2, -0.3, 0.1);
+          if (hips) hips.add(hipCamera);
+
+          const heldCamera = this.cameraAsset.clone(true);
+          heldCamera.name = "heldCamera";
+          heldCamera.scale.setScalar(100);
+          heldCamera.position.set(0.05, -0.04, 0.08);
+          heldCamera.rotation.set(-Math.PI / 2, 0, 0);
+          heldCamera.visible = false;
+          if (rightHand) rightHand.add(heldCamera);
+        }
+
+        const mixer = new THREE.AnimationMixer(cloned);
+        const findClip = (name: string, fallbackIdx = 0) =>
+          THREE.AnimationClip.findByName(this.astronautAnimations, name) ||
+          this.astronautAnimations.find((c) =>
+            c.name.toLowerCase().includes(name.toLowerCase()),
+          ) ||
+          this.astronautAnimations[fallbackIdx] ||
+          new THREE.AnimationClip(name, 1, []);
+
+        const actions: Record<string, THREE.AnimationAction> = {
+          idle: mixer.clipAction(findClip("idle", 0)),
+          walk: mixer.clipAction(findClip("walk", 1)),
+          run: mixer.clipAction(findClip("run", 2)),
+          floating: mixer.clipAction(findClip("floating", 3)),
+        };
+        actions.idle.play();
+
+        anim = {
+          mixer,
+          actions,
+          currentAction: "idle",
+          head: cloned.getObjectByName("mixamorig:Head") || cloned.getObjectByName("Head") || cloned.getObjectByName("head"),
+          torso: cloned.getObjectByName("mixamorig:Spine1") || cloned.getObjectByName("Spine1") || cloned.getObjectByName("Spine"),
+          armL: cloned.getObjectByName("mixamorig:LeftArm") || cloned.getObjectByName("LeftArm") || cloned.getObjectByName("arm_L"),
+          armR: cloned.getObjectByName("mixamorig:RightArm") || cloned.getObjectByName("RightArm"),
+        };
+        this.avatarMixers.set(p.id, anim);
         this.avatars.set(p.id, a);
         this.scene.add(a);
       }
+      if (a.userData.name !== p.name) {
+        const old = a.getObjectByName("nameplate");
+        if (old) a.remove(old);
+        const nameplate = createNameplateSprite(p.name, COLORS[p.color]);
+        if (own) nameplate.visible = false;
+        a.add(nameplate);
+        a.userData.name = p.name;
+      }
       a.visible =
-        p.seat < 0 && !(own && (!this.thirdPerson || this.cameraRange < 1.2));
-      if (own) a.position.set(p.x, p.y - 0.82, p.z);
+        p.seat < 0 && !(own && (!this.thirdPerson || this.cameraRange < 0.4));
+      if (p.planet) {
+        a.position.copy(v3(p)).addScaledVector(playerUp(p), -FOOT_OFFSET);
+      } else if (own) a.position.set(p.x, p.y - 0.82, p.z);
       else
         a.position.lerp(
           new THREE.Vector3(p.x, p.y - 0.82, p.z),
           1 - Math.exp(-dt * 14),
         );
       const targetYaw = p.yaw + Math.PI;
-      a.rotation.y +=
-        Math.atan2(
-          Math.sin(targetYaw - a.rotation.y),
-          Math.cos(targetYaw - a.rotation.y),
-        ) *
-        (1 - Math.exp(-dt * 12));
+      if (!p.planet) {
+        a.rotation.y +=
+          Math.atan2(
+            Math.sin(targetYaw - a.rotation.y),
+            Math.cos(targetYaw - a.rotation.y),
+          ) *
+          (1 - Math.exp(-dt * 12));
+      }
+      const speed = Math.hypot(p.vx, p.vz);
+      const targetPitch = p.skate
+        ? 0
+        : p.jetting
+          ? 0
+          : p.grounded
+            ? 0
+            : Math.min(0.12, speed * 0.01);
+      a.rotation.x = THREE.MathUtils.damp(a.rotation.x, targetPitch, 8, dt);
       a.rotation.z = THREE.MathUtils.damp(
         a.rotation.z,
         p.grapple ? Math.sin(t * 3) * 0.08 : 0,
         8,
         dt,
       );
-      const torso = a.getObjectByName("body");
-      if (torso) {
-        torso.rotation.x = THREE.MathUtils.damp(
-          torso.rotation.x,
-          p.grapple
-            ? -0.22
-            : p.jetting
-              ? 0.13
-              : p.grounded
-                ? Math.min(0.16, Math.hypot(p.vx, p.vz) * 0.008)
-                : -0.08,
-          7,
+
+      if (p.skate) {
+        const turnDelta = Math.atan2(
+          Math.sin(targetYaw - a.rotation.y),
+          Math.cos(targetYaw - a.rotation.y),
+        );
+        a.rotation.z = THREE.MathUtils.damp(
+          a.rotation.z,
+          Math.max(-0.25, Math.min(0.25, -turnDelta * 0.35)),
+          8,
           dt,
         );
-        torso.position.y = 0.98 + (p.grounded ? Math.sin(t * 2) * 0.008 : 0);
       }
-      const head = a.getObjectByName("head");
-      if (head)
-        head.rotation.x = THREE.MathUtils.damp(
-          head.rotation.x,
-          -p.pitch * 0.35,
-          10,
-          dt,
+      if (p.planet) {
+        a.quaternion.copy(surfaceOrientation(p)).multiply(
+          new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), targetYaw),
         );
+      }
+
+      if (anim) {
+        anim.mixer.update(dt);
+        let target = "idle";
+        if (p.skate) {
+          // Skateboard strictly overrides jetting and airborne animations!
+          // Solid surfing stance with feet firmly planted in the middle of the deck, even when boosting/airborne!
+          target = "idle";
+        } else if (p.jetting || !p.grounded) {
+          target = "floating";
+        } else if (speed > 5.0) {
+          target = "run";
+          anim.actions.run.timeScale = Math.max(0.75, Math.min(1.25, speed * 0.085));
+        } else if (speed > 0.35) {
+          target = "walk";
+          anim.actions.walk.timeScale = Math.max(0.6, Math.min(1.15, speed * 0.22));
+        } else {
+          target = "idle";
+        }
+
+        if (anim.currentAction !== target) {
+          const prev = anim.actions[anim.currentAction];
+          const next = anim.actions[target];
+          if (prev && next) {
+            prev.fadeOut(0.2);
+            next.reset().fadeIn(0.2).play();
+            anim.currentAction = target;
+          }
+        }
+
+        if (anim.head) {
+          anim.head.rotation.x = THREE.MathUtils.damp(
+            anim.head.rotation.x,
+            -p.pitch * 0.35,
+            10,
+            dt,
+          );
+        }
+
+        const inShip = p.seat >= 0 || this.interplanetary.inCorridor;
+        const activeWep = own ? this.activeWeapon : (p.grapple ? "grapple" : "none");
+        const heldRifle = a.getObjectByName("heldRifle");
+        const backRifle = a.getObjectByName("backRifle");
+        const heldCamera = a.getObjectByName("heldCamera");
+        const hipCamera = a.getObjectByName("hipCamera");
+        const grappleLauncher = a.getObjectByName("grappleLauncher");
+
+        if (heldRifle && backRifle) {
+          heldRifle.visible = !inShip && activeWep === "rifle";
+          backRifle.visible = !inShip && activeWep !== "rifle" && activeWep !== "none";
+        }
+        if (heldCamera && hipCamera) {
+          heldCamera.visible = !inShip && activeWep === "camera";
+          hipCamera.visible = !inShip && activeWep !== "camera" && activeWep !== "none";
+        }
+        if (grappleLauncher) {
+          grappleLauncher.visible = !inShip && (activeWep === "grapple" || !!p.grapple);
+        }
+
+        if (p.skate) {
+          // Surfing stance on skateboard: torso turned slightly, balanced stance
+          if (anim.torso) {
+            anim.torso.rotation.y = THREE.MathUtils.damp(anim.torso.rotation.y, 0.38, 8, dt);
+          }
+          if (anim.armL && !p.grapple) {
+            anim.armL.rotation.z = THREE.MathUtils.damp(anim.armL.rotation.z, -0.4, 8, dt);
+            anim.armL.rotation.x = THREE.MathUtils.damp(anim.armL.rotation.x, 0.2, 8, dt);
+          }
+          if (anim.armR) {
+            anim.armR.rotation.z = THREE.MathUtils.damp(anim.armR.rotation.z, 0.4, 8, dt);
+            anim.armR.rotation.x = THREE.MathUtils.damp(anim.armR.rotation.x, -0.2, 8, dt);
+          }
+        } else if (activeWep === "rifle" && !inShip) {
+          // Two-handed tactical rifle aiming posture only when actively equipped and outside ship
+          if (anim.armR) {
+            anim.armR.rotation.x = THREE.MathUtils.damp(anim.armR.rotation.x, -1.05 - p.pitch * 0.4, 12, dt);
+            anim.armR.rotation.y = THREE.MathUtils.damp(anim.armR.rotation.y, -0.15, 12, dt);
+            anim.armR.rotation.z = THREE.MathUtils.damp(anim.armR.rotation.z, 0.1, 12, dt);
+          }
+          if (anim.armL && !p.grapple) {
+            anim.armL.rotation.x = THREE.MathUtils.damp(anim.armL.rotation.x, -0.95 - p.pitch * 0.4, 12, dt);
+            anim.armL.rotation.y = THREE.MathUtils.damp(anim.armL.rotation.y, 0.35, 12, dt);
+            anim.armL.rotation.z = THREE.MathUtils.damp(anim.armL.rotation.z, 0.42, 12, dt);
+          }
+          if (anim.torso) {
+            anim.torso.rotation.y = THREE.MathUtils.damp(anim.torso.rotation.y, -0.15, 8, dt);
+          }
+        } else if (activeWep === "camera" && !inShip) {
+          // Two-handed camera inspection/shooting posture
+          if (anim.armR) {
+            anim.armR.rotation.x = THREE.MathUtils.damp(anim.armR.rotation.x, -0.85 - p.pitch * 0.4, 12, dt);
+            anim.armR.rotation.y = THREE.MathUtils.damp(anim.armR.rotation.y, -0.25, 12, dt);
+          }
+          if (anim.armL) {
+            anim.armL.rotation.x = THREE.MathUtils.damp(anim.armL.rotation.x, -0.85 - p.pitch * 0.4, 12, dt);
+            anim.armL.rotation.y = THREE.MathUtils.damp(anim.armL.rotation.y, 0.25, 12, dt);
+          }
+        } else {
+          // Default empty-handed natural posture: arms follow natural animation without manual overrides
+        }
+        if (p.grapple && anim.armL) {
+          anim.armL.rotation.x = -1.35 - p.pitch * 0.5;
+        }
+      }
+
       for (const side of [-1, 1]) {
         const jet = a.getObjectByName("jet-" + side);
         if (jet) {
-          jet.visible = p.jetting;
-          jet.scale.y = 0.75 + Math.sin(t * 63) * 0.25;
+          jet.visible = p.jetting && !p.skate;
+          const flicker = 0.8 + Math.sin(t * 60 + side * 1.5) * 0.2;
+          jet.scale.set(1, flicker, 1);
         }
       }
-      const speed = Math.hypot(p.vx, p.vz),
-        stride = Math.sin(worldTime * Math.min(18, speed * 0.85)),
-        amount = p.grounded ? clamp(speed / 15) * 0.56 : 0.2;
-      for (const [n, sign] of [
-        ["leg_L", 1],
-        ["leg_R", -1],
-        ["arm_L", -1],
-        ["arm_R", 1],
-      ] as const) {
-        const limb = a.getObjectByName(n);
-        if (limb)
-          limb.rotation.x = p.grounded
-            ? stride * amount * sign
-            : p.jetting
-              ? -0.27
-              : amount * sign;
-      }
-      for (const side of ["L", "R"]) {
-        const sign = side === "L" ? 1 : -1,
-          knee = a.getObjectByName("knee_" + side),
-          elbow = a.getObjectByName("elbow_" + side);
-        if (knee)
-          knee.rotation.x = THREE.MathUtils.damp(
-            knee.rotation.x,
-            p.grounded
-              ? Math.max(0, -stride * sign) * amount * 0.9
-              : p.jetting
-                ? 0.4
-                : 0.7,
-            12,
-            dt,
-          );
-        if (elbow)
-          elbow.rotation.x = THREE.MathUtils.damp(
-            elbow.rotation.x,
-            p.toolCooldown > 0 || p.grapple
-              ? -1.1
-              : -0.16 - Math.max(0, stride * sign) * amount * 0.4,
-            14,
-            dt,
-          );
-        if (p.grapple && side === "L") {
-          const arm = a.getObjectByName("arm_L");
-          if (arm) arm.rotation.x = -1.3;
+
+      const board = a.getObjectByName("hoverboard");
+      if (board) {
+        board.visible = !!p.skate;
+        if (p.skate) {
+          const isOllie = !!(p.ollieUntil && p.ollieUntil > worldTime);
+          if (isOllie) {
+            const remain = Math.max(0, (p.ollieUntil ?? 0) - worldTime);
+            const progress = Math.max(0, Math.min(1, 1 - remain / 0.8));
+            // 360 Kickflip longitudinal roll along Z-axis (parallel to stance, stays flat beneath feet)
+            board.rotation.z = progress < 1 ? progress * Math.PI * 2 : 0;
+            // Aerodynamic pop pitch along X-axis: nose rises during takeoff, levels out cleanly for landing
+            const popPitch = -Math.sin(progress * Math.PI) * 0.22;
+            board.rotation.x = THREE.MathUtils.damp(board.rotation.x, popPitch, 12, dt);
+            board.rotation.y = THREE.MathUtils.damp(board.rotation.y, 0, 10, dt);
+            // Downward clearance: board drops 12-22cm below feet during the flip to guarantee zero body clipping
+            const clearance = -0.44 - Math.sin(progress * Math.PI) * 0.12;
+            board.position.set(0, clearance, 0.0);
+          } else {
+            board.rotation.x = THREE.MathUtils.damp(board.rotation.x, 0, 12, dt);
+            board.rotation.z = THREE.MathUtils.damp(board.rotation.z, 0, 12, dt);
+            board.rotation.y = THREE.MathUtils.damp(board.rotation.y, 0, 12, dt);
+            board.position.set(0, -0.38 + Math.sin(t * 8) * 0.008, 0.0);
+          }
         }
       }
-      if (p.jetting && !own && hash(Math.floor(t * 30), p.color) > 0.4)
-        this.burst({ x: p.x, y: p.y - 0.3, z: p.z }, 2, COLORS[p.color], 1.5);
+
+      if (p.skate && p.jetting && hash(Math.floor(t * 30), p.color) > 0.25) {
+        this.burst({ x: p.x, y: p.y - 0.78, z: p.z }, 3, 0x00f0ff, 2.4);
+      }
+      if (p.jetting && !p.skate && !own && hash(Math.floor(t * 30), p.color) > 0.4)
+        this.burst({ x: p.x, y: p.y + 0.35, z: p.z }, 2, COLORS[p.color], 1.5);
     }
     for (const [id, g] of this.markers)
       if (!s?.markers.some((m) => m.owner === id)) {
@@ -1248,4 +1906,47 @@ export class GameView {
     );
     ctx.stroke();
   }
+}
+
+
+export function downloadAsset(url: string, filename: string): void {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+export async function exportHoverboardGlb(): Promise<void> {
+  downloadAsset("/assets/hoverboard.glb", `kepler-hoverboard-${Date.now()}.glb`);
+}
+
+export function takeSnapshot(view: GameView): void {
+  view.sound("shutter");
+  const flash = document.createElement("div");
+  flash.className = "camera-flash";
+  document.body.appendChild(flash);
+  setTimeout(() => flash.remove(), 450);
+  try {
+    const url = view.canvas.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.download = `last-light-snapshot-${Date.now()}.png`;
+    a.href = url;
+    a.click();
+  } catch (err) {
+    console.error("Camera snapshot error:", err);
+  }
+}
+
+export async function exportTechRifleGlb(): Promise<void> {
+  downloadAsset("/assets/kinetic-rifle.glb", `kepler-kinetic-rifle-${Date.now()}.glb`);
+}
+
+export async function exportSurveyCameraGlb(): Promise<void> {
+  downloadAsset("/assets/survey-camera.glb", `kepler-survey-camera-${Date.now()}.glb`);
+}
+
+export async function exportGrappleLauncherGlb(): Promise<void> {
+  downloadAsset("/assets/echo-grapple.glb", `kepler-echo-grapple-${Date.now()}.glb`);
 }

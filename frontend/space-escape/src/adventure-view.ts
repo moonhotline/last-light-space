@@ -9,7 +9,10 @@ import {
   OUTPOST,
   DESTINATION,
   SHIP_HOME,
+  SHIP1_POS,
+  SHIP2_POS,
 } from "../shared/adventure-data";
+import { alignShipToGround, clean3DEntityText, computeMercuryAlignment } from "./interplanetary";
 import { groundAt, hash, type Vec } from "../shared/map";
 import type { Player, Snapshot } from "../shared/types";
 const v = (p: Vec) => new THREE.Vector3(p.x, p.y, p.z);
@@ -28,6 +31,7 @@ export function optimizeModel(root: THREE.Object3D) {
   for (const child of root.children)
     if (
       child instanceof THREE.Mesh &&
+      !(child instanceof THREE.SkinnedMesh) &&
       !Array.isArray(child.material) &&
       !child.name.startsWith("engine_glow")
     ) {
@@ -62,8 +66,15 @@ export class AdventureView {
   clues: THREE.Group[] = [];
   drones: THREE.Group[] = [];
   ropes = new Map<string, THREE.Line>();
-  lasers = new Map<string, THREE.Line>();
-  enemyLasers: THREE.Line[] = [];
+  bulletModel: THREE.Group | null = null;
+  projectiles: {
+    model: THREE.Group;
+    start: THREE.Vector3;
+    end: THREE.Vector3;
+    age: number;
+    duration: number;
+    color: number;
+  }[] = [];
   effects = new Map<string, number>();
   constructor(
     public scene: THREE.Scene,
@@ -72,11 +83,31 @@ export class AdventureView {
   ) {}
   async load() {
     const loader = new GLTFLoader();
-    const [ship, lab, drone] = await Promise.all([
-      loader.loadAsync("/assets/skiff.glb"),
-      loader.loadAsync("/assets/dawn-lab.glb"),
-      loader.loadAsync("/assets/drone.glb"),
+    const load = async (url: string) => {
+      let error: unknown;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          return await loader.loadAsync(url);
+        } catch (e) {
+          error = e;
+          await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+        }
+      }
+      throw error;
+    };
+    const [ship, lab, drone, bullet] = await Promise.all([
+      load("/assets/skiff.glb"),
+      load("/assets/dawn-lab.glb"),
+      load("/assets/drone.glb"),
+      load("/assets/kinetic-bullet.glb"),
     ]);
+    this.bulletModel = bullet.scene;
+    this.bulletModel.traverse((o) => {
+      if (o instanceof THREE.Mesh) {
+        o.castShadow = true;
+        o.receiveShadow = false;
+      }
+    });
     [ship.scene, lab.scene, drone.scene].forEach((root) => {
       root.traverse((o) => {
         if (o instanceof THREE.Mesh) {
@@ -86,10 +117,12 @@ export class AdventureView {
       optimizeModel(root);
       weatherMaterials(root);
     });
+    clean3DEntityText(ship.scene);
     this.ship.add(ship.scene);
-    this.ship.position.copy(v(SHIP_HOME));
-    this.ship.rotation.y = Math.PI;
+    clean3DEntityText(this.ship);
     this.scene.add(this.ship);
+    alignShipToGround(this.ship, SHIP1_POS.x, SHIP1_POS.z, Math.PI, 3.8, 5.5, 0.05);
+    this.ship.visible = true;
     lab.scene.position.copy(v(LAB));
     this.scene.add(lab.scene);
     const lamp = new THREE.PointLight(0x83cfcd, 22, 20, 2);
@@ -236,11 +269,31 @@ export class AdventureView {
       g.scale.setScalar(2.3);
       this.drones.push(g);
       this.scene.add(g);
-      const line = this.line(0xff6950);
-      this.enemyLasers.push(line);
     }
     this.buildGrove();
     this.buildOutpost();
+  }
+  spawnProjectile(start: THREE.Vector3, end: THREE.Vector3, color = 0x00f0ff, speed = 175) {
+    const dist = start.distanceTo(end);
+    if (dist < 0.2) return;
+    const model = this.bulletModel ? this.bulletModel.clone(true) : new THREE.Group();
+    model.position.copy(start);
+    model.lookAt(end);
+    model.scale.setScalar(0.7);
+    if (color !== 0x00f0ff) {
+      model.traverse((o) => {
+        if (o instanceof THREE.Mesh && o.material) {
+          const m = o.material.clone();
+          if ("color" in m) m.color.setHex(color);
+          if ("emissive" in m) m.emissive.setHex(color);
+          o.material = m;
+        }
+      });
+    }
+    this.scene.add(model);
+    const duration = Math.max(0.04, Math.min(0.4, dist / speed));
+    this.projectiles.push({ model, start, end, age: 0, duration, color });
+    this.burst({ x: start.x, y: start.y, z: start.z }, 4, color, 1.8);
   }
   line(color: number) {
     const g = new THREE.BufferGeometry().setFromPoints([
@@ -364,8 +417,26 @@ export class AdventureView {
     if (!s) return;
     const a = s.adventure,
       ship = a.ship;
-    this.ship.position.lerp(v(ship), 1 - Math.exp(-dt * 16));
-    this.ship.rotation.set(0, ship.yaw + Math.PI, -ship.bank);
+    const isCruiserFlying =
+      (window as any).__activeShip === "cruiser" &&
+      (ship.seats.some(Boolean) || (ship.flightTime || 0) > 0);
+
+    if (isCruiserFlying) {
+      alignShipToGround(this.ship, SHIP1_POS.x, SHIP1_POS.z, Math.PI, 3.8, 5.5, 0.05);
+      this.ship.visible = true;
+    } else {
+      const mercAlign = computeMercuryAlignment(ship, ship.yaw, ship.bank);
+      if (mercAlign.captureWeight > 0.05) {
+        this.ship.position.lerp(v(ship), 1 - Math.exp(-dt * 16));
+        this.ship.quaternion.slerp(mercAlign.quaternion, 1 - Math.exp(-dt * 12));
+      } else if (ship.grounded && ship.seats.every((v) => !v) && (ship.flightTime || 0) === 0) {
+        alignShipToGround(this.ship, SHIP1_POS.x, SHIP1_POS.z, Math.PI, 3.8, 5.5, 0.05);
+      } else {
+        this.ship.position.lerp(v(ship), 1 - Math.exp(-dt * 16));
+        this.ship.rotation.set(0, ship.yaw + Math.PI, -ship.bank);
+      }
+      this.ship.visible = true;
+    }
     for (const side of [-1, 1]) {
       const gear = this.ship.getObjectByName("gear_" + side);
       if (gear)
@@ -418,15 +489,10 @@ export class AdventureView {
         d.yaw + Math.PI,
         d.mode === "stunned" ? Math.sin(t * 45) * 0.2 : 0,
       );
-      const line = this.enemyLasers[id];
-      line.visible = false;
-      if (d.mode === "charge" || d.mode === "fire") {
-        this.setLine(line, d, d.aim);
-        (line.material as THREE.LineBasicMaterial).opacity =
-          d.mode === "fire" ? 1 : 0.25 + 0.35 * (1 - d.timer / 1.15);
-      }
       if (this.changed("enemyShot" + id, d.shotId)) {
-        this.burst(d.aim, 16, 0xff6851, 5);
+        const start = new THREE.Vector3(d.x, d.y + 0.2, d.z);
+        const end = new THREE.Vector3(d.aim.x, d.aim.y, d.aim.z);
+        this.spawnProjectile(start, end, 0xff5533, 140);
         if (me && Math.hypot(me.x - d.x, me.z - d.z) < 100) this.sound("enemy");
       }
     });
@@ -445,18 +511,11 @@ export class AdventureView {
           { x: data.x, y: data.y + 0.35, z: data.z },
           data.grapple,
         );
-      let shot = this.lasers.get(p.id);
-      if (!shot) {
-        shot = this.line(0xa9edff);
-        this.lasers.set(p.id, shot);
+      if (this.changed("shot" + p.id, p.shotId)) {
+        const start = new THREE.Vector3(data.x, data.y + 0.35, data.z);
+        const end = new THREE.Vector3(p.shotEnd.x, p.shotEnd.y, p.shotEnd.z);
+        this.spawnProjectile(start, end, 0x00f0ff, 180);
       }
-      shot.visible = p.toolCooldown > 0.2 && p.seat < 0;
-      if (shot.visible)
-        this.setLine(
-          shot,
-          { x: data.x, y: data.y + 0.3, z: data.z },
-          p.shotEnd,
-        );
       if (this.changed("shot" + p.id, p.shotId) && own) {
         this.sound(
           p.hitKind === "kill"
@@ -490,19 +549,38 @@ export class AdventureView {
         );
       }
     }
+    for (let i = this.projectiles.length - 1; i >= 0; i--) {
+      const proj = this.projectiles[i];
+      proj.age += dt;
+      const progress = Math.min(1, proj.age / proj.duration);
+      proj.model.position.lerpVectors(proj.start, proj.end, progress);
+      if (progress < 1 && Math.random() < 0.35) {
+        this.burst(
+          { x: proj.model.position.x, y: proj.model.position.y, z: proj.model.position.z },
+          1,
+          proj.color,
+          1.0,
+        );
+      }
+      if (progress >= 1) {
+        this.burst({ x: proj.end.x, y: proj.end.y, z: proj.end.z }, 10, proj.color, 3.2);
+        this.scene.remove(proj.model);
+        proj.model.traverse((o) => {
+          if (o instanceof THREE.Mesh) {
+            o.geometry?.dispose();
+            if (Array.isArray(o.material)) o.material.forEach((m) => m.dispose());
+            else o.material?.dispose();
+          }
+        });
+        this.projectiles.splice(i, 1);
+      }
+    }
     for (const [id, line] of this.ropes)
       if (!s.players.some((p) => p.id === id)) {
         this.scene.remove(line);
         line.geometry.dispose();
         (line.material as THREE.Material).dispose();
         this.ropes.delete(id);
-        const shot = this.lasers.get(id);
-        if (shot) {
-          this.scene.remove(shot);
-          shot.geometry.dispose();
-          (shot.material as THREE.Material).dispose();
-          this.lasers.delete(id);
-        }
       }
   }
 }

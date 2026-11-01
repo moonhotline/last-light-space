@@ -1,0 +1,11 @@
+Model Information:
+* title:	Intergalactic Spaceship Only Model
+* source:	https://sketchfab.com/3d-models/intergalactic-spaceship-only-model-d36e54a3118744c8ba1a4a47b408b659
+* author:	3DHaupt (https://sketchfab.com/dennish2010)
+
+Model License:
+* license type:	CC-BY-NC-4.0 (http://creativecommons.org/licenses/by-nc/4.0/)
+* requirements:	Author must be credited. No commercial use.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Intergalactic Spaceship Only Model" (https://sketchfab.com/3d-models/intergalactic-spaceship-only-model-d36e54a3118744c8ba1a4a47b408b659) by 3DHaupt (https://sketchfab.com/dennish2010) licensed under CC-BY-NC-4.0 (http://creativecommons.org/licenses/by-nc/4.0/)

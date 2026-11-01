@@ -209,7 +209,7 @@ for (let i = 0; i < ROUTE.length - 1; i++) {
       x = a.x + (b.x - a.x) * t,
       z = a.z + (b.z - a.z) * t;
     const h = groundAt(x, z),
-      arch = i === 3 ? Math.sin(t * Math.PI) * 13 + 4 : j % 4 === 0 ? 8 : 2;
+      arch = i === 3 ? Math.sin(t * Math.PI) * 13 + 4 : (i > 0 && j % 4 === 0 ? 8 : 2);
     if (distance({ x, z }, SPAWN) > 9)
       CRYSTALS.push({
         id: CRYSTALS.length,
@@ -224,6 +224,69 @@ for (let i = 0; i < 16; i++) {
   CRYSTALS.push({
     id: CRYSTALS.length,
     ...atGround(-310 + Math.cos(a) * 105, -210 + Math.sin(a) * 105, 3),
+  });
+}
+
+// 1. Thermal Geyser Sky Updraft Spirals (热气流高空升腾光环)
+for (const t of THERMALS) {
+  for (let k = 0; k < 12; k++) {
+    const ang = (k / 12) * Math.PI * 2;
+    const r = t.radius * 0.72;
+    CRYSTALS.push({
+      id: CRYSTALS.length,
+      x: t.x + Math.cos(ang) * r,
+      z: t.z + Math.sin(ang) * r,
+      y: t.y + 16 + k * 8.5,
+    });
+  }
+}
+
+// 2. Canyon Aerial Glide Arches (大峡谷滑翔与断崖飞跃抛物拱门)
+for (let j = 1; j <= 10; j++) {
+  const t = j / 11;
+  const x = 50 + (105 - 50) * t;
+  const z = 59 + Math.sin(t * Math.PI) * 12;
+  const h = groundAt(x, z);
+  CRYSTALS.push({
+    id: CRYSTALS.length,
+    x,
+    z,
+    y: h + 8 + Math.sin(t * Math.PI) * 18,
+  });
+}
+for (let j = 1; j <= 8; j++) {
+  const t = j / 9;
+  const x = -40 + (12 - -40) * t;
+  const z = 160 + (192 - 160) * t;
+  const h = groundAt(x, z);
+  CRYSTALS.push({
+    id: CRYSTALS.length,
+    x,
+    z,
+    y: h + 4 + Math.sin(t * Math.PI) * 14,
+  });
+}
+
+// 3. High Ridge Trail (西北高山脊穿梭路线)
+for (let j = 1; j <= 14; j++) {
+  const t = j / 15;
+  const x = -220 + (-370 - -220) * t;
+  const z = 240 + (-50 - 240) * t;
+  const h = groundAt(x, z);
+  CRYSTALS.push({
+    id: CRYSTALS.length,
+    x,
+    z,
+    y: h + 3.5 + (j % 3 === 0 ? 6 : 0),
+  });
+}
+
+// 4. Crater Orbital Rim Ring (终点陨石坑外圈双层光环)
+for (let i = 0; i < 20; i++) {
+  const a = (i / 20) * Math.PI * 2;
+  CRYSTALS.push({
+    id: CRYSTALS.length,
+    ...atGround(-310 + Math.cos(a) * 155, -210 + Math.sin(a) * 155, 6),
   });
 }
 export const ROCKS: (Vec & { size: number; angle: number })[] = [];

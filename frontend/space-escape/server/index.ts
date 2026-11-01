@@ -37,7 +37,10 @@ class EscapeRoom extends Room {
       if (this.sim.start(client.sessionId)) void this.lock();
     });
     this.onMessage("restart", (client) => {
-      if (client.sessionId !== this.sim.s.host || this.sim.s.phase !== "won")
+      if (
+        client.sessionId !== this.sim.s.host ||
+        (this.sim.s.phase !== "won" && this.sim.s.completedAt <= 0)
+      )
         return;
       const players = this.sim.s.players.map((p) => ({
         id: p.id,
@@ -74,6 +77,16 @@ class EscapeRoom extends Room {
 }
 
 const app = express();
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Headers", "*");
+  res.setHeader("Access-Control-Allow-Methods", "*");
+  if (req.method === "OPTIONS") {
+    res.sendStatus(204);
+    return;
+  }
+  next();
+});
 app.get("/health", (_req, res) =>
   res.json({ ok: true, game: "last-light", version: "0.3.0", capacity: 4 }),
 );
@@ -89,6 +102,7 @@ const server = new Server({
   transport: new WebSocketTransport({ server: http, maxPayload: 8192 }),
 });
 server.define("escape", EscapeRoom);
-const port = Number(process.env.SPACE_PORT || 2567);
-await server.listen(port, "127.0.0.1");
-console.log(`Last Light room server: http://127.0.0.1:${port}`);
+const port = Number(process.env.PORT || process.env.SPACE_PORT || 2567);
+const host = process.env.SPACE_HOST || "0.0.0.0";
+await server.listen(port, host);
+console.log(`Last Light room server: http://${host}:${port}`);

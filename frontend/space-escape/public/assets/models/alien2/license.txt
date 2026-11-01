@@ -1,0 +1,11 @@
+Model Information:
+* title:	Reptillian Alien
+* source:	https://sketchfab.com/3d-models/reptillian-alien-4ec6a2ed140b4dcaba5f3bd6c06fd475
+* author:	C-List (https://sketchfab.com/Mulberry_Bill)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Reptillian Alien" (https://sketchfab.com/3d-models/reptillian-alien-4ec6a2ed140b4dcaba5f3bd6c06fd475) by C-List (https://sketchfab.com/Mulberry_Bill) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

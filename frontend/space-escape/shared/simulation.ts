@@ -8,6 +8,7 @@ import {
 } from "./adventure";
 import { type ItemId } from "./adventure-data";
 import { MovementWorld, fuelCapacity } from "./physics";
+import { playerUp } from "./surface";
 import {
   SPAWN,
   BEACON_SITES,
@@ -55,13 +56,24 @@ export class Simulation {
     };
   }
   add(id: string, name = "探索员") {
-    if (this.s.players.length >= 4 || this.s.phase !== "lobby")
-      throw new Error("房间已满或探索已开始");
+    const existing = this.player(id);
+    if (existing) {
+      existing.name =
+        name
+          .replace(/[<>\x00-\x1f]/g, "")
+          .trim()
+          .slice(0, 16) || existing.name;
+      return existing;
+    }
+    if (this.s.players.length >= 4)
+      throw new Error("房间已满");
     const slot = [0, 1, 2, 3].find(
       (n) => !this.s.players.some((p) => p.color === n),
     )!;
     const p: Player = {
       id,
+      planet: null,
+      surfaceRotation: { x: 0, y: 0, z: 0, w: 1 },
       name:
         name
           .replace(/[<>\x00-\x1f]/g, "")
@@ -92,6 +104,9 @@ export class Simulation {
       travel: 0,
       checkpoint: 0,
       respawns: 0,
+      skate: false,
+      trickScore: 0,
+      ollieUntil: 0,
       ...adventurePlayer(),
     };
     p.y = groundAt(p.x, p.z) + 0.85;
@@ -122,6 +137,10 @@ export class Simulation {
     this.latest.delete(id);
     this.s.markers = this.s.markers.filter((m) => m.owner !== id);
     if (this.s.host === id) this.s.host = this.s.players[0]?.id || "";
+    if (this.s.players.length === 0) {
+      this.s.phase = "lobby";
+      this.s.host = "";
+    }
   }
   player(id: string) {
     return this.s.players.find((p) => p.id === id);
@@ -153,6 +172,8 @@ export class Simulation {
     p.invulnerable = 4;
     const b = p.checkpoint ? this.s.beacons[p.checkpoint - 1] : SPAWN;
     Object.assign(p, {
+      planet: null,
+      surfaceRotation: { x: 0, y: 0, z: 0, w: 1 },
       x: b.x,
       y: groundAt(b.x, b.z + 8) + 0.85,
       z: b.z + 8,
@@ -177,6 +198,25 @@ export class Simulation {
       this.emit("修复凝胶已使用 · 护盾恢复");
     }
     if (command === "close-lore") p.lore = -1;
+    if (command === "ollie") {
+      const up = playerUp(p);
+      const radial = p.vx * up.x + p.vy * up.y + p.vz * up.z;
+      const impulse = Math.max(radial + 8.5, 14) - radial;
+      p.vx += up.x * impulse;
+      p.vy += up.y * impulse;
+      p.vz += up.z * impulse;
+      p.grounded = false;
+      p.ollieUntil = this.s.time + 0.8;
+      p.trickScore = (p.trickScore || 0) + 300;
+      this.emit(`${p.name} 完成了 🛹 OLLIE 360 特技 (+300)`);
+      this.physics.reset(p.id, p);
+    }
+    if (typeof command === "string" && command.startsWith("trick:")) {
+      const pts = parseInt(command.slice(6), 10);
+      if (Number.isFinite(pts) && pts > 0 && pts <= 1000) {
+        p.trickScore = (p.trickScore || 0) + pts;
+      }
+    }
     if (command === "mark") {
       const x = p.x - Math.sin(p.yaw) * 65,
         z = p.z - Math.cos(p.yaw) * 65;
@@ -208,7 +248,7 @@ export class Simulation {
     for (const p of s.players) {
       const i = inputs.get(p.id)!;
       if (p.seat < 0) this.physics.move(p, i);
-      interactAdventure(this, p, i);
+      if (p.planet === null || p.planet === "mercury") interactAdventure(this, p, i);
       if (i.fire) tool(this, p);
       if (i.interact && p.seat < 0) interactions.add(p.id);
     }
@@ -216,14 +256,14 @@ export class Simulation {
     tickDrones(this);
     for (const p of s.players) {
       if (p.seat >= 0) continue;
-      if (p.y < groundAt(p.x, p.z) - 8 || p.y < -100) this.respawn(p);
+      if (!p.planet && (p.y < groundAt(p.x, p.z) - 8 || p.y < -100)) this.respawn(p);
       if (p.comboUntil < s.time) p.combo = 0;
       if (s.earthAt < 0 && p.z < 260) {
         s.earthAt = s.time;
         this.emit("发现 · 地球正在升起");
       }
       for (const c of s.crystals)
-        if (c.readyAt <= s.time && distance3(p, c) < 4.2) {
+        if (c.readyAt <= s.time && distance3(p, c) < 4.8) {
           c.readyAt = s.time + 32;
           p.crystals++;
           p.combo = Math.min(12, p.combo + 1);

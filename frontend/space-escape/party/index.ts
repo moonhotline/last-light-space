@@ -3,6 +3,25 @@ import { initPhysics } from "../shared/physics";
 import { Simulation } from "../shared/simulation";
 import { DT } from "../shared/types";
 
+// Polyfill Cloudflare Workers / workerd environment for Rapier wasm-bindgen
+if (typeof (globalThis as any).window === "undefined") {
+  (globalThis as any).window = globalThis;
+}
+if (typeof (globalThis as any).performance === "undefined") {
+  (globalThis as any).performance = { now: () => Date.now() };
+} else if (typeof (globalThis as any).performance.now !== "function") {
+  (globalThis as any).performance.now = () => Date.now();
+}
+
+async function loadWasmModule() {
+  try {
+    const mod = await import("./rapier.wasm");
+    return (mod as any).default || mod;
+  } catch {
+    return undefined;
+  }
+}
+
 type Message = { type?: string; data?: unknown };
 
 export default class GameRoom implements Party.Server {
@@ -13,7 +32,8 @@ export default class GameRoom implements Party.Server {
   constructor(readonly room: Party.Room) {}
 
   async onStart() {
-    await initPhysics();
+    const wasmModule = await loadWasmModule();
+    await initPhysics(wasmModule);
     this.sim = new Simulation();
   }
 
@@ -40,7 +60,7 @@ export default class GameRoom implements Party.Server {
     try {
       this.sim.add(connection.id, name);
     } catch {
-      connection.close(4001, "room full or expedition started");
+      connection.close(4001, "room full");
       return;
     }
     this.startLoop();
@@ -71,6 +91,28 @@ export default class GameRoom implements Party.Server {
       this.commands.set(sender.id, now);
       this.sim.action(sender.id, message.data);
     }
+    if (message.type === "chat") {
+      const p = this.sim.player(sender.id);
+      const rawText =
+        typeof message.data === "string"
+          ? message.data
+          : (message.data as any)?.text;
+      const text = String(rawText || "").trim().slice(0, 150);
+      if (text && p) {
+        this.room.broadcast(
+          JSON.stringify({
+            type: "chat",
+            data: {
+              id: p.id,
+              name: p.name,
+              color: p.color,
+              text,
+              time: Date.now(),
+            },
+          }),
+        );
+      }
+    }
   }
 
   onClose(connection: Party.Connection) {
@@ -97,7 +139,11 @@ export default class GameRoom implements Party.Server {
   }
 
   private restart(id: string) {
-    if (id !== this.sim.s.host || this.sim.s.phase !== "won") return;
+    if (
+      id !== this.sim.s.host ||
+      (this.sim.s.phase !== "won" && this.sim.s.completedAt <= 0)
+    )
+      return;
     const players = this.sim.s.players.map((player) => ({
       id: player.id,
       name: player.name,

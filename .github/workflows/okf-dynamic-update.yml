@@ -1,0 +1,65 @@
+name: "OKF Knowledge Bundle Dynamic Sync"
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync-okf-knowledge:
+    name: "Sync OKF Knowledge Base"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run Dynamic OKF Sync Script
+        run: |
+          node scripts/update-okf.mjs
+
+      - name: Check for Knowledge Changes & Auto-Commit
+        id: commit-step
+        run: |
+          if [ -n "$(git status --porcelain knowledge/)" ]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add knowledge/
+            
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              COMMIT_MSG="chore(okf): dynamically update OKF knowledge bundle for PR #${{ github.event.pull_request.number }}"
+            else
+              COMMIT_MSG="chore(okf): update OKF knowledge bundle on push (${{ github.sha }})"
+            fi
+            
+            git commit -m "$COMMIT_MSG"
+            git push origin HEAD:${{ github.head_ref || github.ref_name }}
+            echo "Successfully updated and pushed OKF knowledge bundle."
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "OKF knowledge bundle is already up to date."
+          fi
+
+      - name: Generate PR Summary Report
+        if: steps.commit-step.outputs.has_changes == 'true'
+        run: |
+          echo "### 📚 OKF Knowledge Bundle Dynamically Updated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: ${{ github.event_name }} (${{ github.head_ref || github.ref_name }})" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target Directory**: \`knowledge/\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Audit Log**: [knowledge/log.md](knowledge/log.md)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Root Specification**: [knowledge/index.md](knowledge/index.md)" >> $GITHUB_STEP_SUMMARY

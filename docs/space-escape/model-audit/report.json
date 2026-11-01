@@ -1,0 +1,143 @@
+{
+  "origin": "http://127.0.0.1:5180",
+  "capturedAt": "2026-10-02T14:25:49.998Z",
+  "warnings": [
+    "[.WebGL-0x13c004c6c00]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+    "[.WebGL-0x13c004c6c00]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+    "[.WebGL-0x13c004c6c00]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+    "[.WebGL-0x13c004c6c00]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels (this message will no longer repeat)",
+    "THREE.WebGLRenderer: KHR_parallel_shader_compile extension not supported.",
+    "THREE.WARNING: Multiple instances of Three.js being imported."
+  ],
+  "errors": [],
+  "models": [
+    {
+      "id": "hmg-379",
+      "meshes": 5,
+      "triangles": 6647,
+      "textures": 15,
+      "drawCalls": 6,
+      "pixelColors": 1452,
+      "name": "HMG-379 机枪"
+    },
+    {
+      "id": "blerk",
+      "meshes": 7,
+      "triangles": 14135,
+      "textures": 15,
+      "drawCalls": 8,
+      "pixelColors": 5240,
+      "name": "Blerk 外星向导"
+    },
+    {
+      "id": "alien1",
+      "meshes": 10,
+      "triangles": 14580,
+      "textures": 10,
+      "drawCalls": 10,
+      "pixelColors": 2227,
+      "name": "Another Alien"
+    },
+    {
+      "id": "alien2",
+      "meshes": 3,
+      "triangles": 216838,
+      "textures": 0,
+      "drawCalls": 3,
+      "pixelColors": 1026,
+      "name": "Reptillian Alien"
+    },
+    {
+      "id": "stylized_planet",
+      "meshes": 2,
+      "triangles": 47352,
+      "textures": 2,
+      "drawCalls": 2,
+      "pixelColors": 11587,
+      "name": "绿意星球"
+    },
+    {
+      "id": "mercury",
+      "meshes": 1,
+      "triangles": 3968,
+      "textures": 3,
+      "drawCalls": 1,
+      "pixelColors": 3985,
+      "name": "水星"
+    },
+    {
+      "id": "earth",
+      "meshes": 6,
+      "triangles": 599040,
+      "textures": 3,
+      "drawCalls": 14,
+      "pixelColors": 19351,
+      "name": "地球"
+    },
+    {
+      "id": "cave",
+      "meshes": 1,
+      "triangles": 960,
+      "textures": 1,
+      "drawCalls": 1,
+      "pixelColors": 55885,
+      "name": "异星洞窟 · 内景"
+    },
+    {
+      "id": "sky",
+      "meshes": 1,
+      "triangles": 2660,
+      "textures": 1,
+      "drawCalls": 1,
+      "pixelColors": 18799,
+      "name": "幻想天空 · 内景"
+    },
+    {
+      "id": "minerals",
+      "meshes": 4,
+      "triangles": 109907,
+      "textures": 8,
+      "drawCalls": 4,
+      "pixelColors": 9605,
+      "name": "矿物标本"
+    },
+    {
+      "id": "solar_system",
+      "meshes": 12,
+      "triangles": 10624,
+      "textures": 12,
+      "drawCalls": 12,
+      "pixelColors": 2715,
+      "name": "太阳系模型"
+    },
+    {
+      "id": "corridor",
+      "meshes": 7,
+      "triangles": 125571,
+      "textures": 4,
+      "drawCalls": 7,
+      "pixelColors": 3802,
+      "name": "飞船走廊"
+    },
+    {
+      "id": "fighter",
+      "meshes": 2,
+      "triangles": 72677,
+      "textures": 8,
+      "drawCalls": 2,
+      "pixelColors": 7786,
+      "name": "轻型战机"
+    },
+    {
+      "id": "intergalactic",
+      "meshes": 1,
+      "triangles": 27560,
+      "textures": 3,
+      "drawCalls": 1,
+      "pixelColors": 3499,
+      "name": "重型星舰"
+    }
+  ],
+  "count": 14,
+  "assetErrors": []
+}

@@ -19,6 +19,7 @@ import {
   distance,
   WORLD_SIZE,
 } from "../../frontend/space-escape/shared/map";
+import { SOLAR_SYSTEM } from "../../frontend/space-escape/shared/celestial";
 await initPhysics();
 
 test("expanded basin keeps the authored world at five times the prior area", () => {
@@ -78,6 +79,30 @@ test("player stands on the same authored terrain used by rendering", () => {
   ticks(sim, 90, p.id, { forward: 1 });
   assert.ok(p.z < SPAWN.z - 35);
   assert.ok(p.y > groundAt(p.x, p.z) + 0.7);
+  sim.dispose();
+});
+test("kepler traversal keeps the explorer on a continuous spherical surface", () => {
+  const { sim, p } = setup();
+  const planet = SOLAR_SYSTEM.kepler;
+  Object.assign(p, {
+    planet: "kepler",
+    x: planet.position.x,
+    y: planet.position.y + planet.radius + 0.85,
+    z: planet.position.z,
+    vx: 0,
+    vy: 0,
+    vz: 0,
+    grounded: true,
+  });
+  sim.physics.reset(p.id, p);
+  ticks(sim, 120, p.id, { forward: 1, yaw: 0 });
+  const radius = Math.hypot(
+    p.x - planet.position.x,
+    p.y - planet.position.y,
+    p.z - planet.position.z,
+  );
+  assert.ok(Math.abs(radius - planet.radius - 0.825) < 0.02);
+  assert.ok(Math.hypot(p.x - planet.position.x, p.z - planet.position.z) > 1);
   sim.dispose();
 });
 test("low-gravity jump rises, lands, and reports impact exactly once", () => {

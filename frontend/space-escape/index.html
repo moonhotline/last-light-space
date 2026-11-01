@@ -29,12 +29,26 @@
           物品栏 <kbd>Tab</kbd></button
         ><span id="linkState">KEPLER / 07</span
         ><button
+          id="snapshot"
+          class="icon"
+          title="拍照快照下载 P"
+          aria-label="拍照快照下载"
+        >
+          <i data-lucide="camera"></i></button
+        ><button
           id="camera"
           class="icon"
           title="切换视角 V"
           aria-label="切换视角"
         >
-          <i data-lucide="camera"></i></button
+          <i data-lucide="navigation"></i></button
+        ><button
+          id="feedbackBtn"
+          class="icon"
+          title="联系我们与公开建议"
+          aria-label="联系我们与公开建议"
+        >
+          <i data-lucide="message-square"></i></button
         ><button id="sound" class="icon" title="静音" aria-label="静音">
           <i data-lucide="volume-2"></i></button
         ><button id="pause" class="icon" title="探索菜单" aria-label="探索菜单">
@@ -111,13 +125,17 @@
           <span>W A S D <b>移动</b></span
           ><span>空格 <b>跳跃 / 长按喷射</b></span
           ><span>Shift <b>奔跑</b></span
-          ><span>Q <b>钩锁 / 松开</b></span
+          ><span>1 / 2 / 3 <b>换枪 (步枪/钩索/相机)</b></span
+          ><span>滚轮 <b>循环武器</b></span
+          ><span>Q <b>钩索 / 松开</b></span
           ><span>C <b>冲刺</b></span
           ><span>左键 / T <b>切割 / 射击</b></span
           ><span>Tab <b>物品栏 / 记录</b></span
           ><span>G <b>修复护盾</b></span
           ><span>X / Shift <b>飞船下降 / 刹车</b></span
           ><span>V <b>切换视角</b></span
+          ><span>K <b>反重力滑板</b></span
+          ><span>P <b>拍照快照</b></span
           ><span>E <b>阅读 / 修复 / 登船</b></span
           ><span>R <b>标记路线</b></span
           ><span>H <b>隐藏界面</b></span>
@@ -168,6 +186,47 @@
             <div id="inventoryGrid" class="inventory-grid"></div>
             <p id="inventoryHealth"></p>
             <button id="heal" class="secondary">使用修复凝胶 +55 护盾</button>
+            <div class="special-props">
+              <p class="overline">SPECIAL PROPS / 独立模型装备与下载</p>
+              <div class="prop-item">
+                <div class="prop-text">
+                  <b>反重力滑板 · ION HOVERBOARD</b>
+                  <small>极速冲浪 · 减小摩擦阻力 · 双击空格 Ollie 360 翻板特技</small>
+                </div>
+                <div class="prop-btns">
+                  <button id="toggleSkate" class="secondary">装备 / 收起 <kbd>K</kbd></button>
+                  <button id="downloadBoard" class="secondary"><i data-lucide="download"></i>下载滑板 GLB</button>
+                </div>
+              </div>
+              <div class="prop-item">
+                <div class="prop-text">
+                  <b>科技脉冲步枪 · SCI-FI PLASMA RIFLE</b>
+                  <small>高斯加速导轨 · 3D 体积发光等离子能量光束</small>
+                </div>
+                <div class="prop-btns">
+                  <button id="downloadRifle" class="secondary"><i data-lucide="download"></i>下载科技枪 GLB</button>
+                </div>
+              </div>
+              <div class="prop-item">
+                <div class="prop-text">
+                  <b>远征全息相机 · SURVEY CAMERA</b>
+                  <small>全高清星球实景 · 原生画质保存到本地相册</small>
+                </div>
+                <div class="prop-btns">
+                  <button id="snapPhoto" class="secondary"><i data-lucide="camera"></i>拍照下载快照 <kbd>P</kbd></button>
+                  <button id="downloadCamera" class="secondary"><i data-lucide="download"></i>下载相机 GLB</button>
+                </div>
+              </div>
+              <div class="prop-item">
+                <div class="prop-text">
+                  <b>重力钩索发射器 · GRAPPLE GAUNTLET</b>
+                  <small>腕载合金三爪 · 磁力高频卷盘 · 实时摆荡计分</small>
+                </div>
+                <div class="prop-btns">
+                  <button id="downloadGrapple" class="secondary"><i data-lucide="download"></i>下载钩索 GLB</button>
+                </div>
+              </div>
+            </div>
             <p class="helper">
               瞄准矿脉 / 物资箱，长按左键或 T。任务部件全队协作；靠近飞船长按 E
               存入材料。
@@ -207,6 +266,58 @@
         ><button id="again" class="secondary">重新远征</button
         ><button id="home" class="secondary">返回着陆页</button>
       </section>
+      <section
+        id="feedbackSheet"
+        class="sheet feedback-sheet"
+        hidden
+        aria-labelledby="feedbackTitle"
+      >
+        <p class="overline">ECHOES & COMMUNITY / 联系与公开建议</p>
+        <h2 id="feedbackTitle">来自开普勒的回声</h2>
+        <div class="feedback-contact-box">
+          <div class="feedback-email-row">
+            <span>官方联络邮箱：</span>
+            <code id="contactEmail">oodaleek@gmail.com</code>
+            <button id="copyEmail" class="secondary icon-btn" title="复制邮箱">
+              <i data-lucide="copy"></i> 复制
+            </button>
+          </div>
+          <p class="helper">
+            任何 Bug 汇报、玩法奇思妙想或跨星际合作建议，我们都会认真阅读并回复。
+          </p>
+        </div>
+        <div class="feedback-form">
+          <label class="field">
+            <span>公开建议 / 探索反馈</span>
+            <textarea
+              id="feedbackContent"
+              rows="3"
+              placeholder="写下你对开普勒星球的探索感受或功能建议..."
+            ></textarea>
+          </label>
+          <div class="feedback-actions">
+            <label class="attach-img-btn secondary">
+              <i data-lucide="image"></i> 附带本地图片
+              <input type="file" id="feedbackFile" accept="image/*" hidden />
+            </label>
+            <button id="feedbackSnap" class="secondary">
+              <i data-lucide="camera"></i> 截取当前画面附带
+            </button>
+            <button id="submitFeedback" class="primary">
+              <i data-lucide="send"></i> 发送建议
+            </button>
+          </div>
+          <div id="feedbackPreviewContainer" class="feedback-preview-box" hidden>
+            <img id="feedbackPreviewImg" alt="反馈截图预览" />
+            <button id="removeFeedbackImg" class="icon-btn-danger" title="移除截图">×</button>
+          </div>
+        </div>
+        <div class="feedback-echoes">
+          <p class="overline">PUBLIC ECHOES / 公开建议展板</p>
+          <div id="echoesList" class="echoes-list"></div>
+        </div>
+        <button id="closeFeedback" class="primary">关闭面板</button>
+      </section>
     </main>
     <div class="landing-caption">
       <span>07 / THE SILENT FRONTIER</span><b>一颗陌生星球，一次共同的发现。</b
@@ -231,6 +342,49 @@
         ><progress id="interactionProgress" max="1" value="0"></progress>
       </div>
       <div id="combo" class="combo"></div>
+      <!-- 摄影相机取景器 (Through-The-Lens Viewfinder) -->
+      <div id="cameraViewfinder" class="camera-viewfinder" hidden aria-hidden="true">
+        <div class="vf-frame">
+          <div class="vf-corner tl"></div>
+          <div class="vf-corner tr"></div>
+          <div class="vf-corner bl"></div>
+          <div class="vf-corner br"></div>
+          <div class="vf-grid">
+            <div class="vf-grid-line h1"></div>
+            <div class="vf-grid-line h2"></div>
+            <div class="vf-grid-line v1"></div>
+            <div class="vf-grid-line v2"></div>
+          </div>
+          <div class="vf-focus-box">
+            <div class="vf-focus-reticle"></div>
+          </div>
+          <div class="vf-telemetry-top">
+            <span class="vf-rec"><b class="vf-rec-dot"></b>REC [RAW 4K 60FPS]</span>
+            <span id="vfZoomLabel">50mm · 1.0x OPTICAL</span>
+            <span id="vfHeading">HDG 000°</span>
+          </div>
+          <div class="vf-telemetry-bottom">
+            <span>1/500s</span>
+            <span>f/2.8</span>
+            <span>ISO 400</span>
+            <span class="vf-af">AF-C [LOCK]</span>
+            <span class="vf-hint">滚轮: 光学变焦 · 左键: 拍摄快照 · V: 视角</span>
+          </div>
+        </div>
+      </div>
+      <div id="chatBox" class="chat-box">
+        <div id="chatMessages" class="chat-messages"></div>
+        <form id="chatForm" class="chat-form" hidden>
+          <input
+            id="chatInput"
+            type="text"
+            maxlength="64"
+            placeholder="按 Enter 发送全队广播..."
+            autocomplete="off"
+          />
+          <button type="submit" class="secondary">发送</button>
+        </form>
+      </div>
       <div class="bottom-hud">
         <div class="vitals">
           <div class="health-line">
@@ -260,6 +414,12 @@
           <div id="controlsHint">
             <span><kbd>WASD</kbd> 移动</span
             ><span><kbd>空格</kbd> 长按喷射</span><span><kbd>E</kbd> 交互</span>
+          </div>
+          <div class="weapon-hud">
+            <button id="wepRifle" class="wep-slot" type="button"><kbd>1</kbd> HMG-379电磁枪</button>
+            <button id="wepGrapple" class="wep-slot" type="button"><kbd>2</kbd> DX5机动钩索</button>
+            <button id="wepCamera" class="wep-slot" type="button"><kbd>3</kbd> 拍立得复古相机</button>
+            <span id="weaponAmmo" class="weapon-ammo">24 / 24</span>
           </div>
           <div class="control-row">
             <span><kbd>Q</kbd> 钩锁 <b id="dashStatus">就绪</b></span

@@ -1,0 +1,11 @@
+Model Information:
+* title:	Another Alien
+* source:	https://sketchfab.com/3d-models/another-alien-18e8a671ba15466390108c01e190a989
+* author:	Rasmus (https://sketchfab.com/Rasmus82)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Another Alien" (https://sketchfab.com/3d-models/another-alien-18e8a671ba15466390108c01e190a989) by Rasmus (https://sketchfab.com/Rasmus82) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
