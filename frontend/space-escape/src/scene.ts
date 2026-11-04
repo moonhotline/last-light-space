@@ -224,8 +224,8 @@ function createNameplateSprite(name: string, colorHex: number): THREE.Sprite {
 export class GameView {
   scene = new THREE.Scene();
   skyScene = new THREE.Scene();
-  skyCamera = new THREE.PerspectiveCamera(66, 1, 100, 22000);
-  camera = new THREE.PerspectiveCamera(66, 1, 0.1, 18000);
+  skyCamera = new THREE.PerspectiveCamera(66, 1, 100, 30000);
+  camera = new THREE.PerspectiveCamera(66, 1, 0.1, 30000);
   renderer: THREE.WebGLRenderer;
   composer: EffectComposer;
   bloom: UnrealBloomPass;
