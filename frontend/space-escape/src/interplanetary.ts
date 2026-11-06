@@ -9,7 +9,16 @@ import {
   type FlightFlightMode,
 } from "../shared/celestial";
 import { groundAt } from "../shared/map";
-import { SHIP_HOME, SHIP1_POS, SHIP2_POS } from "../shared/adventure-data";
+import {
+  SHIP_HOME,
+  SHIP1_POS,
+  SHIP2_POS,
+  FIGHTER_POS,
+  INTERGALACTIC_POS,
+  ALIEN1_POS,
+  ALIEN2_POS,
+  MINERALS_POS,
+} from "../shared/adventure-data";
 
 export function normalizeModelContainer(
   obj: THREE.Object3D,
@@ -302,6 +311,11 @@ export class InterplanetarySystem {
   // Spaceship models in flight
   shipMeshes: Map<SpaceshipKind, THREE.Group> = new Map();
   cruiserModel: THREE.Group | null = null;
+  fighterModel: THREE.Group | null = null;
+  intergalacticModel: THREE.Group | null = null;
+  alien1Model: THREE.Group | null = null;
+  alien2Model: THREE.Group | null = null;
+  mineralsModel: THREE.Group | null = null;
   initialPlaceholderShip?: THREE.Group;
 
   setShipReference(shipGroup: THREE.Group) {
@@ -366,7 +380,7 @@ export class InterplanetarySystem {
     return board;
   }
 
-  makePlaceholder(kind: "ship" | "npc", targetSize: number): THREE.Group {
+  makePlaceholder(kind: "ship" | "npc" | "mineral", targetSize: number): THREE.Group {
     const group = new THREE.Group();
     group.userData.placeholder = true;
     if (kind === "npc") {
@@ -377,6 +391,20 @@ export class InterplanetarySystem {
       mesh.position.y = 1.1;
       mesh.castShadow = true;
       group.add(mesh);
+    } else if (kind === "mineral") {
+      const crystal = new THREE.Mesh(
+        new THREE.OctahedronGeometry(targetSize * 0.4, 0),
+        new THREE.MeshStandardMaterial({
+          color: 0x38bdf8,
+          roughness: 0.2,
+          metalness: 0.1,
+          emissive: 0x0284c7,
+          emissiveIntensity: 0.6,
+        }),
+      );
+      crystal.position.y = targetSize * 0.35;
+      crystal.castShadow = true;
+      group.add(crystal);
     } else {
       const hull = new THREE.Mesh(
         new THREE.ConeGeometry(0.6, 2.4, 8),
@@ -417,6 +445,36 @@ export class InterplanetarySystem {
     this.initialPlaceholderShip = initialShip;
     this.shipMeshes.set("light_fighter", initialShip);
     this.scene.add(initialShip);
+
+    // Frame zero spawn base entities: Fighter, Intergalactic, Alien1, Alien2, Minerals (Decoupled & zero clipping)
+    this.fighterModel = this.makePlaceholder("ship", 11);
+    alignShipToGround(this.fighterModel, FIGHTER_POS.x, FIGHTER_POS.z, 0, 3.5, 5.5, 0.05);
+    this.fighterModel.visible = true;
+    this.scene.add(this.fighterModel);
+
+    this.intergalacticModel = this.makePlaceholder("ship", 18);
+    alignShipToGround(this.intergalacticModel, INTERGALACTIC_POS.x, INTERGALACTIC_POS.z, -0.15, 5.0, 9.0, 0.08);
+    this.intergalacticModel.visible = true;
+    this.scene.add(this.intergalacticModel);
+
+    this.alien1Model = this.makePlaceholder("npc", 2.2);
+    this.alien1Model.position.set(ALIEN1_POS.x, ALIEN1_POS.y, ALIEN1_POS.z);
+    this.alien1Model.rotation.set(0, 1.2, 0);
+    this.alien1Model.visible = true;
+    this.scene.add(this.alien1Model);
+
+    this.alien2Model = this.makePlaceholder("npc", 2.6);
+    this.alien2Model.position.set(ALIEN2_POS.x, ALIEN2_POS.y, ALIEN2_POS.z);
+    this.alien2Model.rotation.set(0, -0.8, 0);
+    this.alien2Model.visible = true;
+    this.scene.add(this.alien2Model);
+
+    this.mineralsModel = this.makePlaceholder("mineral", 2.5);
+    this.mineralsModel.position.set(MINERALS_POS.x, MINERALS_POS.y, MINERALS_POS.z);
+    this.mineralsModel.rotation.set(0, 0.3, 0);
+    this.mineralsModel.visible = true;
+    this.scene.add(this.mineralsModel);
+    this.mineralNodes.add(this.mineralsModel);
 
     this.buildSolarSystem();
     this.buildSpaceshipCorridor();
@@ -1019,6 +1077,21 @@ export class InterplanetarySystem {
       const shouldShow = this.flightMode === "cruise" ? id === this.activeShip : id === "light_fighter";
       ship.visible = shouldShow && isInFrustum(ship.position, 40);
     }
+    if (this.fighterModel) {
+      this.fighterModel.visible = isInFrustum(this.fighterModel.position, 40);
+    }
+    if (this.intergalacticModel) {
+      this.intergalacticModel.visible = isInFrustum(this.intergalacticModel.position, 60);
+    }
+    if (this.alien1Model) {
+      this.alien1Model.visible = isInFrustum(this.alien1Model.position, 20);
+    }
+    if (this.alien2Model) {
+      this.alien2Model.visible = isInFrustum(this.alien2Model.position, 20);
+    }
+    if (this.mineralsModel) {
+      this.mineralsModel.visible = isInFrustum(this.mineralsModel.position, 20);
+    }
     if (this.guideMixer) {
       this.guideMixer.update(dt);
     }
@@ -1029,17 +1102,17 @@ export class InterplanetarySystem {
       const distanceToPlayer = Math.hypot(dx, dz);
 
       // Enemy check: alien predators or combat encounters
-      const alien1 = this.downloadedAssets.get("alien1");
-      const alien2 = this.downloadedAssets.get("alien2");
+      const alien1 = this.alien1Model || this.downloadedAssets.get("alien1");
+      const alien2 = this.alien2Model || this.downloadedAssets.get("alien2");
       let nearEnemy = false;
       let enemyTarget: THREE.Vector3 | null = null;
       for (const enemy of [alien1, alien2]) {
-        if (enemy && enemy.visible) {
+        if (enemy && enemy.visible && enemy.userData.isHostile) {
           const eDist = Math.hypot(
             enemy.position.x - this.guideModel.position.x,
             enemy.position.z - this.guideModel.position.z
           );
-          if (eDist < 45) {
+          if (eDist < 25) {
             nearEnemy = true;
             enemyTarget = enemy.position;
             break;
@@ -1163,7 +1236,8 @@ export class InterplanetarySystem {
     }
 
     for (const [key, url, size] of [
-      ["fighter", "/assets/models/fighter/scene.gltf", 12],
+      ["fighter", "/assets/models/fighter/scene.gltf", 11],
+      ["intergalactic", "/assets/models/intergalactic/scene.gltf", 18],
       ["corridor", "/assets/models/corridor/scene.gltf", 38],
       ["cave", "/assets/models/cave/scene.gltf", 40],
       ["sky", "/assets/models/sky/scene.gltf", 40],
@@ -1177,10 +1251,18 @@ export class InterplanetarySystem {
           this.corridorGroup.add(model);
           this.onModelLoaded?.();
         } else if (key === "fighter") {
-          model.position.copy(SOLAR_SYSTEM.kepler.position).add(new THREE.Vector3(0, 520, 0));
-          model.visible = false;
-          this.shipMeshes.set("light_fighter", model);
-          this.systemGroup.add(model);
+          if (this.fighterModel) {
+            this.fighterModel.clear();
+            this.fighterModel.add(model);
+            alignShipToGround(this.fighterModel, FIGHTER_POS.x, FIGHTER_POS.z, 0, 3.5, 5.5, 0.05);
+          }
+          this.onModelLoaded?.();
+        } else if (key === "intergalactic") {
+          if (this.intergalacticModel) {
+            this.intergalacticModel.clear();
+            this.intergalacticModel.add(model);
+            alignShipToGround(this.intergalacticModel, INTERGALACTIC_POS.x, INTERGALACTIC_POS.z, -0.15, 5.0, 9.0, 0.08);
+          }
           this.onModelLoaded?.();
         }
       }
@@ -1257,22 +1339,33 @@ export class InterplanetarySystem {
           this.guideState = "idle";
         }
       }),
-      loadModel("alien1", "/assets/models/alien1/scene.gltf", 2).then((model) => {
-        if (model) {
-          model.position.set(165, groundAt(165, -85) + 1, -85);
-          this.scene.add(model);
+      loadModel("alien1", "/assets/models/alien1/scene.gltf", 2.2).then((model) => {
+        if (model && this.alien1Model) {
+          clean3DEntityText(model);
+          this.alien1Model.clear();
+          this.alien1Model.add(model);
         }
       }),
-      loadModel("alien2", "/assets/models/alien2/scene.gltf", 2.4).then((model) => {
-        if (model) {
-          model.position.set(-170, groundAt(-170, -150) + 1.2, -150);
-          this.scene.add(model);
+      loadModel("alien2", "/assets/models/alien2/scene.gltf", 2.6).then((model) => {
+        if (model && this.alien2Model) {
+          model.traverse((o: any) => {
+            if (o.isMesh && o.material) {
+              o.material.color = new THREE.Color(0x475569);
+              o.material.roughness = 0.45;
+              o.material.metalness = 0.25;
+              o.material.needsUpdate = true;
+            }
+          });
+          clean3DEntityText(model);
+          this.alien2Model.clear();
+          this.alien2Model.add(model);
         }
       }),
-      loadModel("minerals", "/assets/models/minerals/scene.gltf", 2.4).then((model) => {
-        if (model) {
-          model.position.set(-30, 21.5, 115);
-          this.mineralNodes.add(model);
+      loadModel("minerals", "/assets/models/minerals/scene.gltf", 2.5).then((model) => {
+        if (model && this.mineralsModel) {
+          clean3DEntityText(model);
+          this.mineralsModel.clear();
+          this.mineralsModel.add(model);
         }
       }),
     ]);
