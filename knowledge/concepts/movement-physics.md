@@ -8,7 +8,7 @@ tags:
   - rapier3d
   - movement
   - character-controller
-timestamp: 2026-10-31T17:35:00Z
+timestamp: 2026-11-07T13:54:08.025Z
 sources:
   - "frontend/space-escape/shared/physics.ts"
 ---
