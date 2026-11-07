@@ -30,7 +30,7 @@ export function missionObjective(s: Snapshot, p: Player) {
       7,
       p.seat >= 0 ? "飞向回声林地" : "游隼号已就绪",
       p.seat >= 0
-        ? "西侧陨石坑 · X 下降，Shift 刹停后着陆"
+        ? "西侧陨石坑 · X 刹停下降，Shift 后燃加力"
         : "靠近飞船按 E 登船 · 空格起飞",
     );
   if (!a.lore.includes(0))

@@ -4,21 +4,23 @@ import {
   SOLAR_SYSTEM,
   MINERAL_SAMPLES,
   ALIEN_ROSTER,
+  celestialCapture,
   type CelestialBody,
   type SpaceshipKind,
   type FlightFlightMode,
 } from "../shared/celestial";
+import { buildLandmark, buildPlanetaryRings, buildWarpGate, planetTexture } from "./celestial-visuals";
+import { celestialFlightFrame } from "../shared/celestial-flight";
 import { groundAt } from "../shared/map";
+import type { AdventureShip } from "../shared/types";
 import {
-  SHIP_HOME,
-  SHIP1_POS,
-  SHIP2_POS,
-  FIGHTER_POS,
-  INTERGALACTIC_POS,
   ALIEN1_POS,
   ALIEN2_POS,
   MINERALS_POS,
+  SPAWN_FLEET,
 } from "../shared/adventure-data";
+
+type RenderShip = Pick<AdventureShip, "x" | "y" | "z" | "yaw" | "bank" | "seats"> & Partial<AdventureShip>;
 
 export function normalizeModelContainer(
   obj: THREE.Object3D,
@@ -206,47 +208,35 @@ export function computeMercuryAlignment(
   altitude: number;
   isLanded: boolean;
 } {
-  const merc = SOLAR_SYSTEM.mercury;
-  const mercPos = new THREE.Vector3(merc.position.x, merc.position.y, merc.position.z);
-  const pShip = new THREE.Vector3(shipPos.x, shipPos.y, shipPos.z);
-  const diff = pShip.clone().sub(mercPos);
-  const dist = diff.length();
-  const normal = dist > 0.001 ? diff.clone().normalize() : new THREE.Vector3(0, 1, 0);
+  return computeCelestialAlignment(shipPos, shipYaw, shipBank, SOLAR_SYSTEM.mercury);
+}
 
-  const captureRadius = merc.atmosphereRadius + 180; // 660m
-  const t = THREE.MathUtils.clamp((captureRadius - dist) / (captureRadius - merc.radius), 0, 1);
-  const captureWeight = t * t * (3 - 2 * t); // smoothstep
-
-  const worldUp = new THREE.Vector3(0, 1, 0);
-  const blendedUp = worldUp.clone().lerp(normal, captureWeight).normalize();
-
-  // Project forward vector from yaw onto the tangent plane perpendicular to blendedUp
-  let forward = new THREE.Vector3(-Math.sin(shipYaw), 0, -Math.cos(shipYaw));
-  forward.addScaledVector(blendedUp, -forward.dot(blendedUp));
-  if (forward.lengthSq() < 0.0001) {
-    forward.set(1, 0, 0).addScaledVector(blendedUp, -blendedUp.x);
-  }
-  forward.normalize();
-
-  const right = new THREE.Vector3().crossVectors(forward, blendedUp).normalize();
-
-  const matrix = new THREE.Matrix4().makeBasis(right, blendedUp, forward.clone().negate());
-  const quat = new THREE.Quaternion().setFromRotationMatrix(matrix);
-
-  if (Math.abs(shipBank) > 0.001) {
-    const bankQuat = new THREE.Quaternion().setFromAxisAngle(forward, -shipBank);
-    quat.multiply(bankQuat);
-  }
-
-  const altitude = Math.max(0, dist - merc.radius);
-  const isLanded = dist <= merc.radius + 0.35;
-
+/** Universal gravitational capture frame for every spherical celestial body. */
+export function computeCelestialAlignment(
+  shipPos: { x: number; y: number; z: number },
+  shipYaw: number,
+  shipBank: number,
+  preferredBody?: CelestialBody,
+): {
+  body: CelestialBody | null;
+  up: THREE.Vector3;
+  quaternion: THREE.Quaternion;
+  captureWeight: number;
+  altitude: number;
+  isLanded: boolean;
+} {
+  const frame = celestialFlightFrame(shipPos, shipYaw, preferredBody ? [preferredBody] : undefined);
+  // Bank is a local roll, independent of the planet's orientation in world space.
+  const quaternion = frame.quaternion.clone().multiply(
+    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -shipBank),
+  );
   return {
-    up: blendedUp,
-    quaternion: quat,
-    captureWeight,
-    altitude,
-    isLanded,
+    body: frame.capture?.body ?? null,
+    up: frame.up,
+    quaternion,
+    captureWeight: frame.capture?.weight ?? 0,
+    altitude: frame.capture ? Math.max(0, frame.capture.altitude) : Infinity,
+    isLanded: !!frame.capture && frame.capture.altitude <= 0.35,
   };
 }
 
@@ -288,6 +278,8 @@ export interface PlanetMeshEntry {
   atmosphereMesh?: THREE.Mesh;
   rayleighMesh?: THREE.Mesh;
   highDetail?: THREE.Group;
+  rings?: THREE.Group;
+  portal?: THREE.Mesh<THREE.CircleGeometry, THREE.ShaderMaterial>;
 }
 
 /**
@@ -308,7 +300,8 @@ export class InterplanetarySystem {
 
   // Flight Cruise State
   flightMode: FlightFlightMode = "surface";
-  activeShip: SpaceshipKind = "light_fighter";
+  activeShip: SpaceshipKind = "skiff";
+  private shipState: RenderShip | null = null;
   currentPlanet = "kepler";
   targetPlanet = "mercury";
 
@@ -331,7 +324,7 @@ export class InterplanetarySystem {
       this.initialPlaceholderShip.parent.remove(this.initialPlaceholderShip);
       this.initialPlaceholderShip.visible = false;
     }
-    this.shipMeshes.set("light_fighter", shipGroup);
+    this.shipMeshes.set("skiff", shipGroup);
   }
 
   // Mineral specimens placed in world
@@ -350,7 +343,8 @@ export class InterplanetarySystem {
   caveModel: THREE.Group | null = null;
   skyModel: THREE.Group | null = null;
   solarModel: THREE.Group | null = null;
-  mercuryOrbitEntered = false;
+  mercuryOrbitEntered = false; // Legacy status for Mercury-specific consumers
+  private capturedPlanet: string | null = null;
 
   onModelLoaded?: () => void;
 
@@ -449,23 +443,24 @@ export class InterplanetarySystem {
     this.corridorGroup.visible = false;
 
     // Dock spaceship at starting home position from frame zero
-    const homePos = new THREE.Vector3(SHIP_HOME.x, groundAt(SHIP_HOME.x, SHIP_HOME.z) + 1.2, SHIP_HOME.z);
     const initialShip = this.makePlaceholder("ship", 12);
-    initialShip.position.copy(homePos);
+    this.parkShip("skiff", initialShip);
     initialShip.visible = true;
     this.initialPlaceholderShip = initialShip;
-    this.shipMeshes.set("light_fighter", initialShip);
+    this.shipMeshes.set("skiff", initialShip);
     this.scene.add(initialShip);
 
     // Frame zero spawn base entities: Fighter, Intergalactic, Alien1, Alien2, Minerals (Decoupled & zero clipping)
     this.fighterModel = this.makePlaceholder("ship", 11);
-    alignShipToGround(this.fighterModel, FIGHTER_POS.x, FIGHTER_POS.z, 0, 3.5, 5.5, 0.05);
+    this.parkShip("light_fighter", this.fighterModel);
     this.fighterModel.visible = true;
+    this.shipMeshes.set("light_fighter", this.fighterModel);
     this.scene.add(this.fighterModel);
 
     this.intergalacticModel = this.makePlaceholder("ship", 18);
-    alignShipToGround(this.intergalacticModel, INTERGALACTIC_POS.x, INTERGALACTIC_POS.z, -0.15, 5.0, 9.0, 0.08);
+    this.parkShip("intergalactic", this.intergalacticModel);
     this.intergalacticModel.visible = true;
+    this.shipMeshes.set("intergalactic", this.intergalacticModel);
     this.scene.add(this.intergalacticModel);
 
     this.alien1Model = this.makePlaceholder("npc", 2.2);
@@ -500,6 +495,14 @@ export class InterplanetarySystem {
       pGroup.position.set(body.position.x, body.position.y, body.position.z);
       pGroup.frustumCulled = true;
 
+      if (id === "warpgate") {
+        const gate = buildWarpGate(body);
+        // Keep the entry shape shared, but never give a portal a spherical shell.
+        pGroup.add(...gate.group.children.slice());
+        this.systemGroup.add(pGroup);
+        this.planets.set(id, { body, group: pGroup, surfaceMesh: gate.frame, portal: gate.portal });
+        continue;
+      }
       let mat: THREE.Material;
       if (id === "earth") {
         // High-contrast Earth with continent & cloud shaders
@@ -516,6 +519,8 @@ export class InterplanetarySystem {
           color: 0x94a3b8,
           roughness: 0.85,
           metalness: 0.2,
+          emissive: 0x475569,
+          emissiveIntensity: 0.25,
         });
       } else if (id === "stylized") {
         // Stylized emerald green biosphere planet
@@ -525,6 +530,26 @@ export class InterplanetarySystem {
           metalness: 0.1,
           emissive: 0x065f46,
           emissiveIntensity: 0.3,
+        });
+      } else if (id === "venus") {
+        mat = new THREE.MeshPhysicalMaterial({
+          color: 0xd9a441, roughness: 0.52, metalness: 0.02,
+          transmission: 0.08, thickness: 1.2, emissive: 0x8a4f16, emissiveIntensity: 0.18,
+        });
+      } else if (id === "mars") {
+        mat = new THREE.MeshStandardMaterial({
+          color: 0xb74f30, roughness: 0.94, metalness: 0.03,
+          emissive: 0x4a160d, emissiveIntensity: 0.22,
+        });
+      } else if (id === "jupiter") {
+        mat = new THREE.MeshStandardMaterial({
+          color: 0xd8ac83, roughness: 0.7, metalness: 0,
+          emissive: 0x6c3f2c, emissiveIntensity: 0.16,
+        });
+      } else if (id === "saturn") {
+        mat = new THREE.MeshStandardMaterial({
+          color: 0xdcca96, roughness: 0.62, metalness: 0,
+          emissive: 0x725d2d, emissiveIntensity: 0.14,
         });
       } else {
         // Kepler home planet
@@ -539,7 +564,12 @@ export class InterplanetarySystem {
         });
       }
 
-      const geo = new THREE.SphereGeometry(body.radius, 48, 36);
+      if (["venus", "mars", "jupiter", "saturn"].includes(id) && mat instanceof THREE.MeshStandardMaterial) {
+        mat.color.set(0xffffff);
+        mat.map = planetTexture(body);
+        if (id === "mars") { mat.bumpMap = mat.map; mat.bumpScale = 1.8; }
+      }
+      const geo = new THREE.SphereGeometry(body.radius, 64, 48);
       const surfaceMesh = new THREE.Mesh(geo, mat);
       surfaceMesh.castShadow = true;
       surfaceMesh.receiveShadow = true;
@@ -548,9 +578,9 @@ export class InterplanetarySystem {
       // Atmospheric Rayleigh scattering blending shell
       const rayleighGeo = new THREE.SphereGeometry(body.radius * 1.018, 48, 36);
       const rayleighMat = new THREE.MeshBasicMaterial({
-        color: 0x1b3547,
+        color: id === "kepler" ? 0x1b3547 : body.atmosphereColor,
         transparent: true,
-        opacity: id === "kepler" ? 0.78 : 0.45,
+        opacity: id === "kepler" ? 0.78 : 0.18,
         depthWrite: false,
         side: THREE.FrontSide,
       });
@@ -569,6 +599,10 @@ export class InterplanetarySystem {
       });
       const atmoMesh = new THREE.Mesh(atmoGeo, atmoMat);
       atmoMesh.frustumCulled = true;
+
+      const rings = body.hasRings ? buildPlanetaryRings(body) : undefined;
+      if (rings) pGroup.add(rings);
+      for (const landmark of body.landmarks) pGroup.add(buildLandmark(body, landmark));
 
       if (id === "mercury") {
         // Frame-sliced progressive mounting for alien planet surface & atmosphere to eliminate synchronous compile stalls
@@ -616,6 +650,7 @@ export class InterplanetarySystem {
         surfaceMesh,
         atmosphereMesh: atmoMesh,
         rayleighMesh,
+        rings,
       });
     }
   }
@@ -903,7 +938,7 @@ export class InterplanetarySystem {
     this.cruiserModel = cruiser;
     this.shipMeshes.set("cruiser", cruiser);
     this.scene.add(cruiser);
-    alignShipToGround(cruiser, SHIP2_POS.x, SHIP2_POS.z, 0, 3.5, 8.0, 0.05);
+    this.parkShip("cruiser", cruiser);
     cruiser.visible = true;
 
     return cruiser;
@@ -911,18 +946,7 @@ export class InterplanetarySystem {
 
   /** Switch between Spaceship models */
   switchShip(kind: SpaceshipKind) {
-    this.activeShip = kind;
-    if (typeof window !== "undefined") {
-      (window as any).__activeShip = kind;
-    }
-    if (this.cruiserModel) this.cruiserModel.visible = true;
-    for (const [id, ship] of this.shipMeshes) {
-      if (id === "cruiser") {
-        ship.visible = true;
-        continue;
-      }
-      ship.visible = this.flightMode === "cruise" && id === kind;
-    }
+    this.activeShip = this.shipState ? this.shipState.kind ?? "skiff" : kind;
   }
   guideDialogue(player: { x: number; y: number; z: number }, pressed: boolean) {
     const guide = this.guideModel;
@@ -936,68 +960,57 @@ export class InterplanetarySystem {
     if (toggled) this.guideFollowing = !this.guideFollowing;
     return toggled ? this.guideFollowing : null;
   }
-  setShipState(ship: { x: number; y: number; z: number; yaw: number; bank: number; seats: string[]; flightTime?: number } | null) {
-    if (this.cruiserModel) {
-      this.cruiserModel.visible = true;
-      this.cruiserModel.traverse((c) => {
-        if (c instanceof THREE.Mesh) c.frustumCulled = true;
-      });
+  private parkShip(kind: SpaceshipKind, model: THREE.Group) {
+    const spawn = SPAWN_FLEET[kind];
+    alignShipToGround(model, spawn.position.x, spawn.position.z,
+      spawn.yaw + (kind === "skiff" ? Math.PI : 0),
+      spawn.halfWidth, spawn.halfLength, spawn.clearance);
+  }
 
-      const isCruiserFlying = this.activeShip === "cruiser" && ship && (ship.seats.some(Boolean) || (ship.flightTime || 0) > 0);
-      if (isCruiserFlying) {
-        const mercAlign = computeMercuryAlignment(ship, ship.yaw, ship.bank);
-        if (mercAlign.captureWeight > 0.05) {
-          this.cruiserModel.position.set(ship.x, ship.y + 1.2, ship.z);
-          this.cruiserModel.quaternion.copy(mercAlign.quaternion);
+  setShipState(ship: RenderShip | null) {
+    this.shipState = ship;
+    this.activeShip = ship?.kind ?? "skiff";
+    for (const [kind, model] of this.shipMeshes) {
+      if (ship && kind === this.activeShip) {
+        // AdventureView animates the authored skiff; keep the standalone
+        // fallback following snapshots too when there is no AdventureView.
+        if (kind === "skiff" && model !== this.initialPlaceholderShip) continue;
+        const spawn = SPAWN_FLEET[kind];
+        const celestialAlign = computeCelestialAlignment(ship, ship.yaw + (kind === "skiff" ? Math.PI : 0), ship.bank);
+        if (celestialAlign.captureWeight > 0.05) {
+          model.position.set(ship.x, ship.y, ship.z).addScaledVector(celestialAlign.up, 1.2);
+          model.quaternion.copy(celestialAlign.quaternion);
+        } else if (ship.grounded) {
+          alignShipToGround(model, ship.x, ship.z, ship.yaw + (kind === "skiff" ? Math.PI : 0),
+            spawn.halfWidth, spawn.halfLength, spawn.clearance);
         } else {
-          this.cruiserModel.position.set(ship.x, ship.y + 1.8, ship.z);
-          this.cruiserModel.rotation.set(0, ship.yaw, -ship.bank);
+          model.position.set(ship.x, ship.y + 1.8, ship.z);
+          model.rotation.set(0, ship.yaw + (kind === "skiff" ? Math.PI : 0), -ship.bank);
         }
-      } else if (this.activeShip === "cruiser" && ship) {
-        alignShipToGround(this.cruiserModel, ship.x, ship.z, ship.yaw, 3.5, 8.0, 0.05);
       } else {
-        // Parked in spawn position side-by-side with Skiff (18m apart)
-        alignShipToGround(this.cruiserModel, SHIP2_POS.x, SHIP2_POS.z, 0, 3.5, 8.0, 0.05);
+        this.parkShip(kind, model);
       }
     }
   }
 
   /** Step solar system rotation & flight physics */
   step(dt: number, shipPos: { x: number; y: number; z: number; planet?: string | null }) {
-    // Altitude calculation relative to current planet surface
-    const current = SOLAR_SYSTEM[shipPos.planet || this.currentPlanet] || SOLAR_SYSTEM.kepler;
-    const distToCenter = Math.hypot(
-      shipPos.x - current.position.x,
-      shipPos.y - current.position.y,
-      shipPos.z - current.position.z,
-    );
-    const altitude = Math.max(
-      0,
-      current.id === "kepler" && shipPos.planet !== "kepler"
-        ? shipPos.y - groundAt(shipPos.x, shipPos.z)
-        : distToCenter - current.radius,
-    );
+    const capture = celestialCapture(shipPos);
+    const requested = shipPos.planet ? SOLAR_SYSTEM[shipPos.planet] : null;
+    const current = capture?.body ?? (requested?.landable !== false ? requested : null);
+    const altitude = current
+      ? Math.max(0, Math.hypot(shipPos.x - current.position.x, shipPos.y - current.position.y,
+        shipPos.z - current.position.z) - current.radius)
+      : Math.max(0, shipPos.y - groundAt(shipPos.x, shipPos.z));
     this.flightAltitude = altitude;
-
-    // Automatic flight mode transition
+    this.currentPlanet = current?.id ?? "kepler";
     const prevFlightMode = this.flightMode;
-    if (this.flightAltitude > 350 && this.flightMode === "surface") {
-      this.flightMode = "cruise";
-    } else if (this.flightAltitude <= 300 && this.flightMode === "cruise" && shipPos.y < 300) {
-      this.flightMode = "surface";
-    }
-    if (this.flightMode !== prevFlightMode) {
-      this.onModelLoaded?.();
-    }
-
-    // Mercury orbital capture detection & async compilation trigger
-    const mercAlign = computeMercuryAlignment(shipPos, 0, dt);
-    if (mercAlign.captureWeight > 0.05 && !this.mercuryOrbitEntered) {
-      this.mercuryOrbitEntered = true;
-      this.onModelLoaded?.();
-    } else if (mercAlign.captureWeight <= 0.01 && this.mercuryOrbitEntered) {
-      this.mercuryOrbitEntered = false;
-    }
+    if (altitude > 350 && this.flightMode === "surface") this.flightMode = "cruise";
+    else if (altitude <= 300 && this.flightMode === "cruise") this.flightMode = "surface";
+    const captured = capture?.body.id ?? null;
+    if (captured !== this.capturedPlanet || this.flightMode !== prevFlightMode) this.onModelLoaded?.();
+    this.capturedPlanet = captured;
+    this.mercuryOrbitEntered = captured === "mercury";
 
     // Altitude factor: 0 on ground, 1 in deep space cruise via smoothstep
     const groundLevel = 15;
@@ -1024,7 +1037,14 @@ export class InterplanetarySystem {
     // Update ALL planets:
     // STRICT RULE: NEVER set visible = false in surface mode! All planets remain visible and rely on frustum culling.
     for (const [id, entry] of this.planets) {
-      entry.group.rotation.y += (id === "mercury" ? 0.04 : 0.08) * dt;
+      const rotationStep = (entry.body.rotationSpeed ?? 0.08) * dt;
+      entry.surfaceMesh.rotation.y += rotationStep;
+      if (entry.highDetail) entry.highDetail.rotation.y += rotationStep;
+      for (const child of entry.group.children) {
+        // Landmarks rotate about the same center as the textured crust.
+        if (child.name.startsWith("landmark-")) child.rotation.y += rotationStep;
+      }
+      if (entry.portal) entry.portal.material.uniforms.time.value += dt;
       entry.group.visible = true; // All planets must remain visible through frustum culling
       entry.group.frustumCulled = true;
 
@@ -1061,7 +1081,7 @@ export class InterplanetarySystem {
         entry.rayleighMesh.visible = true;
         entry.rayleighMesh.frustumCulled = true;
         const mat = entry.rayleighMesh.material as THREE.MeshBasicMaterial;
-        mat.opacity = (id === "kepler" ? 0.75 : 0.45) * rayleighBlend;
+        mat.opacity = (id === "kepler" ? 0.75 : 0.18) * rayleighBlend;
       }
       if (entry.atmosphereMesh) {
         entry.atmosphereMesh.visible = true;
@@ -1082,18 +1102,7 @@ export class InterplanetarySystem {
     };
 
     for (const [id, ship] of this.shipMeshes) {
-      if (id === "cruiser") {
-        ship.visible = true;
-        continue;
-      }
-      const shouldShow = this.flightMode === "cruise" ? id === this.activeShip : id === "light_fighter";
-      ship.visible = shouldShow && isInFrustum(ship.position, 40);
-    }
-    if (this.fighterModel) {
-      this.fighterModel.visible = isInFrustum(this.fighterModel.position, 40);
-    }
-    if (this.intergalacticModel) {
-      this.intergalacticModel.visible = isInFrustum(this.intergalacticModel.position, 60);
+      ship.visible = isInFrustum(ship.position, id === "intergalactic" ? 60 : 40);
     }
     if (this.alien1Model) {
       this.alien1Model.visible = isInFrustum(this.alien1Model.position, 20);
@@ -1235,9 +1244,6 @@ export class InterplanetarySystem {
         this.downloadedAssets.set("lander", landerContainer);
         this.assetLibrary.add(landerContainer);
       }
-      if (this.cruiserModel) {
-        alignShipToGround(this.cruiserModel, SHIP2_POS.x, SHIP2_POS.z, 0, 3.5, 8.0, 0.05);
-      }
     } catch {
       /* Keep authored cruiser chassis fallback */
     }
@@ -1262,7 +1268,7 @@ export class InterplanetarySystem {
             this.fighterModel.clear();
             this.fighterModel.scale.setScalar(1);
             this.fighterModel.add(model);
-            alignShipToGround(this.fighterModel, FIGHTER_POS.x, FIGHTER_POS.z, 0, 3.5, 5.5, 0.05);
+            this.setShipState(this.shipState);
           }
           this.onModelLoaded?.();
         } else if (key === "intergalactic") {
@@ -1270,7 +1276,7 @@ export class InterplanetarySystem {
             this.intergalacticModel.clear();
             this.intergalacticModel.scale.setScalar(1);
             this.intergalacticModel.add(model);
-            alignShipToGround(this.intergalacticModel, INTERGALACTIC_POS.x, INTERGALACTIC_POS.z, -0.15, 5.0, 9.0, 0.08);
+            this.setShipState(this.shipState);
           }
           this.onModelLoaded?.();
         }

@@ -4,7 +4,7 @@ import { Scene, PerspectiveCamera, Vector3 } from "three";
 import { InterplanetarySystem } from "../../frontend/space-escape/src/interplanetary";
 import { SOLAR_SYSTEM } from "../../frontend/space-escape/shared/celestial";
 import { groundAt, SPAWN } from "../../frontend/space-escape/shared/map";
-import { SHIP_HOME } from "../../frontend/space-escape/shared/adventure-data";
+import { SHIP1_POS } from "../../frontend/space-escape/shared/adventure-data";
 
 test("planet surface and atmosphere share elevated global coordinates", () => {
   const system = new InterplanetarySystem(new Scene(), new PerspectiveCamera());
@@ -12,6 +12,10 @@ test("planet surface and atmosphere share elevated global coordinates", () => {
     assert.deepEqual(planet.group.position.toArray(), Object.values(SOLAR_SYSTEM[id].position));
     assert.equal(planet.surfaceMesh.parent, planet.group);
     const atmosphere = planet.atmosphereMesh;
+    if (id === "warpgate") {
+      assert.equal(atmosphere, undefined, "a traversable gate has no spherical atmosphere shell");
+      continue;
+    }
     assert.ok(atmosphere);
     assert.equal(atmosphere.position.length(), 0);
   }
@@ -91,21 +95,21 @@ test("InterplanetarySystem preserves all planets and docks spaceship at starting
   assert.ok(system.planets.has("mercury"), "Mercury planet must exist");
   assert.ok(system.planets.has("stylized"), "Stylized planet must exist");
 
-  // Spaceship is docked at starting position SHIP_HOME
-  const ship = system.shipMeshes.get("light_fighter");
+  // Spaceship is docked at starting position SHIP1_POS
+  const ship = system.shipMeshes.get("skiff");
   assert.ok(ship, "Spaceship model must exist");
-  assert.equal(ship.position.x, SHIP_HOME.x, "Ship x coordinate must match SHIP_HOME starting position");
-  assert.equal(ship.position.z, SHIP_HOME.z, "Ship z coordinate must match SHIP_HOME starting position");
+  assert.equal(ship.position.x, SHIP1_POS.x, "Ship x coordinate must match SHIP1_POS starting position");
+  assert.equal(ship.position.z, SHIP1_POS.z, "Ship z coordinate must match SHIP1_POS starting position");
 
-  // Camera pointing at SHIP_HOME starting position
-  camera.lookAt(SHIP_HOME.x, SHIP_HOME.y, SHIP_HOME.z);
+  // Camera pointing at SHIP1_POS starting position
+  camera.lookAt(SHIP1_POS.x, SHIP1_POS.y, SHIP1_POS.z);
   camera.updateMatrixWorld();
   camera.updateProjectionMatrix();
   system.step(1 / 30, { ...SPAWN, y: floor + 0.85 });
   assert.equal(ship.visible, true, "Spaceship in front of camera must be visible at starting position");
 
   // Camera looking in opposite direction culls the spaceship
-  camera.lookAt(-SHIP_HOME.x, SHIP_HOME.y, -SHIP_HOME.z);
+  camera.lookAt(-SHIP1_POS.x, SHIP1_POS.y, -SHIP1_POS.z);
   camera.updateMatrixWorld();
   camera.updateProjectionMatrix();
   system.step(1 / 30, { ...SPAWN, y: floor + 0.85 });

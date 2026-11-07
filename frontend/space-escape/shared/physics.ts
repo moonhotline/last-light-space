@@ -209,10 +209,10 @@ export class MovementWorld {
   move(p: Player, i: Input) {
     const body = this.bodies.get(p.id);
     if (!body) return;
-    const nearPlanet = Object.values(SOLAR_SYSTEM).find(planet =>
+    const nearPlanet = Object.values(SOLAR_SYSTEM).find(planet => planet.landable !== false &&
       Math.hypot(p.x - planet.position.x, p.y - planet.position.y, p.z - planet.position.z) < planet.radius + 60);
     if (!p.planet && p.y > groundAt(p.x, p.z) + 80 && (p.jetting || nearPlanet)) {
-      const nearby = Object.values(SOLAR_SYSTEM).find(planet =>
+      const nearby = Object.values(SOLAR_SYSTEM).find(planet => planet.landable !== false &&
         Math.hypot(p.x - planet.position.x, p.y - planet.position.y, p.z - planet.position.z) < planet.radius + 260);
       if (nearby) {
         p.planet = nearby.id;

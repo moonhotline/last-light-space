@@ -1,7 +1,8 @@
 import { weatherMaterials } from "./weathering";
 import { AdventureView, optimizeModel } from "./adventure-view";
 import { missionObjective } from "../shared/objectives";
-import { InterplanetarySystem, computeMercuryAlignment } from "./interplanetary";
+import { celestialCockpitPose, celestialFlightFrame } from "../shared/celestial-flight";
+import { InterplanetarySystem, computeCelestialAlignment } from "./interplanetary";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
@@ -32,6 +33,7 @@ import {
 import type { Snapshot, Player } from "../shared/types";
 import type { MovementWorld } from "../shared/physics";
 import { SOLAR_SYSTEM } from "../shared/celestial";
+import { SPAWN_FLEET } from "../shared/adventure-data";
 import { FOOT_OFFSET, playerUp, surfaceOrientation, eyePosition, viewOrientation } from "../shared/surface";
 import { createHandRig, equipmentModel, attachHeldModel } from "./hand-rig";
 const COLORS = [0x9eeafa, 0xffc98b, 0xff9f81, 0xa6baff];
@@ -1196,7 +1198,7 @@ export class GameView {
       if (me.seat >= 0 && s) {
         const ship = s.adventure.ship;
         const shipSpeed = Math.hypot(ship.vx, ship.vy, ship.vz);
-        const speedRatio = clamp(shipSpeed / 130, 0, 1.0);
+        const speedRatio = clamp(shipSpeed / (ship.kind === "intergalactic" ? 400 : 320), 0, 1.0);
         let fov = 60 + speedRatio * 18; // smooth 60° -> 78°
         if (this.activeWeapon === "camera") {
           fov = fov / Math.max(1, this.cameraZoom);
@@ -1219,16 +1221,11 @@ export class GameView {
       if (me.seat >= 0 && s && this.thirdPerson) {
         // Flight Spring Arm Lag & Roll/Pitch Linkage
         const ship = s.adventure.ship;
-        const mercAlign = computeMercuryAlignment(ship, ship.yaw, ship.bank);
-        const localUp = mercAlign.captureWeight > 0.05 ? mercAlign.up.clone() : new THREE.Vector3(0, 1, 0);
+        const celestialAlign = computeCelestialAlignment(ship, ship.yaw, ship.bank);
+        const localUp = celestialAlign.captureWeight > 0.05 ? celestialAlign.up.clone() : new THREE.Vector3(0, 1, 0);
 
         const shipPos = new THREE.Vector3(ship.x, ship.y, ship.z);
-        let shipForward = new THREE.Vector3(-Math.sin(ship.yaw), 0, -Math.cos(ship.yaw));
-        shipForward.addScaledVector(localUp, -shipForward.dot(localUp));
-        if (shipForward.lengthSq() < 0.0001) {
-          shipForward.set(1, 0, 0).addScaledVector(localUp, -localUp.x);
-        }
-        shipForward.normalize();
+        const shipForward = celestialFlightFrame(ship, ship.yaw).forward;
 
         const idealFocus = shipPos.clone().addScaledVector(localUp, 1.8).addScaledVector(shipForward, 4.0);
 
@@ -1238,8 +1235,9 @@ export class GameView {
           this.flightSpringArm.focus.lerp(idealFocus, 1 - Math.exp(-dt * 10));
         }
 
-        const baseDist = 22.0;
-        const baseH = 6.5;
+        const hull = SPAWN_FLEET[ship.kind ?? "skiff"];
+        const baseDist = Math.max(22, hull.halfLength * 3);
+        const baseH = Math.max(6.5, hull.halfWidth * 1.7);
         const shipSpeed = Math.hypot(ship.vx, ship.vy, ship.vz);
         const lagDist = clamp(shipSpeed * 0.12, 0, 8.0);
 
@@ -1256,7 +1254,8 @@ export class GameView {
 
         const targetRoll = -ship.bank * 0.65;
         this.flightSpringArm.roll = THREE.MathUtils.damp(this.flightSpringArm.roll, targetRoll, 7, dt);
-        const targetPitch = clamp(ship.vy / 28, -0.3, 0.3) * 0.18;
+        const radialVelocity = new THREE.Vector3(ship.vx, ship.vy, ship.vz).dot(localUp);
+        const targetPitch = clamp(radialVelocity / 28, -0.3, 0.3) * 0.18;
         this.flightSpringArm.pitch = THREE.MathUtils.damp(this.flightSpringArm.pitch, targetPitch, 6, dt);
 
         this.camera.position.copy(this.flightSpringArm.position);
@@ -1293,11 +1292,11 @@ export class GameView {
           this.cameraRange = 0;
           this.camera.position.copy(target);
           if (me.seat >= 0 && s) {
-            this.camera.position.set(
-              s.adventure.ship.x - Math.sin(s.adventure.ship.yaw) * 4.7,
-              s.adventure.ship.y + 3.9,
-              s.adventure.ship.z - Math.cos(s.adventure.ship.yaw) * 4.7,
-            );
+            const ship = s.adventure.ship;
+            const cockpit = celestialCockpitPose(ship, ship.yaw, me.yaw, me.pitch);
+            this.camera.position.copy(cockpit.position);
+            this.camera.up.copy(cockpit.up);
+            this.camera.quaternion.copy(cockpit.quaternion);
           }
         }
       }
@@ -1363,8 +1362,8 @@ export class GameView {
         .add(new THREE.Vector3(-240, 190, -140));
     }
     this.camera.updateMatrixWorld();
-    this.interplanetary.step(dt, me || { x: 0, y: 0, z: 0 });
     this.interplanetary.setShipState(s?.adventure.ship || null);
+    this.interplanetary.step(dt, me || { x: 0, y: 0, z: 0 });
     if (this.jetGain && this.listener) {
       const ctx = this.listener.context;
       this.jetGain.gain.setTargetAtTime(
