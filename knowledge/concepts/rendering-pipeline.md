@@ -8,7 +8,7 @@ tags:
   - threejs
   - dual-frustum
   - lod-culling
-timestamp: 2026-11-04T08:29:06.854Z
+timestamp: 2026-11-07T08:18:33.747Z
 sources:
   - "frontend/space-escape/src/scene.ts"
   - "frontend/space-escape/shared/lod-culling.ts"

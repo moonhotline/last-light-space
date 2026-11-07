@@ -30,3 +30,4 @@
 | 2026-11-01 16:48 | Commit a514465 | moonhotline | 渲染管线与 LOD | Fix ship dual mesh clipping, boost vertical ascent thrust, and remove weapon han |
 | 2026-11-04 03:08 | PR #29 (aef59f0) | moonhotline | 渲染管线与 LOD | fix(scene): extend both camera clipping ranges to 30 km |
 | 2026-11-04 08:29 | Commit 73fe42c | moonhotline | 渲染管线与 LOD | Merge pull request #29 from moonhotline/fix/deep-space-view-distance |
+| 2026-11-07 08:18 | PR #30 (fdfc2df) | moonhotline | 渲染管线与 LOD | fix(space): prevent spawn fleet double scaling, preserve cruiser model, and sync |
