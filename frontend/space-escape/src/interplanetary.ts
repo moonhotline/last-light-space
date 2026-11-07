@@ -55,41 +55,9 @@ export function normalizeModelContainer(
 }
 
 export function clean3DEntityText(root: THREE.Object3D) {
-  const toRemove: THREE.Object3D[] = [];
-  root.traverse((obj) => {
-    const name = (obj.name || "").toLowerCase();
-    if (
-      (obj as any).isSprite ||
-      (obj as any).isCSS2DObject ||
-      (obj as any).isCSS3DObject ||
-      name.includes("placeholder") ||
-      name.includes("label") ||
-      name.includes("debug") ||
-      name.includes("text") ||
-      name.includes("hint")
-    ) {
-      toRemove.push(obj);
-    }
-    if (obj instanceof THREE.Mesh && obj.material) {
-      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      for (const m of mats) {
-        const maps = [m.map, m.emissiveMap, m.alphaMap, m.bumpMap, m.roughnessMap, m.metalnessMap];
-        for (const tex of maps) {
-          if (
-            tex &&
-            (tex instanceof THREE.CanvasTexture ||
-              (typeof HTMLCanvasElement !== "undefined" && tex.image instanceof HTMLCanvasElement))
-          ) {
-            toRemove.push(obj);
-            break;
-          }
-        }
-      }
-    }
-  });
-  for (const obj of toRemove) {
-    obj.removeFromParent();
-  }
+  // Authored node names, sprites and canvas textures can all be model content.
+  // Retain this compatibility hook without removing or hiding any asset nodes.
+  return root;
 }
 
 export interface ChassisGroundAlignment {
@@ -157,7 +125,7 @@ export function computeChassisAlignment(
 
 /**
  * Aligns a spaceship model to the local ground height and terrain inclination angle.
- * Strips any placeholder text and guarantees frustum culling is enabled on all submeshes.
+ * Preserves authored nodes and enables frustum culling on all submeshes.
  */
 export function alignShipToGround(
   shipObj: THREE.Object3D,
@@ -317,13 +285,10 @@ export class InterplanetarySystem {
   alien1Model: THREE.Group | null = null;
   alien2Model: THREE.Group | null = null;
   mineralsModel: THREE.Group | null = null;
-  initialPlaceholderShip?: THREE.Group;
+  private adventureShip: THREE.Group | null = null;
 
   setShipReference(shipGroup: THREE.Group) {
-    if (this.initialPlaceholderShip && this.initialPlaceholderShip.parent) {
-      this.initialPlaceholderShip.parent.remove(this.initialPlaceholderShip);
-      this.initialPlaceholderShip.visible = false;
-    }
+    this.adventureShip = shipGroup;
     this.shipMeshes.set("skiff", shipGroup);
   }
 
@@ -382,7 +347,7 @@ export class InterplanetarySystem {
     return board;
   }
 
-  makePlaceholder(kind: "ship" | "npc" | "mineral", targetSize: number): THREE.Group {
+  makePlaceholder(kind: "npc" | "mineral", targetSize: number): THREE.Group {
     const group = new THREE.Group();
     group.userData.placeholder = true;
     const inner = new THREE.Group();
@@ -409,20 +374,6 @@ export class InterplanetarySystem {
       crystal.position.y = targetSize * 0.35;
       crystal.castShadow = true;
       inner.add(crystal);
-    } else {
-      const hull = new THREE.Mesh(
-        new THREE.ConeGeometry(0.6, 2.4, 8),
-        new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.4, metalness: 0.6 }),
-      );
-      hull.rotation.x = Math.PI / 2;
-      hull.castShadow = true;
-      const body = new THREE.Mesh(
-        new THREE.BoxGeometry(1.1, 0.5, 2.2),
-        new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.5, metalness: 0.5 }),
-      );
-      body.castShadow = true;
-      inner.add(hull);
-      inner.add(body);
     }
     const box = new THREE.Box3().setFromObject(inner);
     const size = box.getSize(new THREE.Vector3());
@@ -442,26 +393,17 @@ export class InterplanetarySystem {
     this.scene.add(this.assetLibrary);
     this.corridorGroup.visible = false;
 
-    // Dock spaceship at starting home position from frame zero
-    const initialShip = this.makePlaceholder("ship", 12);
-    this.parkShip("skiff", initialShip);
-    initialShip.visible = true;
-    this.initialPlaceholderShip = initialShip;
-    this.shipMeshes.set("skiff", initialShip);
-    this.scene.add(initialShip);
-
-    // Frame zero spawn base entities: Fighter, Intergalactic, Alien1, Alien2, Minerals (Decoupled & zero clipping)
-    this.fighterModel = this.makePlaceholder("ship", 11);
-    this.parkShip("light_fighter", this.fighterModel);
-    this.fighterModel.visible = true;
-    this.shipMeshes.set("light_fighter", this.fighterModel);
-    this.scene.add(this.fighterModel);
-
-    this.intergalacticModel = this.makePlaceholder("ship", 18);
-    this.parkShip("intergalactic", this.intergalacticModel);
-    this.intergalacticModel.visible = true;
-    this.shipMeshes.set("intergalactic", this.intergalacticModel);
-    this.scene.add(this.intergalacticModel);
+    // Stable flight containers receive authored assets when their files load.
+    for (const kind of ["skiff", "cruiser", "light_fighter", "intergalactic"] as const) {
+      const ship = new THREE.Group();
+      ship.name = `${kind}-ship`;
+      this.parkShip(kind, ship);
+      this.shipMeshes.set(kind, ship);
+      this.scene.add(ship);
+    }
+    this.cruiserModel = this.shipMeshes.get("cruiser")!;
+    this.fighterModel = this.shipMeshes.get("light_fighter")!;
+    this.intergalacticModel = this.shipMeshes.get("intergalactic")!;
 
     this.alien1Model = this.makePlaceholder("npc", 2.2);
     this.alien1Model.position.set(ALIEN1_POS.x, ALIEN1_POS.y, ALIEN1_POS.z);
@@ -485,7 +427,6 @@ export class InterplanetarySystem {
     this.buildSolarSystem();
     this.buildSpaceshipCorridor();
     this.buildMineralSpecimens();
-    this.buildCruiserModel();
   }
 
   /** Build 3D planetary celestial bodies and orbits */
@@ -799,151 +740,6 @@ export class InterplanetarySystem {
     return this.inCorridor;
   }
 
-  /**
-   * Procedural High-Fidelity Interstellar Cruiser (2号星际战舰):
-   * Built immediately at instantiation so the warship is guaranteed visible at spawn from frame 0.
-   * Scaled to 34m with multi-corner chassis slope alignment and frustum culling.
-   */
-  private buildCruiserModel(): THREE.Group {
-    if (this.cruiserModel && this.cruiserModel.children.length > 0) {
-      return this.cruiserModel;
-    }
-    const cruiser = this.cruiserModel || new THREE.Group();
-    cruiser.name = "InterstellarCruiser_Root";
-
-    const hullMat = new THREE.MeshStandardMaterial({
-      color: 0x1e293b,
-      roughness: 0.28,
-      metalness: 0.82,
-    });
-    const armorPlateMat = new THREE.MeshStandardMaterial({
-      color: 0x0f172a,
-      roughness: 0.35,
-      metalness: 0.9,
-    });
-    const glowCyanMat = new THREE.MeshStandardMaterial({
-      color: 0x38bdf8,
-      emissive: 0x0284c7,
-      emissiveIntensity: 0.85,
-      roughness: 0.15,
-      metalness: 0.2,
-    });
-    const engineGlowMat = new THREE.MeshBasicMaterial({
-      color: 0x67e8f9,
-      transparent: true,
-      opacity: 0.85,
-      blending: THREE.AdditiveBlending,
-    });
-
-    // 1. Main Fuselage Hull (Angular heavy warship chassis)
-    const hullGeo = new THREE.BoxGeometry(6.4, 2.6, 22);
-    const hullMesh = new THREE.Mesh(hullGeo, hullMat);
-    hullMesh.position.set(0, 1.4, 0);
-    cruiser.add(hullMesh);
-
-    // 2. Chiseled Forward Bow / Ramming Prow
-    const prowGeo = new THREE.ConeGeometry(3.6, 9.5, 4);
-    const prowMesh = new THREE.Mesh(prowGeo, armorPlateMat);
-    prowMesh.rotation.y = Math.PI / 4;
-    prowMesh.rotation.x = -Math.PI / 2;
-    prowMesh.position.set(0, 1.3, -14.5);
-    cruiser.add(prowMesh);
-
-    // 3. Command Bridge Deck (Elevated sci-fi cockpit)
-    const bridgeGeo = new THREE.BoxGeometry(3.4, 1.3, 6.2);
-    const bridgeMesh = new THREE.Mesh(bridgeGeo, armorPlateMat);
-    bridgeMesh.position.set(0, 2.9, -1.5);
-    cruiser.add(bridgeMesh);
-
-    // Glowing panoramic visor canopy
-    const visorGeo = new THREE.BoxGeometry(3.0, 0.65, 3.2);
-    const visorMesh = new THREE.Mesh(visorGeo, glowCyanMat);
-    visorMesh.position.set(0, 3.2, -3.2);
-    cruiser.add(visorMesh);
-
-    // 4. Heavy Tactical Swept Delta Wings (Port & Starboard)
-    for (const side of [-1, 1]) {
-      const wingGeo = new THREE.BoxGeometry(7.2, 0.45, 12);
-      const wingMesh = new THREE.Mesh(wingGeo, hullMat);
-      wingMesh.position.set(side * 6.2, 1.2, 2.0);
-      wingMesh.rotation.z = side * -0.06;
-      wingMesh.rotation.y = side * 0.12;
-      cruiser.add(wingMesh);
-
-      // Wingtip vertical stabilizer fin
-      const finGeo = new THREE.BoxGeometry(0.35, 2.8, 5.0);
-      const finMesh = new THREE.Mesh(finGeo, armorPlateMat);
-      finMesh.position.set(side * 9.8, 2.4, 3.5);
-      cruiser.add(finMesh);
-
-      // Navigation strobe beacon
-      const navLightGeo = new THREE.SphereGeometry(0.2, 8, 8);
-      const navLightMat = new THREE.MeshBasicMaterial({
-        color: side < 0 ? 0xf43f5e : 0x10b981,
-      });
-      const navLight = new THREE.Mesh(navLightGeo, navLightMat);
-      navLight.position.set(side * 9.8, 3.8, 2.0);
-      cruiser.add(navLight);
-
-      // Forward Kinetic Railgun Battery
-      const cannonGeo = new THREE.CylinderGeometry(0.25, 0.35, 7.5, 12);
-      const cannonMesh = new THREE.Mesh(cannonGeo, armorPlateMat);
-      cannonMesh.rotation.x = Math.PI / 2;
-      cannonMesh.position.set(side * 3.8, 0.8, -10.5);
-      cruiser.add(cannonMesh);
-
-      // Twin Heavy Stern Thrusters
-      const thrusterGeo = new THREE.CylinderGeometry(1.25, 1.5, 5.2, 16);
-      const thrusterMesh = new THREE.Mesh(thrusterGeo, armorPlateMat);
-      thrusterMesh.rotation.x = Math.PI / 2;
-      thrusterMesh.position.set(side * 2.2, 1.4, 11.2);
-      cruiser.add(thrusterMesh);
-
-      // Exhaust glow nozzle
-      const glowNozzleGeo = new THREE.CircleGeometry(1.2, 16);
-      const glowNozzle = new THREE.Mesh(glowNozzleGeo, engineGlowMat);
-      glowNozzle.position.set(side * 2.2, 1.4, 13.81);
-      cruiser.add(glowNozzle);
-    }
-
-    // 5. Ventral Armored Magnetic Landing Gear Skids (4 corners)
-    const gearPositions = [
-      { x: -3.2, z: -8.0 },
-      { x: 3.2, z: -8.0 },
-      { x: -3.2, z: 8.0 },
-      { x: 3.2, z: 8.0 },
-    ];
-    for (const gPos of gearPositions) {
-      const legGeo = new THREE.CylinderGeometry(0.25, 0.3, 1.8, 8);
-      const legMesh = new THREE.Mesh(legGeo, armorPlateMat);
-      legMesh.position.set(gPos.x, 0.1, gPos.z);
-      cruiser.add(legMesh);
-
-      const footPadGeo = new THREE.BoxGeometry(1.4, 0.25, 2.2);
-      const footPad = new THREE.Mesh(footPadGeo, armorPlateMat);
-      footPad.position.set(gPos.x, -0.7, gPos.z);
-      cruiser.add(footPad);
-    }
-
-    cruiser.traverse((child) => {
-      if (child instanceof THREE.Mesh) {
-        child.castShadow = true;
-        child.receiveShadow = true;
-        child.frustumCulled = true;
-      }
-    });
-
-    clean3DEntityText(cruiser);
-
-    this.cruiserModel = cruiser;
-    this.shipMeshes.set("cruiser", cruiser);
-    this.scene.add(cruiser);
-    this.parkShip("cruiser", cruiser);
-    cruiser.visible = true;
-
-    return cruiser;
-  }
-
   /** Switch between Spaceship models */
   switchShip(kind: SpaceshipKind) {
     this.activeShip = this.shipState ? this.shipState.kind ?? "skiff" : kind;
@@ -972,9 +768,8 @@ export class InterplanetarySystem {
     this.activeShip = ship?.kind ?? "skiff";
     for (const [kind, model] of this.shipMeshes) {
       if (ship && kind === this.activeShip) {
-        // AdventureView animates the authored skiff; keep the standalone
-        // fallback following snapshots too when there is no AdventureView.
-        if (kind === "skiff" && model !== this.initialPlaceholderShip) continue;
+        // AdventureView animates its skiff; standalone asset containers follow snapshots here.
+        if (model === this.adventureShip) continue;
         const spawn = SPAWN_FLEET[kind];
         const celestialAlign = computeCelestialAlignment(ship, ship.yaw + (kind === "skiff" ? Math.PI : 0), ship.bank);
         if (celestialAlign.captureWeight > 0.05) {
@@ -1213,6 +1008,23 @@ export class InterplanetarySystem {
       this.assetLibrary.add(model);
       return model;
     };
+
+    await Promise.all(([
+      ["skiff", "skiff", "/assets/skiff.glb", 12],
+      ["cruiser", "lander", "/assets/lander.glb", 14],
+      ["light_fighter", "fighter", "/assets/models/fighter/scene.gltf", 11],
+      ["intergalactic", "intergalactic", "/assets/models/intergalactic/scene.gltf", 18],
+    ] as const).map(async ([kind, key, url, size]) => {
+      // AdventureView already loads and animates the main skiff from skiff.glb.
+      if (kind === "skiff" && this.adventureShip) return;
+      const container = this.shipMeshes.get(kind)!;
+      const model = await loadModel(key, url, size);
+      if (!model) return;
+      container.add(model);
+      this.setShipState(this.shipState);
+      this.onModelLoaded?.();
+    }));
+
     const replacePlanet = async (id: string, key: string, url: string) => {
       const model = await loadModel(key, url, this.planets.get(id)!.body.radius * 2);
       const entry = this.planets.get(id);
@@ -1236,21 +1048,7 @@ export class InterplanetarySystem {
       await replacePlanet(id, key, url);
     }
 
-    try {
-      const landerGltf = await loader.loadAsync("/assets/lander.glb");
-      if (landerGltf) {
-        clean3DEntityText(landerGltf.scene);
-        const landerContainer = normalizeModelContainer(landerGltf.scene, 14);
-        this.downloadedAssets.set("lander", landerContainer);
-        this.assetLibrary.add(landerContainer);
-      }
-    } catch {
-      /* Keep authored cruiser chassis fallback */
-    }
-
     for (const [key, url, size] of [
-      ["fighter", "/assets/models/fighter/scene.gltf", 11],
-      ["intergalactic", "/assets/models/intergalactic/scene.gltf", 18],
       ["corridor", "/assets/models/corridor/scene.gltf", 38],
       ["cave", "/assets/models/cave/scene.gltf", 40],
       ["sky", "/assets/models/sky/scene.gltf", 40],
@@ -1260,24 +1058,7 @@ export class InterplanetarySystem {
       if (model) {
         clean3DEntityText(model);
         if (key === "corridor") {
-          this.corridorGroup.clear();
           this.corridorGroup.add(model);
-          this.onModelLoaded?.();
-        } else if (key === "fighter") {
-          if (this.fighterModel) {
-            this.fighterModel.clear();
-            this.fighterModel.scale.setScalar(1);
-            this.fighterModel.add(model);
-            this.setShipState(this.shipState);
-          }
-          this.onModelLoaded?.();
-        } else if (key === "intergalactic") {
-          if (this.intergalacticModel) {
-            this.intergalacticModel.clear();
-            this.intergalacticModel.scale.setScalar(1);
-            this.intergalacticModel.add(model);
-            this.setShipState(this.shipState);
-          }
           this.onModelLoaded?.();
         }
       }
@@ -1357,8 +1138,6 @@ export class InterplanetarySystem {
       loadModel("alien1", "/assets/models/alien1/scene.gltf", 2.2).then((model) => {
         if (model && this.alien1Model) {
           clean3DEntityText(model);
-          this.alien1Model.clear();
-          this.alien1Model.scale.setScalar(1);
           this.alien1Model.add(model);
         }
       }),
@@ -1373,16 +1152,12 @@ export class InterplanetarySystem {
             }
           });
           clean3DEntityText(model);
-          this.alien2Model.clear();
-          this.alien2Model.scale.setScalar(1);
           this.alien2Model.add(model);
         }
       }),
       loadModel("minerals", "/assets/models/minerals/scene.gltf", 2.5).then((model) => {
         if (model && this.mineralsModel) {
           clean3DEntityText(model);
-          this.mineralsModel.clear();
-          this.mineralsModel.scale.setScalar(1);
           this.mineralsModel.add(model);
         }
       }),

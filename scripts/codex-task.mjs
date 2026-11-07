@@ -8,7 +8,7 @@ if (!prompt) {
   process.exit(1);
 }
 
-const MAX_RETRIES = 5;
+const MAX_RETRIES = 20;
 const BASE_BACKOFF_MS = 2000;
 
 async function runCodex(attempt = 1) {
@@ -20,7 +20,7 @@ async function runCodex(attempt = 1) {
   return new Promise((resolve, reject) => {
     const child = spawn(
       "/opt/homebrew/bin/codex",
-      ["exec", "--sandbox", "workspace-write", prompt],
+      ["exec", "-m", "gpt-6-astra", "--sandbox", "workspace-write", prompt],
       {
         stdio: "inherit",
         env: process.env,

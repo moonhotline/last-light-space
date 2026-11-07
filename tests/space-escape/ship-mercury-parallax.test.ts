@@ -69,8 +69,9 @@ test("dual ships parked side-by-side at spawn with 15~22m spacing and slope alig
   });
 });
 
-test("clean3DEntityText strips placeholder labels, text sprites and debug markers", () => {
+test("clean3DEntityText and ground alignment preserve authored nodes and canvas materials", () => {
   const root = new THREE.Group();
+  root.name = "placeholder_ship_root";
 
   const bodyMesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2));
   bodyMesh.name = "ShipHull";
@@ -88,10 +89,26 @@ test("clean3DEntityText strips placeholder labels, text sprites and debug marker
   debugObj.name = "debug_pivot_point";
   root.add(debugObj);
 
-  assert.equal(root.children.length, 4);
+  const texture = new THREE.CanvasTexture({} as HTMLCanvasElement);
+  const texturedMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), [
+    new THREE.MeshStandardMaterial(),
+    new THREE.MeshStandardMaterial({ map: texture, emissiveMap: texture }),
+  ]);
+  texturedMesh.name = "hint_textured_panel";
+  debugObj.add(texturedMesh);
+  const scene = new THREE.Scene();
+  scene.add(root);
+  const nodes: { node: THREE.Object3D; parent: THREE.Object3D | null }[] = [];
+  root.traverse((node) => nodes.push({ node, parent: node.parent }));
+
   clean3DEntityText(root);
-  assert.equal(root.children.length, 1, "Only ShipHull mesh should remain");
-  assert.equal(root.children[0].name, "ShipHull");
+  alignShipToGround(root, SHIP1_POS.x, SHIP1_POS.z, 0);
+  for (const { node, parent } of nodes) {
+    assert.equal(node.parent, parent, `${node.name} must retain its parent`);
+    assert.equal(node.visible, true, `${node.name} must remain visible`);
+  }
+  assert.equal(texturedMesh.material[1].map, texture);
+  assert.equal(texturedMesh.material[1].emissiveMap, texture);
 });
 
 test("Mercury gravitational capture aligns Up-vector to radial normal", () => {
