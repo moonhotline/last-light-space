@@ -15,7 +15,11 @@ import {
   ALIEN2_POS,
   MINERALS_POS,
 } from "../../frontend/space-escape/shared/adventure-data";
-import { InterplanetarySystem } from "../../frontend/space-escape/src/interplanetary";
+import {
+  InterplanetarySystem,
+  normalizeModelContainer,
+  alignShipToGround,
+} from "../../frontend/space-escape/src/interplanetary";
 
 test("Spawn outpost entities layout guarantees non-clipping clearance and ground alignment", () => {
   const entities = {
@@ -110,4 +114,33 @@ test("InterplanetarySystem renders Fighter, Intergalactic, Alien1, Alien2 and Mi
   assert.equal(system.fighterModel.visible, true, "Fighter must be visible in forward view");
   assert.equal(system.alien2Model.visible, true, "Alien2 must be visible in forward view");
   assert.equal(system.mineralsModel.visible, true, "Minerals must be visible in forward view");
+
+  // Container scale must be strictly 1.0 to prevent double-scaling upon GLTF hydration
+  assert.equal(system.fighterModel.scale.x, 1, "Fighter container scale must be 1");
+  assert.equal(system.intergalacticModel.scale.x, 1, "Intergalactic container scale must be 1");
+  assert.equal(system.alien1Model.scale.x, 1, "Alien1 container scale must be 1");
+  assert.equal(system.alien2Model.scale.x, 1, "Alien2 container scale must be 1");
+  assert.equal(system.mineralsModel.scale.x, 1, "Minerals container scale must be 1");
+
+  // Simulate GLTF hydration with pre-scaled child nodes and verify exact normalized bounding sizes
+  const rawFighter = new THREE.Group();
+  rawFighter.scale.setScalar(0.01);
+  rawFighter.add(new THREE.Mesh(new THREE.BoxGeometry(1200, 300, 1000)));
+  const hydratedFighter = normalizeModelContainer(rawFighter, 11);
+  system.fighterModel.clear();
+  system.fighterModel.scale.setScalar(1);
+  system.fighterModel.add(hydratedFighter);
+  alignShipToGround(system.fighterModel, FIGHTER_POS.x, FIGHTER_POS.z, 0, 3.5, 5.5, 0.05);
+
+  const fighterBox = new THREE.Box3().setFromObject(system.fighterModel);
+  const fighterSize = fighterBox.getSize(new THREE.Vector3());
+  const fighterMaxDim = Math.max(fighterSize.x, fighterSize.y, fighterSize.z);
+  assert.ok(
+    Math.abs(fighterMaxDim - 11) < 0.5,
+    `Hydrated fighter max dimension must be ~11m (no double scaling), got ${fighterMaxDim.toFixed(2)}m`,
+  );
+  assert.ok(
+    fighterBox.min.y >= groundAt(FIGHTER_POS.x, FIGHTER_POS.z) - 0.5,
+    "Hydrated fighter bottom must rest above terrain without sinking",
+  );
 });

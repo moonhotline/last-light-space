@@ -25,17 +25,20 @@ export function normalizeModelContainer(
   targetSize: number,
 ): THREE.Group {
   const container = new THREE.Group();
+  obj.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(obj);
   const size = new THREE.Vector3();
   box.getSize(size);
   const maxDim = Math.max(size.x, size.y, size.z);
   const scale = maxDim > 0.001 ? targetSize / maxDim : 1;
-  obj.scale.setScalar(scale);
+  obj.scale.multiplyScalar(scale);
+  obj.updateMatrixWorld(true);
 
   const scaledBox = new THREE.Box3().setFromObject(obj);
   const center = new THREE.Vector3();
   scaledBox.getCenter(center);
   obj.position.sub(center);
+  obj.updateMatrixWorld(true);
 
   obj.traverse((child) => {
     if (child instanceof THREE.Mesh) {
@@ -135,7 +138,12 @@ export function computeChassisAlignment(
   const pitch = THREE.MathUtils.clamp(Math.atan2(frontAvg - rearAvg, halfLength * 2), -0.15, 0.15);
   const roll = THREE.MathUtils.clamp(Math.atan2(leftAvg - rightAvg, halfWidth * 2), -0.15, 0.15);
 
-  const targetY = maxH + 0.82 + groundOffset;
+  model.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(model);
+  const bottomClearance = !box.isEmpty()
+    ? Math.max(0.82, model.position.y - box.min.y)
+    : 0.82;
+  const targetY = maxH + bottomClearance + groundOffset;
 
   return {
     position: new THREE.Vector3(cx, targetY, cz),
@@ -383,6 +391,8 @@ export class InterplanetarySystem {
   makePlaceholder(kind: "ship" | "npc" | "mineral", targetSize: number): THREE.Group {
     const group = new THREE.Group();
     group.userData.placeholder = true;
+    const inner = new THREE.Group();
+    inner.name = "placeholder_inner";
     if (kind === "npc") {
       const mesh = new THREE.Mesh(
         new THREE.CapsuleGeometry(0.45, 1.1, 4, 12),
@@ -390,7 +400,7 @@ export class InterplanetarySystem {
       );
       mesh.position.y = 1.1;
       mesh.castShadow = true;
-      group.add(mesh);
+      inner.add(mesh);
     } else if (kind === "mineral") {
       const crystal = new THREE.Mesh(
         new THREE.OctahedronGeometry(targetSize * 0.4, 0),
@@ -404,7 +414,7 @@ export class InterplanetarySystem {
       );
       crystal.position.y = targetSize * 0.35;
       crystal.castShadow = true;
-      group.add(crystal);
+      inner.add(crystal);
     } else {
       const hull = new THREE.Mesh(
         new THREE.ConeGeometry(0.6, 2.4, 8),
@@ -417,13 +427,14 @@ export class InterplanetarySystem {
         new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.5, metalness: 0.5 }),
       );
       body.castShadow = true;
-      group.add(hull);
-      group.add(body);
+      inner.add(hull);
+      inner.add(body);
     }
-    const box = new THREE.Box3().setFromObject(group);
+    const box = new THREE.Box3().setFromObject(inner);
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z) || 1;
-    group.scale.setScalar(targetSize / maxDim);
+    inner.scale.setScalar(targetSize / maxDim);
+    group.add(inner);
     return group;
   }
 
@@ -1059,6 +1070,7 @@ export class InterplanetarySystem {
         atmoMat.opacity = THREE.MathUtils.lerp(0.18, 0.42, rayleighBlend);
       }
     }
+    this.camera.updateMatrixWorld();
     const frustum = new THREE.Frustum();
     const projScreenMatrix = new THREE.Matrix4().multiplyMatrices(
       this.camera.projectionMatrix,
@@ -1217,18 +1229,13 @@ export class InterplanetarySystem {
 
     try {
       const landerGltf = await loader.loadAsync("/assets/lander.glb");
-      if (landerGltf && this.cruiserModel) {
+      if (landerGltf) {
         clean3DEntityText(landerGltf.scene);
-        landerGltf.scene.scale.setScalar(1.2);
-        landerGltf.scene.traverse((child) => {
-          if (child instanceof THREE.Mesh) {
-            child.castShadow = true;
-            child.receiveShadow = true;
-            child.frustumCulled = true;
-          }
-        });
-        this.cruiserModel.clear();
-        this.cruiserModel.add(landerGltf.scene);
+        const landerContainer = normalizeModelContainer(landerGltf.scene, 14);
+        this.downloadedAssets.set("lander", landerContainer);
+        this.assetLibrary.add(landerContainer);
+      }
+      if (this.cruiserModel) {
         alignShipToGround(this.cruiserModel, SHIP2_POS.x, SHIP2_POS.z, 0, 3.5, 8.0, 0.05);
       }
     } catch {
@@ -1253,6 +1260,7 @@ export class InterplanetarySystem {
         } else if (key === "fighter") {
           if (this.fighterModel) {
             this.fighterModel.clear();
+            this.fighterModel.scale.setScalar(1);
             this.fighterModel.add(model);
             alignShipToGround(this.fighterModel, FIGHTER_POS.x, FIGHTER_POS.z, 0, 3.5, 5.5, 0.05);
           }
@@ -1260,6 +1268,7 @@ export class InterplanetarySystem {
         } else if (key === "intergalactic") {
           if (this.intergalacticModel) {
             this.intergalacticModel.clear();
+            this.intergalacticModel.scale.setScalar(1);
             this.intergalacticModel.add(model);
             alignShipToGround(this.intergalacticModel, INTERGALACTIC_POS.x, INTERGALACTIC_POS.z, -0.15, 5.0, 9.0, 0.08);
           }
@@ -1343,6 +1352,7 @@ export class InterplanetarySystem {
         if (model && this.alien1Model) {
           clean3DEntityText(model);
           this.alien1Model.clear();
+          this.alien1Model.scale.setScalar(1);
           this.alien1Model.add(model);
         }
       }),
@@ -1358,6 +1368,7 @@ export class InterplanetarySystem {
           });
           clean3DEntityText(model);
           this.alien2Model.clear();
+          this.alien2Model.scale.setScalar(1);
           this.alien2Model.add(model);
         }
       }),
@@ -1365,6 +1376,7 @@ export class InterplanetarySystem {
         if (model && this.mineralsModel) {
           clean3DEntityText(model);
           this.mineralsModel.clear();
+          this.mineralsModel.scale.setScalar(1);
           this.mineralsModel.add(model);
         }
       }),

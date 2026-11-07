@@ -1159,8 +1159,6 @@ export class GameView {
     physics?: MovementWorld | null,
   ) {
     this.adventure.update(s, me, dt, t);
-    this.interplanetary.step(dt, me || { x: 0, y: 0, z: 0 });
-    this.interplanetary.setShipState(s?.adventure.ship || null);
     this.toolModel.visible = !!me && !this.thirdPerson && me.seat < 0 && this.activeWeapon !== "none";
     this.rifleFill.visible = this.toolModel.visible && this.activeWeapon === "rifle";
     if (this.fpHandRig) this.fpHandRig.visible = this.toolModel.visible;
@@ -1364,6 +1362,9 @@ export class GameView {
         .copy(shadowTarget)
         .add(new THREE.Vector3(-240, 190, -140));
     }
+    this.camera.updateMatrixWorld();
+    this.interplanetary.step(dt, me || { x: 0, y: 0, z: 0 });
+    this.interplanetary.setShipState(s?.adventure.ship || null);
     if (this.jetGain && this.listener) {
       const ctx = this.listener.context;
       this.jetGain.gain.setTargetAtTime(
