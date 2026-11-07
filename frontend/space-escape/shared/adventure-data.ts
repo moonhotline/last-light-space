@@ -1,4 +1,5 @@
 import { atGround, type Vec } from "./map";
+import type { SpaceshipKind } from "./celestial";
 export const ITEMS = {
   ore: {
     name: "钛矿",
@@ -59,6 +60,34 @@ export const SHIP1_POS = atGround(-2, 344);  // 1号探索艇 (Skiff)
 export const SHIP2_POS = atGround(-20, 344); // 2号星际战舰 (Cruiser), 18m apart
 export const FIGHTER_POS = atGround(16, 344);          // 轻型穿梭战机 (Light Fighter), 18m right of Skiff
 export const INTERGALACTIC_POS = atGround(36, 338);     // 跃迁级重型星舰 (Intergalactic Cruiser)
+export interface SpawnShip {
+  kind: SpaceshipKind;
+  name: string;
+  position: Vec;
+  boardingRadius: number;
+  yaw: number;
+  halfWidth: number;
+  halfLength: number;
+  clearance: number;
+}
+export const SPAWN_FLEET: Record<SpaceshipKind, SpawnShip> = {
+  skiff: {
+    kind: "skiff", name: "游隼号探索艇", position: SHIP1_POS,
+    boardingRadius: 18, yaw: 0, halfWidth: 3.8, halfLength: 5.5, clearance: 0.05,
+  },
+  cruiser: {
+    kind: "cruiser", name: "星际巡洋舰", position: SHIP2_POS,
+    boardingRadius: 18, yaw: 0, halfWidth: 3.5, halfLength: 8, clearance: 0.05,
+  },
+  light_fighter: {
+    kind: "light_fighter", name: "轻型战机", position: FIGHTER_POS,
+    boardingRadius: 12, yaw: 0, halfWidth: 3.5, halfLength: 5.5, clearance: 0.05,
+  },
+  intergalactic: {
+    kind: "intergalactic", name: "跃迁级星舰", position: INTERGALACTIC_POS,
+    boardingRadius: 20, yaw: -0.15, halfWidth: 5, halfLength: 9, clearance: 0.08,
+  },
+};
 export const ALIEN1_POS = atGround(-11, 352, 0.9);      // 异星潜行者 (Alien Crawler / Stalker)
 export const ALIEN2_POS = atGround(9.5, 350, 1.2);      // 重装蜥蜴卫士 (Reptillian Alien Guardian)
 export const MINERALS_POS = atGround(3.5, 348, 0.6);    // 异星矿物样本晶体节点 (Minerals)

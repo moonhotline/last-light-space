@@ -1,5 +1,6 @@
 import type { Vec } from "./map";
 import type { Inventory, ItemId } from "./adventure-data";
+import type { SpaceshipKind } from "./celestial";
 export const DT = 1 / 30;
 export type Phase = "lobby" | "active" | "won";
 export interface Input {
@@ -91,8 +92,11 @@ export interface Drone extends Vec {
   shotId: number;
   aim: Vec;
 }
-export interface Ship extends Vec {
+export interface AdventureShip extends Vec {
+  kind?: SpaceshipKind;
+  flightRotation?: { x: number; y: number; z: number; w: number };
   yaw: number;
+  yawVelocity?: number;
   vx: number;
   vy: number;
   vz: number;
@@ -106,11 +110,12 @@ export interface Ship extends Vec {
   flightTime: number;
   arrived: boolean;
 }
+export type Ship = AdventureShip;
 export interface Adventure {
   lore: number[];
   nodes: ResourceNode[];
   drones: Drone[];
-  ship: Ship;
+  ship: AdventureShip;
   completeAt: number;
 }
 export interface Snapshot {

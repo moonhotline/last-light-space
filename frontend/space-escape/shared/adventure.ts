@@ -2,6 +2,7 @@ import {
   DT,
   idleInput,
   type Adventure,
+  type AdventureShip,
   type Input,
   type Player,
 } from "./types";
@@ -10,9 +11,8 @@ import {
   emptyInventory,
   REPAIR,
   RESOURCE_SITES,
-  SHIP_HOME,
   SHIP1_POS,
-  SHIP2_POS,
+  SPAWN_FLEET,
   OUTPOST,
   LORE,
   DESTINATION,
@@ -20,7 +20,9 @@ import {
 } from "./adventure-data";
 import { groundAt, distance3, distance, HALF, clamp, type Vec } from "./map";
 import { eyePosition, viewDirection, FOOT_OFFSET, surfaceOrientation } from "./surface";
-import { SOLAR_SYSTEM, projectToSphere } from "./celestial";
+import { celestialCapture, geodesicArcDistance, projectToSphere, type SpaceshipKind } from "./celestial";
+import { celestialFlightFrame } from "./celestial-flight";
+import { Vector3 } from "three";
 import type { Simulation } from "./simulation";
 export function createAdventure(): Adventure {
   return {
@@ -43,7 +45,9 @@ export function createAdventure(): Adventure {
     })),
     ship: {
       ...SHIP1_POS,
+      kind: "skiff",
       yaw: 0,
+      yawVelocity: 0,
       vx: 0,
       vy: 0,
       vz: 0,
@@ -157,38 +161,48 @@ export function tool(sim: Simulation, p: Player) {
     }
   }
 }
-export function shipBoardingDistance(
-  p: { x: number; y: number; z: number; planet?: string | null },
-  ship: { x: number; y: number; z: number },
-): number {
-  const merc = SOLAR_SYSTEM.mercury;
-  const dShipMerc = Math.hypot(ship.x - merc.position.x, ship.y - merc.position.y, ship.z - merc.position.z);
-  const dPlayerMerc = Math.hypot(p.x - merc.position.x, p.y - merc.position.y, p.z - merc.position.z);
+type BoardingPlayer = Vec & { planet?: string | null };
+type BoardingShip = Vec & Partial<Pick<AdventureShip, "kind" | "seats">>;
 
-  // If on Mercury or within Mercury gravity sphere, calculate spherical geodesic distance: R * DeltaTheta
-  if (p.planet === "mercury" || (dShipMerc < merc.radius + 60 && dPlayerMerc < merc.radius + 60)) {
-    const v1x = p.x - merc.position.x;
-    const v1y = p.y - merc.position.y;
-    const v1z = p.z - merc.position.z;
-    const len1 = Math.hypot(v1x, v1y, v1z);
-
-    const v2x = ship.x - merc.position.x;
-    const v2y = ship.y - merc.position.y;
-    const v2z = ship.z - merc.position.z;
-    const len2 = Math.hypot(v2x, v2y, v2z);
-
-    if (len1 > 0.001 && len2 > 0.001) {
-      const dot = clamp((v1x * v2x + v1y * v2y + v1z * v2z) / (len1 * len2), -1, 1);
-      const deltaTheta = Math.acos(dot);
-      const arcLength = merc.radius * deltaTheta; // 320m * deltaTheta
-      const altDiff = Math.abs(len1 - len2);
-      return altDiff > 12 ? arcLength + (altDiff - 12) : arcLength;
+function boardingDistance(p: BoardingPlayer, ship: Vec): number {
+  const capture = celestialCapture(ship);
+  if (capture && capture.altitude < 60) {
+    const body = capture.body;
+    const playerAltitude = Math.hypot(p.x - body.position.x, p.y - body.position.y, p.z - body.position.z) - body.radius;
+    if (playerAltitude < 60) {
+      const { arcDistance, heightDiff } = geodesicArcDistance(p, ship, body);
+      return arcDistance + Math.max(0, heightDiff - 12);
     }
   }
 
-  const dSkiff = distance3(p, { ...ship, y: ship.y + 1 });
-  const dCruiser = distance3(p, { ...SHIP2_POS, y: SHIP2_POS.y + 1 });
-  return Math.min(dSkiff, dCruiser);
+  return distance3(p, { ...ship, y: ship.y + 1 });
+}
+
+function boardingCandidates(p: BoardingPlayer, ship: BoardingShip) {
+  const kind = ship.kind ?? "skiff";
+  const candidates = [{
+    ...SPAWN_FLEET[kind], position: ship, active: true,
+    distance: boardingDistance(p, ship),
+  }];
+  // One shared crew controls one active vessel. Other pads are available only
+  // when it is empty; the active vessel's old pad must never duplicate it.
+  if (!ship.seats?.some(Boolean) && !p.planet) {
+    for (const spawn of Object.values(SPAWN_FLEET)) {
+      if (spawn.kind === kind) continue;
+      candidates.push({
+        ...spawn, active: false, distance: boardingDistance(p, spawn.position),
+      });
+    }
+  }
+  return candidates.sort((a, b) => a.distance - b.distance);
+}
+
+export function shipBoardingDistance(p: BoardingPlayer, ship: BoardingShip): number {
+  return boardingCandidates(p, ship)[0].distance;
+}
+
+export function shipBoardingTarget(p: BoardingPlayer, ship: BoardingShip) {
+  return boardingCandidates(p, ship).find((target) => target.distance < target.boardingRadius) ?? null;
 }
 
 export function interactAdventure(sim: Simulation, p: Player, i: Input) {
@@ -202,43 +216,18 @@ export function interactAdventure(sim: Simulation, p: Player, i: Input) {
         sim.emit("先降落并刹停，再按 E 离舱");
         return;
       }
-      const merc = SOLAR_SYSTEM.mercury;
-      const dMerc = Math.hypot(ship.x - merc.position.x, ship.y - merc.position.y, ship.z - merc.position.z);
-      if (dMerc < merc.atmosphereRadius + 50) {
-        // Disembark on Mercury high-curvature spherical crust
+      const frame = celestialFlightFrame(ship, ship.yaw);
+      if (frame.capture) {
+        const body = frame.capture.body;
         ship.seats[p.seat] = "";
         p.seat = -1;
-        const norm = {
-          x: (ship.x - merc.position.x) / dMerc,
-          y: (ship.y - merc.position.y) / dMerc,
-          z: (ship.z - merc.position.z) / dMerc,
-        };
-        // Tangent offset along side of ship
-        let fwdX = -Math.sin(ship.yaw);
-        let fwdZ = -Math.cos(ship.yaw);
-        const dotFwd = fwdX * norm.x + fwdZ * norm.z;
-        fwdX -= dotFwd * norm.x;
-        fwdZ -= dotFwd * norm.z;
-        let rightX = norm.y * fwdZ - norm.z * 0;
-        let rightY = norm.z * fwdX - norm.x * fwdZ;
-        let rightZ = norm.x * 0 - norm.y * fwdX;
-        const rLen = Math.hypot(rightX, rightY, rightZ);
-        if (rLen > 0.001) {
-          rightX /= rLen; rightY /= rLen; rightZ /= rLen;
-        } else {
-          rightX = 1; rightY = 0; rightZ = 0;
-        }
-        const exitRaw = {
-          x: ship.x + rightX * 6,
-          y: ship.y + rightY * 6,
-          z: ship.z + rightZ * 6,
-        };
-        const exit = projectToSphere(exitRaw, merc, FOOT_OFFSET);
+        const exitRaw = new Vector3(ship.x, ship.y, ship.z).addScaledVector(frame.right, 6);
+        const exit = projectToSphere(exitRaw, body, FOOT_OFFSET);
         Object.assign(p, {
           x: exit.x,
           y: exit.y,
           z: exit.z,
-          planet: "mercury",
+          planet: body.id,
           vx: 0,
           vy: 0,
           vz: 0,
@@ -247,7 +236,7 @@ export function interactAdventure(sim: Simulation, p: Player, i: Input) {
         const q = surfaceOrientation(p);
         p.surfaceRotation = { x: q.x, y: q.y, z: q.z, w: q.w };
         sim.physics.reset(p.id, p);
-        sim.emit("已离舱 · 水星高曲率地表已捕获");
+        sim.emit(`已离舱 · ${body.name}地表已捕获`);
         return;
       }
       ship.seats[p.seat] = "";
@@ -285,18 +274,15 @@ export function interactAdventure(sim: Simulation, p: Player, i: Input) {
     }
     return;
   }
-  const boardingDist = shipBoardingDistance(p, ship);
-  if (boardingDist < 18 && i.interact) {
-    const dCruiser = distance3(p, { ...SHIP2_POS, y: SHIP2_POS.y + 1 });
-    const dSkiff = distance3(p, { ...ship, y: ship.y + 1 });
-    const isNearCruiser = dCruiser < 8 && dCruiser < dSkiff - 2 && p.planet !== "mercury";
+  const boarding = shipBoardingTarget(p, ship);
+  if (boarding && i.interact) {
     const canContribute = (Object.keys(REPAIR) as ItemId[]).some(
       (k) => (p.inventory[k] || 0) > 0 && ship.cargo[k] < REPAIR[k]!,
     );
     const allMaterialsGathered = (Object.keys(REPAIR) as ItemId[]).every(
       (k) => ship.cargo[k] >= REPAIR[k]!,
     );
-    const inRepairFlow = !ship.repaired && !isNearCruiser && (canContribute || allMaterialsGathered);
+    const inRepairFlow = !ship.repaired && boarding.active && boarding.kind === "skiff" && (canContribute || allMaterialsGathered);
     if (inRepairFlow) {
       for (const key of Object.keys(REPAIR) as ItemId[]) {
         const transfer = Math.min(
@@ -316,9 +302,18 @@ export function interactAdventure(sim: Simulation, p: Player, i: Input) {
           sim.emit("游隼号重新点火 · 松开 E，再按 E 登船");
         }
       } else if (pressed) sim.emit("材料已存入飞船 · Tab 查看剩余修复需求");
-    } else if (pressed && (ship.grounded || p.planet === "mercury") && Math.hypot(ship.vx, ship.vz) < 3) {
+    } else if (pressed && (!boarding.active || ((ship.grounded || (p.planet && celestialCapture(ship)?.body.id === p.planet)) && Math.hypot(ship.vx, ship.vy, ship.vz) < 3))) {
       const seat = ship.seats.findIndex((v) => !v);
       if (seat >= 0) {
+        if (!boarding.active) {
+          Object.assign(ship, boarding.position, {
+            yaw: boarding.yaw, yawVelocity: 0, bank: 0,
+            flightRotation: undefined,
+            vx: 0, vy: 0, vz: 0, grounded: true,
+            thrust: 0, flightTime: 0, arrived: false,
+          });
+        }
+        ship.kind = boarding.kind;
         p.seat = seat;
         ship.seats[seat] = p.id;
         p.grapple = null;
@@ -328,7 +323,7 @@ export function interactAdventure(sim: Simulation, p: Player, i: Input) {
         ship.progress = 1;
         sim.emit(
           seat === 0
-            ? "驾驶位已就绪 · WASD 推进 / 空格点火升空 / X 下降 / Shift 刹车"
+            ? `${boarding.name}已点火 · WASD 推进 / 空格升空 / X 刹停下降 / Shift 加力`
             : "乘客就位 · E 在着陆后离舱",
         );
       }
@@ -356,72 +351,123 @@ export function interactAdventure(sim: Simulation, p: Player, i: Input) {
     }
   }
 }
+interface FlightTuning {
+  turnRate: number;
+  turnResponse: number;
+  maxBank: number;
+  rollResponse: number;
+  acceleration: number;
+  drag: number;
+  surfaceSpeed: number;
+  surfaceBoost: number;
+  cruiseSpeed: number;
+  cruiseBoost: number;
+  climbForce: number;
+}
+
+const FLIGHT_TUNING: Record<SpaceshipKind, FlightTuning> = {
+  skiff: {
+    turnRate: 1.2, turnResponse: 7, maxBank: 0.48, rollResponse: 8,
+    acceleration: 32, drag: 0.22, surfaceSpeed: 72, surfaceBoost: 120,
+    cruiseSpeed: 240, cruiseBoost: 320, climbForce: 85,
+  },
+  light_fighter: {
+    turnRate: 1.8, turnResponse: 12, maxBank: 0.52, rollResponse: 12,
+    acceleration: 46, drag: 0.28, surfaceSpeed: 96, surfaceBoost: 160,
+    cruiseSpeed: 280, cruiseBoost: 360, climbForce: 100,
+  },
+  cruiser: {
+    turnRate: 0.65, turnResponse: 3, maxBank: 0.32, rollResponse: 4,
+    acceleration: 18, drag: 0.07, surfaceSpeed: 56, surfaceBoost: 96,
+    cruiseSpeed: 210, cruiseBoost: 260, climbForce: 65,
+  },
+  intergalactic: {
+    turnRate: 0.8, turnResponse: 4, maxBank: 0.4, rollResponse: 5,
+    acceleration: 24, drag: 0.11, surfaceSpeed: 64, surfaceBoost: 110,
+    cruiseSpeed: 260, cruiseBoost: 400, climbForce: 75,
+  },
+};
+
 export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
   const s = sim.s.adventure.ship;
   const pilot = sim.player(s.seats[0]);
   const i = pilot ? inputs.get(pilot.id) || idleInput() : idleInput();
   if (s.repaired) {
+    const kind = s.kind ?? "skiff";
+    const tuning = FLIGHT_TUNING[kind];
+    const inDeepSpace = s.y > 650 || Math.abs(s.x) > HALF - 10 || Math.abs(s.z) > HALF - 10;
+    const boosting = !!pilot && i.sprint && !i.brake;
     const turn = pilot
       ? Math.atan2(Math.sin(i.yaw - s.yaw), Math.cos(i.yaw - s.yaw))
       : 0;
-    s.yaw += clamp(turn, -1.1 * DT, 1.1 * DT);
-    s.bank += (clamp(-turn, -0.35, 0.35) - s.bank) * 0.08;
-    const damping = i.sprint || !pilot ? 3.5 : 0.22;
-    s.vx =
-      s.vx * Math.exp(-damping * DT) +
-      (Math.cos(s.yaw) * i.side - Math.sin(s.yaw) * i.forward) * 28 * DT;
-    s.vz =
-      s.vz * Math.exp(-damping * DT) +
-      (-Math.sin(s.yaw) * i.side - Math.cos(s.yaw) * i.forward) * 28 * DT;
+    const targetYawVelocity = clamp(turn * 4, -tuning.turnRate, tuning.turnRate);
+    const yawVelocity = (s.yawVelocity ?? 0) +
+      (targetYawVelocity - (s.yawVelocity ?? 0)) * (1 - Math.exp(-tuning.turnResponse * DT));
+    const yawStep = clamp(yawVelocity * DT, -Math.abs(turn), Math.abs(turn));
+    s.yaw += yawStep;
+    s.yawVelocity = yawStep / DT;
+    const targetBank = clamp(
+      -s.yawVelocity / tuning.turnRate * tuning.maxBank - i.side * 0.08,
+      -tuning.maxBank, tuning.maxBank,
+    );
+    s.bank += (targetBank - s.bank) * (1 - Math.exp(-tuning.rollResponse * DT));
+    const damping = i.brake || !pilot ? 3.5 : tuning.drag;
+    const drag = Math.exp(-damping * DT);
+    const frame = celestialFlightFrame(s, s.yaw);
+    s.flightRotation = { x: frame.surfaceRotation.x, y: frame.surfaceRotation.y,
+      z: frame.surfaceRotation.z, w: frame.surfaceRotation.w };
+    const velocity = new Vector3(s.vx, s.vy, s.vz);
+    const radialSpeed = velocity.dot(frame.up);
+    const tangent = velocity.clone().addScaledVector(frame.up, -radialSpeed);
+    const previousSpeed = tangent.length();
+    // Shift ignites forward afterburners even without W. Braking takes priority.
+    const boostMultiplier = inDeepSpace && kind === "intergalactic" ? 4 : 2.5;
+    const forward = boosting ? Math.max(0, i.forward) + boostMultiplier - 1 : i.forward;
+    const acceleration = tuning.acceleration * (inDeepSpace && boosting ? 1.5 : 1);
+    tangent.multiplyScalar(drag)
+      .addScaledVector(frame.right, i.side * acceleration * DT)
+      .addScaledVector(frame.forward, forward * acceleration * DT);
     const isClimbing = (i.jump || i.jet) && !!pilot;
-    const climbForce = isClimbing ? 85 : 0;
-    const vyDamping = i.sprint ? 4.0 : (isClimbing ? 0.9 : 1.8);
-    s.vy =
-      s.vy * Math.exp(-vyDamping * DT) +
-      (climbForce - (i.brake ? 28 : 0) - 3) * DT;
-    const speed = Math.hypot(s.vx, s.vz);
-    const inDeepSpace = s.y > 650 || Math.abs(s.x) > HALF - 10 || Math.abs(s.z) > HALF - 10;
-    const maxSpeed = inDeepSpace || (s.thrust || 0) > 1.2 ? 320 : 72;
-    if (speed > maxSpeed) {
-      s.vx *= maxSpeed / speed;
-      s.vz *= maxSpeed / speed;
-    }
+    const climbForce = isClimbing ? tuning.climbForce : 0;
+    const vyDamping = i.brake ? 4 : (isClimbing ? 0.9 : 1.8);
+    const gravity = frame.capture
+      ? frame.capture.body.gravity * frame.capture.weight : 3;
+    let radial = radialSpeed * Math.exp(-vyDamping * DT) +
+      (climbForce - (i.brake ? 28 : 0) - (frame.capture ? 0 : gravity)) * DT;
+    const speed = tangent.length();
+    const speedLimit = inDeepSpace
+      ? (boosting ? tuning.cruiseBoost : tuning.cruiseSpeed)
+      : (boosting ? tuning.surfaceBoost : tuning.surfaceSpeed);
+    // Releasing boost lets momentum bleed away instead of snapping to cruise speed.
+    const maxSpeed = Math.max(speedLimit, previousSpeed * drag);
+    if (speed > maxSpeed) tangent.multiplyScalar(maxSpeed / speed);
     const maxVy = inDeepSpace || (s.thrust || 0) > 0.8 || isClimbing ? 160 : 65;
-    s.vy = clamp(s.vy, -maxVy, maxVy);
+    radial = clamp(radial, -maxVy, maxVy);
+    velocity.copy(tangent).addScaledVector(frame.up, radial);
+    if (frame.capture) velocity.addScaledVector(new Vector3().copy(frame.capture.normal), -gravity * DT);
+    s.vx = velocity.x;
+    s.vy = velocity.y;
+    s.vz = velocity.z;
     const proposed = sim.physics.shipMotion(s, {
       x: s.vx * DT,
       y: s.vy * DT,
       z: s.vz * DT,
     });
-    if (Math.hypot(proposed.x - s.x, proposed.z - s.z) < speed * DT * 0.6) {
+    if (Math.hypot(proposed.x - s.x, proposed.y - s.y, proposed.z - s.z) < velocity.length() * DT * 0.6) {
       s.vx *= 0.65;
       s.vz *= 0.65;
     }
-    const merc = SOLAR_SYSTEM.mercury;
-    const dMerc = Math.hypot(
-      proposed.x - merc.position.x,
-      proposed.y - merc.position.y,
-      proposed.z - merc.position.z,
-    );
-
-    if (dMerc < merc.atmosphereRadius + 220) {
-      // Mercury gravitational capture: pull ship towards Mercury center
-      const norm = {
-        x: (proposed.x - merc.position.x) / dMerc,
-        y: (proposed.y - merc.position.y) / dMerc,
-        z: (proposed.z - merc.position.z) / dMerc,
-      };
-      const pullFactor = clamp(1.2 - (dMerc - merc.radius) / (merc.atmosphereRadius - merc.radius + 100), 0.15, 1.0);
-      s.vx -= norm.x * merc.gravity * pullFactor * DT;
-      s.vy -= norm.y * merc.gravity * pullFactor * DT;
-      s.vz -= norm.z * merc.gravity * pullFactor * DT;
-
-      const surfaceFloor = merc.radius + 0.2;
-      if (dMerc <= surfaceFloor) {
+    const capture = celestialCapture(proposed);
+    if (capture) {
+      const body = capture.body;
+      const norm = capture.normal;
+      const distance = capture.altitude + body.radius;
+      const surfaceFloor = body.radius + 0.2;
+      if (distance <= surfaceFloor) {
         s.grounded = true;
-        s.x = merc.position.x + norm.x * surfaceFloor;
-        s.y = merc.position.y + norm.y * surfaceFloor;
-        s.z = merc.position.z + norm.z * surfaceFloor;
+        s.x = body.position.x + norm.x * surfaceFloor;
+        s.y = body.position.y + norm.y * surfaceFloor;
+        s.z = body.position.z + norm.z * surfaceFloor;
         const radialV = s.vx * norm.x + s.vy * norm.y + s.vz * norm.z;
         if (radialV < 0) {
           s.vx -= norm.x * radialV;
@@ -437,7 +483,7 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
     } else if (proposed.y > 650 || Math.abs(proposed.x) > HALF - 10 || Math.abs(proposed.z) > HALF - 10) {
       // Deep space / interplanetary navigation
       s.x = proposed.x;
-      s.y = clamp(proposed.y, 10, 4500);
+      s.y = proposed.y;
       s.z = proposed.z;
       s.grounded = false;
     } else {
@@ -454,7 +500,7 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
       if (s.grounded && s.vy < 0) s.vy = 0;
     }
     s.thrust =
-      Math.abs(i.forward) + Math.abs(i.side) + (isClimbing ? 1.5 : 0);
+      Math.abs(forward) + Math.abs(i.side) + (isClimbing ? 1.5 : 0);
     if (!s.grounded && pilot) s.flightTime += DT;
     if (
       !s.arrived &&
@@ -470,12 +516,18 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
       sim.emit("抵达回声林地 · 在不该有生命的地方，树木仍在呼吸");
     }
   }
+  const passengerFrame = celestialFlightFrame(s, s.yaw);
+  s.flightRotation = { x: passengerFrame.surfaceRotation.x, y: passengerFrame.surfaceRotation.y,
+    z: passengerFrame.surfaceRotation.z, w: passengerFrame.surfaceRotation.w };
   for (const p of sim.s.players)
     if (p.seat >= 0) {
       Object.assign(p, {
-        x: s.x,
-        y: s.y + 2.2,
-        z: s.z,
+        x: s.x + passengerFrame.up.x * 2.2,
+        y: s.y + passengerFrame.up.y * 2.2,
+        z: s.z + passengerFrame.up.z * 2.2,
+        planet: passengerFrame.capture?.body.id ?? null,
+        surfaceRotation: { x: passengerFrame.surfaceRotation.x, y: passengerFrame.surfaceRotation.y,
+          z: passengerFrame.surfaceRotation.z, w: passengerFrame.surfaceRotation.w },
         vx: s.vx,
         vy: s.vy,
         vz: s.vz,

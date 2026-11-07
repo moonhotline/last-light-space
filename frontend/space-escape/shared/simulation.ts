@@ -248,7 +248,7 @@ export class Simulation {
     for (const p of s.players) {
       const i = inputs.get(p.id)!;
       if (p.seat < 0) this.physics.move(p, i);
-      if (p.planet === null || p.planet === "mercury") interactAdventure(this, p, i);
+      interactAdventure(this, p, i);
       if (i.fire) tool(this, p);
       if (i.interact && p.seat < 0) interactions.add(p.id);
     }

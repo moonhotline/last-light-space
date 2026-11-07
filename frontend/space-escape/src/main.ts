@@ -5,12 +5,11 @@ import {
   REPAIR,
   LORE,
   RESOURCE_SITES,
-  SHIP1_POS,
-  SHIP2_POS,
   type ItemId,
 } from "../shared/adventure-data";
-import { shipBoardingDistance } from "../shared/adventure";
-import { SOLAR_SYSTEM } from "../shared/celestial";
+import { shipBoardingTarget } from "../shared/adventure";
+import { SOLAR_SYSTEM, celestialCapture } from "../shared/celestial";
+import { celestialFlightFrame } from "../shared/celestial-flight";
 import { missionObjective } from "../shared/objectives";
 import { distance3 } from "../shared/map";
 import {
@@ -605,15 +604,12 @@ function step() {
       notice(guideFollowing ? "Blerk 已加入队伍" : "Blerk 暂时停留在原地");
     if (input.interact && state) {
       const ship = state.adventure.ship;
-      if (me.seat < 0 && shipBoardingDistance(me, ship) < 18 && (ship.grounded || view.interplanetary.inCorridor)) {
+      if (me.seat < 0 && shipBoardingTarget(me, ship) && (ship.grounded || view.interplanetary.inCorridor)) {
         if (!nearCorridorHeld) {
           nearCorridorHeld = true;
           if (view.interplanetary.inCorridor) {
             view.interplanetary.toggleCorridor(false);
             recordTrick("返回母星地表", 120);
-          } else {
-            const nearCruiser = distance3(me, SHIP2_POS) < distance3(me, ship);
-            view.interplanetary.switchShip(nearCruiser ? "cruiser" : "light_fighter");
           }
         }
       } else {
@@ -632,15 +628,12 @@ function step() {
       notice(guideFollowing ? "Blerk 已加入队伍" : "Blerk 暂时停留在原地");
     if (i.interact && state) {
       const ship = state.adventure.ship;
-      if (me.seat < 0 && shipBoardingDistance(me, ship) < 18 && (ship.grounded || view.interplanetary.inCorridor)) {
+      if (me.seat < 0 && shipBoardingTarget(me, ship) && (ship.grounded || view.interplanetary.inCorridor)) {
         if (!nearCorridorHeld) {
           nearCorridorHeld = true;
           if (view.interplanetary.inCorridor) {
             view.interplanetary.toggleCorridor(false);
             recordTrick("返回母星地表", 120);
-          } else {
-            const nearCruiser = distance3(me, SHIP2_POS) < distance3(me, ship);
-            view.interplanetary.switchShip(nearCruiser ? "cruiser" : "light_fighter");
           }
         }
       } else {
@@ -670,13 +663,13 @@ function prompt() {
     ship = a.ship;
   if (me.seat >= 0)
     return { label: ship.grounded ? "E · 已着陆，可以离舱" : "", progress: 0 };
-  const boardingDist = shipBoardingDistance(me, ship);
-  if (boardingDist < 18) {
+  const boarding = shipBoardingTarget(me, ship);
+  if (boarding) {
     if (view.interplanetary.inCorridor) {
       return { label: "E · 离开飞船走廊返回地表", progress: 0 };
     }
     return {
-      label: "",
+      label: `E · 登上${boarding.name}`,
       progress: ship.progress,
     };
   }
@@ -887,17 +880,13 @@ function hud() {
   // Reticle minimal boarding crosshair (.reticle.board-ready)
   const a = state.adventure;
   const ship = a.ship;
-  const merc = SOLAR_SYSTEM.mercury;
-  const isMercury =
-    me.planet === "mercury" ||
-    Math.hypot(
-      me.x - merc.position.x,
-      me.y - merc.position.y,
-      me.z - merc.position.z,
-    ) < merc.radius + 60;
-  const boardingDist = shipBoardingDistance(me, ship);
+  const nearbyBody = celestialCapture(me);
+  const isOnPlanet = !!nearbyBody && nearbyBody.altitude < 60;
+  const boarding = shipBoardingTarget(me, ship);
   let isAimingAtShip = false;
-  const targetPos = new THREE.Vector3(ship.x, ship.y + 1.2, ship.z);
+  const boardingPos = boarding?.position ?? ship;
+  const targetPos = new THREE.Vector3(boardingPos.x, boardingPos.y, boardingPos.z)
+    .addScaledVector(celestialFlightFrame(boardingPos, ship.yaw).up, 1.2);
   const camPos = view.camera.position;
   const toShip = targetPos.clone().sub(camPos);
   const shipDist = toShip.length();
@@ -908,7 +897,7 @@ function hud() {
     isAimingAtShip = camDir.dot(toShip) > 0.52;
   }
   const boardReady =
-    me.seat < 0 && boardingDist < 18 && (ship.grounded || isMercury) && isAimingAtShip;
+    me.seat < 0 && !!boarding && (!boarding.active || ship.grounded || isOnPlanet) && isAimingAtShip;
   reticleEl?.classList.toggle("board-ready", boardReady);
 
   if (!p.grapple && anchor)
@@ -1309,9 +1298,9 @@ function toggleCorridorView() {
   if (el) el.classList.toggle("active", inside);
 }
 function switchSpacecraft() {
-  const current = view.interplanetary.activeShip;
-  const next = current === "light_fighter" ? "cruiser" : "light_fighter";
-  view.interplanetary.switchShip(next);
+  notice(me && me.seat >= 0
+    ? "请先降落离舱，再靠近另一艘飞船按 E 登船"
+    : "靠近停机坪上的飞船，按 E 登船并切换舰种");
 }
 
 $("snapshot") && ($("snapshot").onclick = () => takeSnapshot(view));

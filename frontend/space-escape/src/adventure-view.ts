@@ -8,11 +8,9 @@ import {
   RESOURCE_SITES,
   OUTPOST,
   DESTINATION,
-  SHIP_HOME,
   SHIP1_POS,
-  SHIP2_POS,
 } from "../shared/adventure-data";
-import { alignShipToGround, clean3DEntityText, computeMercuryAlignment } from "./interplanetary";
+import { alignShipToGround, clean3DEntityText, computeCelestialAlignment } from "./interplanetary";
 import { groundAt, hash, type Vec } from "../shared/map";
 import type { Player, Snapshot } from "../shared/types";
 const v = (p: Vec) => new THREE.Vector3(p.x, p.y, p.z);
@@ -417,18 +415,16 @@ export class AdventureView {
     if (!s) return;
     const a = s.adventure,
       ship = a.ship;
-    const isCruiserFlying =
-      (window as any).__activeShip === "cruiser" &&
-      (ship.seats.some(Boolean) || (ship.flightTime || 0) > 0);
+    const isSkiff = (ship.kind ?? "skiff") === "skiff";
 
-    if (isCruiserFlying) {
+    if (!isSkiff) {
       alignShipToGround(this.ship, SHIP1_POS.x, SHIP1_POS.z, Math.PI, 3.8, 5.5, 0.05);
       this.ship.visible = true;
     } else {
-      const mercAlign = computeMercuryAlignment(ship, ship.yaw, ship.bank);
-      if (mercAlign.captureWeight > 0.05) {
+      const celestialAlign = computeCelestialAlignment(ship, ship.yaw + Math.PI, ship.bank);
+      if (celestialAlign.captureWeight > 0.05) {
         this.ship.position.lerp(v(ship), 1 - Math.exp(-dt * 16));
-        this.ship.quaternion.slerp(mercAlign.quaternion, 1 - Math.exp(-dt * 12));
+        this.ship.quaternion.slerp(celestialAlign.quaternion, 1 - Math.exp(-dt * 12));
       } else if (ship.grounded && ship.seats.every((v) => !v) && (ship.flightTime || 0) === 0) {
         alignShipToGround(this.ship, SHIP1_POS.x, SHIP1_POS.z, Math.PI, 3.8, 5.5, 0.05);
       } else {
@@ -442,14 +438,14 @@ export class AdventureView {
       if (gear)
         gear.rotation.z = THREE.MathUtils.damp(
           gear.rotation.z,
-          ship.grounded ? 0 : side * 0.65,
+          !isSkiff || ship.grounded ? 0 : side * 0.65,
           3,
           dt,
         );
       const engine = this.ship.getObjectByName("engine_glow_" + side) as
         | THREE.Mesh
         | undefined;
-      if (engine) engine.visible = ship.repaired;
+      if (engine) engine.visible = isSkiff && ship.repaired;
     }
     if (ship.repaired && !ship.grounded && hash(Math.floor(t * 45), 5) > 0.35) {
       const dir = new THREE.Vector3(0, 2, 4.8).applyAxisAngle(

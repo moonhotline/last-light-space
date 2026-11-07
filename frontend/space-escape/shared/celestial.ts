@@ -9,6 +9,17 @@ export interface Vec3 {
   z: number;
 }
 
+/** Body-local spherical coordinates in degrees; longitude zero faces +Z. */
+export interface CelestialLandmark {
+  id: string;
+  name: string;
+  kind: "basin" | "mountain" | "canyon" | "storm" | "plateau" | "portal";
+  latitude: number;
+  longitude: number;
+  size: number; // Visual footprint in meters
+  color: number;
+}
+
 export interface CelestialBody {
   id: string;
   name: string;
@@ -21,6 +32,13 @@ export interface CelestialBody {
   atmosphereColor: number;
   unlocked: boolean;
   landingSite: Vec3; // Default spherical surface coordinate
+  landmarks: readonly CelestialLandmark[];
+  rotationSpeed?: number; // Radians/second; negative means retrograde rotation
+  landable?: boolean; // Megastructures have no spherical collision surface
+  hasRings?: boolean;
+  ringInnerRadius?: number;
+  ringOuterRadius?: number;
+  ringColor?: number;
 }
 
 /** Solar system celestial bodies catalog */
@@ -37,6 +55,7 @@ export const SOLAR_SYSTEM: Record<string, CelestialBody> = {
     atmosphereColor: 0x38bdf8,
     unlocked: true,
     landingSite: { x: 200, y: 3621, z: -2800 },
+    landmarks: [{ id: "home-basin", name: "Home Basin", kind: "basin", latitude: 58, longitude: 20, size: 65, color: 0x47758c }],
   },
   mercury: {
     id: "mercury",
@@ -50,6 +69,8 @@ export const SOLAR_SYSTEM: Record<string, CelestialBody> = {
     atmosphereColor: 0x475569,
     unlocked: true,
     landingSite: { x: -3200, y: 1525, z: -5400 },
+    rotationSpeed: 0.04,
+    landmarks: [{ id: "caloris-basin", name: "Caloris Basin", kind: "basin", latitude: 31, longitude: 48, size: 64, color: 0x666a70 }],
   },
   earth: {
     id: "earth",
@@ -63,6 +84,56 @@ export const SOLAR_SYSTEM: Record<string, CelestialBody> = {
     atmosphereColor: 0x60a5fa,
     unlocked: true,
     landingSite: { x: 4200, y: 3285, z: -7200 },
+    landmarks: [{ id: "himalayas", name: "Himalayas", kind: "mountain", latitude: 28, longitude: 86, size: 65, color: 0xdce5eb }],
+  },
+  venus: {
+    id: "venus", name: "金星", subtitle: "VENUS / SULFURIC CLOUDS",
+    radius: 640, atmosphereRadius: 920, gravity: 8.87,
+    position: { x: -1800, y: 2100, z: -8400 },
+    color: 0xd9a441, atmosphereColor: 0xf5c76b, unlocked: true,
+    landingSite: { x: -1800, y: 2745, z: -8400 },
+    rotationSpeed: -0.025,
+    landmarks: [{ id: "ishtar-terra", name: "Ishtar Terra", kind: "plateau", latitude: 65, longitude: 20, size: 145, color: 0xf2cf82 }],
+  },
+  mars: {
+    id: "mars", name: "火星", subtitle: "MARS / IRON OXIDE FRONTIER",
+    radius: 380, atmosphereRadius: 550, gravity: 3.72,
+    position: { x: 6400, y: 3200, z: -3800 },
+    color: 0xb74f30, atmosphereColor: 0xe88a58, unlocked: true,
+    landingSite: { x: 6400, y: 3585, z: -3800 },
+    rotationSpeed: 0.035,
+    landmarks: [
+      { id: "olympus-mons", name: "Olympus Mons", kind: "mountain", latitude: 19, longitude: -35, size: 78, color: 0xd78654 },
+      { id: "valles-marineris", name: "Valles Marineris", kind: "canyon", latitude: -14, longitude: 24, size: 145, color: 0x612d24 },
+    ],
+  },
+  jupiter: {
+    id: "jupiter", name: "木星", subtitle: "JUPITER / GREAT RED SPOT",
+    radius: 1350, atmosphereRadius: 1750, gravity: 24.79,
+    position: { x: -9200, y: 4800, z: -11800 },
+    color: 0xd8ac83, atmosphereColor: 0xf0cba0, unlocked: true,
+    landingSite: { x: -9200, y: 6155, z: -11800 },
+    rotationSpeed: 0.065,
+    landmarks: [{ id: "great-red-spot", name: "Great Red Spot", kind: "storm", latitude: -22, longitude: 25, size: 340, color: 0xb94128 }],
+  },
+  saturn: {
+    id: "saturn", name: "土星", subtitle: "SATURN / RINGED GIANT",
+    radius: 1080, atmosphereRadius: 1420, gravity: 10.44,
+    position: { x: 12200, y: 5400, z: -14800 },
+    color: 0xdcca96, atmosphereColor: 0xf2ddb0, unlocked: true,
+    landingSite: { x: 12200, y: 6485, z: -14800 },
+    rotationSpeed: 0.055,
+    hasRings: true, ringInnerRadius: 1600, ringOuterRadius: 2800, ringColor: 0xe2d9b8,
+    landmarks: [{ id: "polar-hexagon", name: "Polar Hexagon", kind: "storm", latitude: 86, longitude: 0, size: 210, color: 0x9e9467 }],
+  },
+  warpgate: {
+    id: "warpgate", name: "古代跃迁星门", subtitle: "ANCIENT GATE / AZURE HORIZON",
+    radius: 350, atmosphereRadius: 350, gravity: 0, landable: false,
+    position: { x: 0, y: 3900, z: -8800 },
+    color: 0x748494, atmosphereColor: 0x38bdf8, unlocked: true,
+    landingSite: { x: 0, y: 3900, z: -8400 },
+    rotationSpeed: 0,
+    landmarks: [{ id: "azure-horizon", name: "Azure Horizon", kind: "portal", latitude: 0, longitude: 0, size: 290, color: 0x38bdf8 }],
   },
   stylized: {
     id: "stylized",
@@ -76,8 +147,51 @@ export const SOLAR_SYSTEM: Record<string, CelestialBody> = {
     atmosphereColor: 0x34d399,
     unlocked: false,
     landingSite: { x: -4800, y: 3465, z: 4200 },
+    landmarks: [{ id: "emerald-basin", name: "Emerald Basin", kind: "basin", latitude: 35, longitude: -40, size: 72, color: 0x046c4e }],
   },
 };
+
+/** Local position on the spherical crust, shared by scenic geometry and navigation. */
+export function landmarkPosition(body: CelestialBody, landmark: CelestialLandmark, height = 0): Vec3 {
+  const latitude = landmark.latitude * Math.PI / 180;
+  const longitude = landmark.longitude * Math.PI / 180;
+  const radius = body.radius + height;
+  return {
+    x: radius * Math.cos(latitude) * Math.sin(longitude),
+    y: radius * Math.sin(latitude),
+    z: radius * Math.cos(latitude) * Math.cos(longitude),
+  };
+}
+
+/** The same capture boundary is used by ships, avatars, rendering and cameras. */
+export function celestialCapture(pos: Vec3, bodies: readonly CelestialBody[] = Object.values(SOLAR_SYSTEM)) {
+  let nearest: CelestialBody | null = null;
+  let nearestDistance = Infinity;
+  let bestRelativeDistance = Infinity;
+  for (const body of bodies) {
+    if (body.landable === false || body.gravity <= 0) continue;
+    const distance = Math.hypot(pos.x - body.position.x, pos.y - body.position.y, pos.z - body.position.z);
+    const captureRadius = body.atmosphereRadius + 220;
+    if (distance < captureRadius && distance / captureRadius < bestRelativeDistance) {
+      nearest = body;
+      nearestDistance = distance;
+      bestRelativeDistance = distance / captureRadius;
+    }
+  }
+  if (!nearest) return null;
+  const t = Math.max(0, Math.min(1, (nearest.atmosphereRadius + 220 - nearestDistance) /
+    (nearest.atmosphereRadius + 220 - nearest.radius - 2)));
+  return {
+    body: nearest,
+    altitude: nearestDistance - nearest.radius,
+    weight: t * t * (3 - 2 * t),
+    normal: nearestDistance > 0.0001 ? {
+      x: (pos.x - nearest.position.x) / nearestDistance,
+      y: (pos.y - nearest.position.y) / nearestDistance,
+      z: (pos.z - nearest.position.z) / nearestDistance,
+    } : { x: 0, y: 1, z: 0 },
+  };
+}
 
 /** Space flight cruise states */
 export type FlightFlightMode =
@@ -91,7 +205,8 @@ export type FlightFlightMode =
 export type SpaceshipKind =
   | "skiff" // Original Peregrine Skiff
   | "light_fighter" // High speed light fighter
-  | "cruiser"; // Intergalactic heavy spaceship
+  | "cruiser" // Heavy, stable cruiser
+  | "intergalactic"; // Long-range warp-drive starship
 
 export interface FlightSystemState {
   mode: FlightFlightMode;
