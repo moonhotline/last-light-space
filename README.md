@@ -1,10 +1,37 @@
 # LAST LIGHT / 余晖 — 回声协议
 
+<div align="center">
+
+<img src="assets/readme/last-light-hero.svg" alt="LAST LIGHT — cinematic expedition beneath a ringed planet" width="100%" />
+
+<br />
+
+**A signal worth chasing. A world worth exploring.**
+
+[**PLAY THE EXPEDITION**](https://last-light-space.vercel.app) · [**EXPEDITION GUIDE**](docs/space-escape/echo-design.md) · [**VERIFY THE BUILD**](docs/space-escape/echo-verification.md)
+
+<br />
+
+<img src="assets/readme/echo-signal-animated.svg" alt="Animated Echo Protocol telemetry signal" width="88%" />
+
+</div>
+
 A cooperative browser expedition built with TypeScript, Three.js, Rapier, Colyseus and Blender.
 
 **v0.3.0 · Beneath the Rings**: the Echo Protocol expedition now unfolds across a 3.58 km authored basin, five times the prior explorable area. Polar snowfields, red-rock rifts, ice plateaus, distant towers and the ringed giant frame the original cooperative chapter. The PEREGRINE-07 explorer is rebuilt as a 16-bone Blender Armature with articulated runtime motion and three authored animation clips. Up to four players, one pilot and three passengers. Solo uses the same game rules locally.
 
 [Play](https://last-light-space.vercel.app) · [Chapter rules and controls](docs/space-escape/echo-design.md) · [Verification](docs/space-escape/echo-verification.md) · [v0.1.0 baseline](https://github.com/moonhotline/last-light-space/releases/tag/v0.1.0)
+
+
+## The world beyond the signal
+
+<img src="assets/readme/beneath-the-rings.svg" alt="Beneath the Rings — chapter one field notes and ringed planet artwork" width="100%" />
+
+A hand-authored polar basin, 3.58 km across, where blue ice shelves meet red-rock fractures. Traverse abandoned research sites, chase the Echo Protocol's signal, upgrade at optional beacons, and pilot the **PEREGRINE-07** with friends. The ringed giant is your compass; the expedition is yours to make.
+
+> **Artwork note:** These are original stylized promotional illustrations, not gameplay screenshots. The signal graphic uses SVG animation; some GitHub renderers or reduced-motion environments may display a still frame.
+
+## Run locally
 
 ```sh
 npm ci
