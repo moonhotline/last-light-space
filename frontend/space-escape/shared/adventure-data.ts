@@ -56,10 +56,8 @@ export const REPAIR: Partial<Inventory> = {
   core: 1,
 };
 export const SHIP_HOME = atGround(-11, 344);
-export const SHIP1_POS = atGround(-2, 344);  // 1号探索艇 (Skiff)
-export const SHIP2_POS = atGround(-20, 344); // 2号星际战舰 (Cruiser), 18m apart
-export const FIGHTER_POS = atGround(16, 344);          // 轻型穿梭战机 (Light Fighter), 18m right of Skiff
-export const INTERGALACTIC_POS = atGround(36, 338);     // 跃迁级重型星舰 (Intergalactic Cruiser)
+export const FIGHTER_POS = atGround(-2, 344); // Downloaded fighter on the central launch pad
+export const INTERGALACTIC_POS = atGround(36, 338);
 export interface SpawnShip {
   kind: SpaceshipKind;
   name: string;
@@ -69,21 +67,18 @@ export interface SpawnShip {
   halfWidth: number;
   halfLength: number;
   clearance: number;
+  asset: string;
+  assetKey: string;
+  modelSize: number;
 }
 export const SPAWN_FLEET: Record<SpaceshipKind, SpawnShip> = {
-  skiff: {
-    kind: "skiff", name: "游隼号探索艇", position: SHIP1_POS,
-    boardingRadius: 18, yaw: 0, halfWidth: 3.8, halfLength: 5.5, clearance: 0.05,
-  },
-  cruiser: {
-    kind: "cruiser", name: "星际巡洋舰", position: SHIP2_POS,
-    boardingRadius: 18, yaw: 0, halfWidth: 3.5, halfLength: 8, clearance: 0.05,
-  },
   light_fighter: {
+    asset: "/assets/models/fighter/scene.gltf", assetKey: "fighter", modelSize: 11,
     kind: "light_fighter", name: "轻型战机", position: FIGHTER_POS,
     boardingRadius: 12, yaw: 0, halfWidth: 3.5, halfLength: 5.5, clearance: 0.05,
   },
   intergalactic: {
+    asset: "/assets/models/intergalactic/scene.gltf", assetKey: "intergalactic", modelSize: 18,
     kind: "intergalactic", name: "跃迁级星舰", position: INTERGALACTIC_POS,
     boardingRadius: 20, yaw: -0.15, halfWidth: 5, halfLength: 9, clearance: 0.08,
   },

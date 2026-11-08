@@ -11,7 +11,7 @@ import {
   emptyInventory,
   REPAIR,
   RESOURCE_SITES,
-  SHIP1_POS,
+  FIGHTER_POS,
   SPAWN_FLEET,
   OUTPOST,
   LORE,
@@ -44,8 +44,8 @@ export function createAdventure(): Adventure {
       aim: { ...OUTPOST },
     })),
     ship: {
-      ...SHIP1_POS,
-      kind: "skiff",
+      ...FIGHTER_POS,
+      kind: "light_fighter",
       yaw: 0,
       yawVelocity: 0,
       vx: 0,
@@ -179,7 +179,7 @@ function boardingDistance(p: BoardingPlayer, ship: Vec): number {
 }
 
 function boardingCandidates(p: BoardingPlayer, ship: BoardingShip) {
-  const kind = ship.kind ?? "skiff";
+  const kind = ship.kind ?? "light_fighter";
   const candidates = [{
     ...SPAWN_FLEET[kind], position: ship, active: true,
     distance: boardingDistance(p, ship),
@@ -282,7 +282,7 @@ export function interactAdventure(sim: Simulation, p: Player, i: Input) {
     const allMaterialsGathered = (Object.keys(REPAIR) as ItemId[]).every(
       (k) => ship.cargo[k] >= REPAIR[k]!,
     );
-    const inRepairFlow = !ship.repaired && boarding.active && boarding.kind === "skiff" && (canContribute || allMaterialsGathered);
+    const inRepairFlow = !ship.repaired && boarding.active && boarding.kind === "light_fighter" && (canContribute || allMaterialsGathered);
     if (inRepairFlow) {
       for (const key of Object.keys(REPAIR) as ItemId[]) {
         const transfer = Math.min(
@@ -299,7 +299,7 @@ export function interactAdventure(sim: Simulation, p: Player, i: Input) {
         ship.progress = Math.min(1, ship.progress + DT / 4);
         if (ship.progress >= 1) {
           ship.repaired = true;
-          sim.emit("游隼号重新点火 · 松开 E，再按 E 登船");
+          sim.emit("轻型战机重新点火 · 松开 E，再按 E 登船");
         }
       } else if (pressed) sim.emit("材料已存入飞船 · Tab 查看剩余修复需求");
     } else if (pressed && (!boarding.active || ((ship.grounded || (p.planet && celestialCapture(ship)?.body.id === p.planet)) && Math.hypot(ship.vx, ship.vy, ship.vz) < 3))) {
@@ -366,20 +366,10 @@ interface FlightTuning {
 }
 
 const FLIGHT_TUNING: Record<SpaceshipKind, FlightTuning> = {
-  skiff: {
-    turnRate: 1.2, turnResponse: 7, maxBank: 0.48, rollResponse: 8,
-    acceleration: 32, drag: 0.22, surfaceSpeed: 72, surfaceBoost: 120,
-    cruiseSpeed: 240, cruiseBoost: 320, climbForce: 85,
-  },
   light_fighter: {
     turnRate: 1.8, turnResponse: 12, maxBank: 0.52, rollResponse: 12,
     acceleration: 46, drag: 0.28, surfaceSpeed: 96, surfaceBoost: 160,
     cruiseSpeed: 280, cruiseBoost: 360, climbForce: 100,
-  },
-  cruiser: {
-    turnRate: 0.65, turnResponse: 3, maxBank: 0.32, rollResponse: 4,
-    acceleration: 18, drag: 0.07, surfaceSpeed: 56, surfaceBoost: 96,
-    cruiseSpeed: 210, cruiseBoost: 260, climbForce: 65,
   },
   intergalactic: {
     turnRate: 0.8, turnResponse: 4, maxBank: 0.4, rollResponse: 5,
@@ -393,7 +383,7 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
   const pilot = sim.player(s.seats[0]);
   const i = pilot ? inputs.get(pilot.id) || idleInput() : idleInput();
   if (s.repaired) {
-    const kind = s.kind ?? "skiff";
+    const kind = s.kind ?? "light_fighter";
     const tuning = FLIGHT_TUNING[kind];
     const inDeepSpace = s.y > 650 || Math.abs(s.x) > HALF - 10 || Math.abs(s.z) > HALF - 10;
     const boosting = !!pilot && i.sprint && !i.brake;
@@ -453,9 +443,10 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
       y: s.vy * DT,
       z: s.vz * DT,
     });
-    if (Math.hypot(proposed.x - s.x, proposed.y - s.y, proposed.z - s.z) < velocity.length() * DT * 0.6) {
-      s.vx *= 0.65;
-      s.vz *= 0.65;
+    if (proposed.frontalCollision) {
+      const collisionDrag = Math.exp(-12 * DT);
+      s.vx *= collisionDrag;
+      s.vz *= collisionDrag;
     }
     const capture = celestialCapture(proposed);
     if (capture) {

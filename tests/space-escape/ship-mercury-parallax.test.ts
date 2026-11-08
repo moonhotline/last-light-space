@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import * as THREE from "three";
 import {
-  SHIP1_POS,
-  SHIP2_POS,
+  FIGHTER_POS,
+  INTERGALACTIC_POS,
   SHIP_HOME,
 } from "../../frontend/space-escape/shared/adventure-data";
 import {
@@ -29,37 +29,36 @@ import { idleInput } from "../../frontend/space-escape/shared/types";
 
 await initPhysics();
 
-test("dual ships parked side-by-side at spawn with 15~22m spacing and slope alignment", () => {
-  // 1. Spacing check: Ship 1 (Skiff) and Ship 2 (Cruiser)
-  const spacing = Math.hypot(SHIP1_POS.x - SHIP2_POS.x, SHIP1_POS.z - SHIP2_POS.z);
+test("downloaded ships have separate spawn pads and slope alignment", () => {
+  // 1. Spacing check: Fighter and heavy starship
+  const spacing = Math.hypot(FIGHTER_POS.x - INTERGALACTIC_POS.x, FIGHTER_POS.z - INTERGALACTIC_POS.z);
   assert.ok(
-    spacing >= 15 && spacing <= 22,
-    `Dual ships spacing must be between 15m and 22m, got ${spacing}m`,
+    spacing >= 30 && spacing <= 45,
+    `Dual ships spacing must be between 30m and 45m, got ${spacing}m`,
   );
-  assert.equal(spacing, 18, "Spacing is exactly 18m");
 
   // 2. Spawn point check: spawn is at (0, 355), ships are parked in front (z = 347, -Z forward)
-  assert.ok(SHIP1_POS.z < 355 && SHIP2_POS.z < 355, "Ships must be in front of spawn");
-  assert.ok(SHIP1_POS.x < 0 && SHIP2_POS.x < 0, "Both ships positioned in the staging bay area");
+  assert.ok(FIGHTER_POS.z < 355 && INTERGALACTIC_POS.z < 355, "Ships must be in front of spawn");
+  assert.ok(FIGHTER_POS.x < INTERGALACTIC_POS.x, "the starter fighter occupies the central pad");
 
   // 3. Ground elevation via groundAt
-  const h1 = groundAt(SHIP1_POS.x, SHIP1_POS.z);
-  const h2 = groundAt(SHIP2_POS.x, SHIP2_POS.z);
-  assert.equal(SHIP1_POS.y, h1, "Ship 1 y matches terrain ground elevation");
-  assert.equal(SHIP2_POS.y, h2, "Ship 2 y matches terrain ground elevation");
+  const h1 = groundAt(FIGHTER_POS.x, FIGHTER_POS.z);
+  const h2 = groundAt(INTERGALACTIC_POS.x, INTERGALACTIC_POS.z);
+  assert.equal(FIGHTER_POS.y, h1, "Ship 1 y matches terrain ground elevation");
+  assert.equal(INTERGALACTIC_POS.y, h2, "Ship 2 y matches terrain ground elevation");
 
   // 4. Chassis footprint multi-corner alignment and slope computation
   const dummyMesh = new THREE.Mesh(
     new THREE.BoxGeometry(6, 3, 12),
     new THREE.MeshBasicMaterial(),
   );
-  const align1 = computeChassisAlignment(dummyMesh, SHIP1_POS.x, SHIP1_POS.z, 0, 3, 6);
+  const align1 = computeChassisAlignment(dummyMesh, FIGHTER_POS.x, FIGHTER_POS.z, 0, 3, 6);
   assert.ok(align1.groundHeight >= h1 - 0.5, "Alignment ground height accounts for footprint");
   assert.ok(Number.isFinite(align1.pitch), "Pitch angle must be finite");
   assert.ok(Number.isFinite(align1.roll), "Roll angle must be finite");
 
   // 5. Frustum culling and shadow enablement
-  alignShipToGround(dummyMesh, SHIP2_POS.x, SHIP2_POS.z, 0, 4, 8);
+  alignShipToGround(dummyMesh, INTERGALACTIC_POS.x, INTERGALACTIC_POS.z, 0, 4, 8);
   assert.equal(dummyMesh.frustumCulled, true, "Ship model must have frustum culling enabled");
   dummyMesh.traverse((child) => {
     if (child instanceof THREE.Mesh) {
@@ -102,7 +101,7 @@ test("clean3DEntityText and ground alignment preserve authored nodes and canvas 
   root.traverse((node) => nodes.push({ node, parent: node.parent }));
 
   clean3DEntityText(root);
-  alignShipToGround(root, SHIP1_POS.x, SHIP1_POS.z, 0);
+  alignShipToGround(root, FIGHTER_POS.x, FIGHTER_POS.z, 0);
   for (const { node, parent } of nodes) {
     assert.equal(node.parent, parent, `${node.name} must retain its parent`);
     assert.equal(node.visible, true, `${node.name} must remain visible`);

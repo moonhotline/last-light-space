@@ -32,9 +32,9 @@ Earthrise starts when any explorer exits the first canyon. All clients use the a
 
 ## Original assets
 
-`/Applications/Blender.app/Contents/MacOS/Blender -b --python frontend/space-escape/scripts/generate_planet_assets.py` rebuilds the astronaut with animated limb pivots, beacon, ruined observatory, and lander as GLB. `node frontend/space-escape/scripts/generate-planet-audio.mjs` creates three original 48-second music layers. Runtime synthesizers supply movement and interaction sounds.
+`/Applications/Blender.app/Contents/MacOS/Blender -b --python frontend/space-escape/scripts/generate_planet_assets.py` rebuilds the astronaut with animated limb pivots, beacon and ruined observatory as GLB. `node frontend/space-escape/scripts/generate-planet-audio.mjs` creates three original 48-second music layers. Runtime synthesizers supply movement and interaction sounds.
 
-`/Applications/Blender.app/Contents/MacOS/Blender -b --python frontend/space-escape/scripts/generate_echo_assets.py` rebuilds the new articulated explorer, Peregrine skiff and Dawn laboratory.
+`/Applications/Blender.app/Contents/MacOS/Blender -b --python frontend/space-escape/scripts/generate_echo_assets.py` rebuilds the articulated explorer and Dawn laboratory.
 
 Earth and Moon texture sources are listed in `public/assets/ATTRIBUTION.md`. The rest of the landscape, rings, gas-giant bands, particles and sky are procedural.
 
@@ -51,3 +51,5 @@ The existing Vercel project `last-light-space` serves static files. The Colyseus
 `npm run space:prepare-vercel -- https://YOUR-PARTYKIT-HOST` verifies the PartyKit room health endpoint and prepares Vercel Build Output. Deploy with `npx vercel deploy --prebuilt --prod --yes --scope moonhotline-9118s-projects --cwd frontend/space-escape` after legitimate CLI login. The preparer copies only the built game, never private runtime files.
 
 Rooms are ephemeral; reconnect/resume, persistent inventory, accounts, planetary streaming, and interplanetary travel are outside this prototype. Planetary ship flight is available in v0.2.0.
+
+The spawn fleet loads only the downloaded `models/fighter/scene.gltf` and `models/intergalactic/scene.gltf` assets. Missing assets leave empty containers; generated hulls and NPC/mineral placeholders are not supported.

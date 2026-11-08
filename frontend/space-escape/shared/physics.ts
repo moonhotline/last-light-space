@@ -29,6 +29,7 @@ export class MovementWorld {
     string,
     { body: RAPIER.RigidBody; collider: RAPIER.Collider }
   >();
+  private terrainCollider: RAPIER.Collider;
   constructor() {
     this.world.timestep = DT;
     this.controller.enableAutostep(0.8, 0.25, false);
@@ -36,7 +37,7 @@ export class MovementWorld {
     this.controller.setMaxSlopeClimbAngle(Math.PI * 0.29);
     this.controller.setMinSlopeSlideAngle(Math.PI * 0.34);
     const m = terrainMesh();
-    this.world.createCollider(
+    this.terrainCollider = this.world.createCollider(
       RAPIER.ColliderDesc.trimesh(m.vertices, m.indices),
     );
     for (const r of ROCKS)
@@ -348,35 +349,43 @@ export class MovementWorld {
       : null;
   }
   shipMotion(a: Vec, delta: Vec) {
-    // Swept hull samples prevent high-speed flight through terrain and architecture.
+    // The basin floor owns downward terrain contact. Raised hull probes only
+    // stop facing obstacles, so a slope beneath a wing cannot brake the ship.
     let fraction = 1;
+    let frontalCollision = false;
     const length = Math.hypot(delta.x, delta.y, delta.z);
-    if (length < 0.0001) return { ...a };
+    const horizontal = Math.hypot(delta.x, delta.z);
+    if (length < 0.0001) return { ...a, frontalCollision };
+    const direction = { x: delta.x / length, y: delta.y / length, z: delta.z / length };
     for (const x of [-4, 0, 4])
       for (const z of [-5, 0, 5]) {
-        const origin = { x: a.x + x, y: a.y + 2, z: a.z + z };
-        const hit = this.world.castRay(
-          new RAPIER.Ray(origin, {
-            x: delta.x / length,
-            y: delta.y / length,
-            z: delta.z / length,
-          }),
-          length + 0.4,
-          true,
+        const origin = { x: a.x + x, y: a.y + 3.5, z: a.z + z };
+        this.world.intersectionsWithRay(
+          new RAPIER.Ray(origin, direction), length + 0.4, true,
+          (hit) => {
+            const facing = horizontal > 0.0001 &&
+              (hit.normal.x * delta.x + hit.normal.z * delta.z) / horizontal < -0.25;
+            if (hit.collider.handle === this.terrainCollider.handle &&
+              (!facing || hit.normal.y < 0 || hit.normal.y >= 0.55)) return true;
+            const allowed = Math.max(0, hit.timeOfImpact - 0.4) / length;
+            if (allowed < 1) {
+              fraction = Math.min(fraction, allowed);
+              frontalCollision ||= facing;
+            }
+            // Continue: an ignored slope must not mask a building on the ray.
+            return true;
+          },
           RAPIER.QueryFilterFlags.EXCLUDE_KINEMATIC,
         );
-        if (hit)
-          fraction = Math.min(
-            fraction,
-            Math.max(0, hit.timeOfImpact - 0.4) / length,
-          );
       }
     return {
       x: a.x + delta.x * fraction,
       y: a.y + delta.y * fraction,
       z: a.z + delta.z * fraction,
+      frontalCollision,
     };
   }
+
   visible(a: Vec, b: Vec) {
     const d = { x: b.x - a.x, y: b.y - a.y, z: b.z - a.z },
       l = Math.hypot(d.x, d.y, d.z);
