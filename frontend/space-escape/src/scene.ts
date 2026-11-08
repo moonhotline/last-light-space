@@ -1244,19 +1244,20 @@ export class GameView {
         const idealCamPos = shipPos.clone()
           .addScaledVector(localUp, baseH)
           .addScaledVector(shipForward, -(baseDist + lagDist));
+        const targetRoll = -ship.bank * 0.65;
+        const radialVelocity = new THREE.Vector3(ship.vx, ship.vy, ship.vz).dot(localUp);
+        const targetPitch = clamp(radialVelocity / 28, -0.3, 0.3) * 0.18;
 
         if (!this.flightSpringArm.initialized) {
           this.flightSpringArm.position.copy(idealCamPos);
+          this.flightSpringArm.roll = targetRoll;
+          this.flightSpringArm.pitch = targetPitch;
           this.flightSpringArm.initialized = true;
         } else {
           this.flightSpringArm.position.lerp(idealCamPos, 1 - Math.exp(-dt * 8));
+          this.flightSpringArm.roll = THREE.MathUtils.damp(this.flightSpringArm.roll, targetRoll, 7, dt);
+          this.flightSpringArm.pitch = THREE.MathUtils.damp(this.flightSpringArm.pitch, targetPitch, 6, dt);
         }
-
-        const targetRoll = -ship.bank * 0.65;
-        this.flightSpringArm.roll = THREE.MathUtils.damp(this.flightSpringArm.roll, targetRoll, 7, dt);
-        const radialVelocity = new THREE.Vector3(ship.vx, ship.vy, ship.vz).dot(localUp);
-        const targetPitch = clamp(radialVelocity / 28, -0.3, 0.3) * 0.18;
-        this.flightSpringArm.pitch = THREE.MathUtils.damp(this.flightSpringArm.pitch, targetPitch, 6, dt);
 
         this.camera.position.copy(this.flightSpringArm.position);
         this.camera.up.copy(localUp);
@@ -1308,8 +1309,9 @@ export class GameView {
         this.camera.position.copy(this.cameraOverride.position);
         this.camera.lookAt(this.cameraOverride.lookAt);
       }
-      this.shake *= Math.exp(-dt * 12);
-      if (playing && this.effects > 0) {
+      if (isDriving) this.shake = 0;
+      else this.shake *= Math.exp(-dt * 12);
+      if (!isDriving && playing && this.effects > 0) {
         this.camera.position.addScaledVector(up, Math.sin(t * 48) * this.shake * this.effects * 0.09);
         this.camera.rotateZ(Math.sin(t * 33) * this.shake * this.effects * 0.003);
       }
@@ -1326,12 +1328,12 @@ export class GameView {
           0x9eb8c6,
           3 + me.landing * 0.3,
         );
-        this.shake = clamp(me.landing / 13);
+        if (!isDriving) this.shake = clamp(me.landing / 13);
         this.lastLanding = me.landingId;
       }
       if (me.dashTime > 0 && this.lastDash === 0) {
         this.sound("dash");
-        this.shake = 0.28;
+        if (!isDriving) this.shake = 0.28;
       }
       this.lastDash = me.dashTime;
       if (me.vy > 8 && this.lastY <= 0 && !me.jetting) this.sound("jump");

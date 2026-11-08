@@ -10,8 +10,8 @@ import {
   DESTINATION,
   SHIP1_POS,
 } from "../shared/adventure-data";
-import { alignShipToGround, clean3DEntityText, computeCelestialAlignment } from "./interplanetary";
-import { groundAt, hash, type Vec } from "../shared/map";
+import { alignShipToGround, clean3DEntityText, computeCelestialAlignment, computeChassisAlignment } from "./interplanetary";
+import { groundAt, hash, HALF, type Vec } from "../shared/map";
 import type { Player, Snapshot } from "../shared/types";
 const v = (p: Vec) => new THREE.Vector3(p.x, p.y, p.z);
 const glow = (color: number, opacity = 1) =>
@@ -417,22 +417,23 @@ export class AdventureView {
       ship = a.ship;
     const isSkiff = (ship.kind ?? "skiff") === "skiff";
 
-    if (!isSkiff) {
-      alignShipToGround(this.ship, SHIP1_POS.x, SHIP1_POS.z, Math.PI, 3.8, 5.5, 0.05);
-      this.ship.visible = true;
-    } else {
-      const celestialAlign = computeCelestialAlignment(ship, ship.yaw + Math.PI, ship.bank);
-      if (celestialAlign.captureWeight > 0.05) {
-        this.ship.position.lerp(v(ship), 1 - Math.exp(-dt * 16));
-        this.ship.quaternion.slerp(celestialAlign.quaternion, 1 - Math.exp(-dt * 12));
-      } else if (ship.grounded && ship.seats.every((v) => !v) && (ship.flightTime || 0) === 0) {
-        alignShipToGround(this.ship, SHIP1_POS.x, SHIP1_POS.z, Math.PI, 3.8, 5.5, 0.05);
-      } else {
-        this.ship.position.lerp(v(ship), 1 - Math.exp(-dt * 16));
-        this.ship.rotation.set(0, ship.yaw + Math.PI, -ship.bank);
-      }
-      this.ship.visible = true;
+    const targetPosition = isSkiff ? v(ship) : v(SHIP1_POS);
+    const yaw = isSkiff ? ship.yaw + Math.PI : Math.PI;
+    const celestialAlign = computeCelestialAlignment(targetPosition, yaw, isSkiff ? ship.bank : 0);
+    const targetQuaternion = celestialAlign.quaternion;
+    const overBasin = Math.abs(targetPosition.x) <= HALF - 10 && Math.abs(targetPosition.z) <= HALF - 10;
+    if (celestialAlign.captureWeight <= 0.05 && overBasin && targetPosition.y <= 650) {
+      const ground = computeChassisAlignment(this.ship, targetPosition.x, targetPosition.z, yaw, 3.8, 5.5, 0.05);
+      // Boarding, ground contact and takeoff share one chassis height floor.
+      // Never move down toward the simulation's lower origin when leaving the pad.
+      const airborne = THREE.MathUtils.smoothstep(targetPosition.y, ground.position.y, ground.position.y + 4);
+      targetPosition.y = Math.max(targetPosition.y, ground.position.y);
+      const groundQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(ground.pitch, yaw, -ground.roll));
+      targetQuaternion.copy(groundQuaternion.slerp(targetQuaternion, airborne));
     }
+    this.ship.position.lerp(targetPosition, 1 - Math.exp(-dt * 16));
+    this.ship.quaternion.slerp(targetQuaternion, 1 - Math.exp(-dt * 12));
+    this.ship.visible = true;
     for (const side of [-1, 1]) {
       const gear = this.ship.getObjectByName("gear_" + side);
       if (gear)

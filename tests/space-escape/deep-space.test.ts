@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Scene, PerspectiveCamera, Vector3 } from "three";
+import { Scene, PerspectiveCamera, Vector3, Group, Mesh, SphereGeometry, MeshStandardMaterial, DataTexture, Frustum, Matrix4 } from "three";
 import { InterplanetarySystem } from "../../frontend/space-escape/src/interplanetary";
 import { SOLAR_SYSTEM } from "../../frontend/space-escape/shared/celestial";
 import { groundAt, SPAWN } from "../../frontend/space-escape/shared/map";
@@ -108,10 +108,78 @@ test("InterplanetarySystem preserves all planets and docks spaceship at starting
   system.step(1 / 30, { ...SPAWN, y: floor + 0.85 });
   assert.equal(ship.visible, true, "Spaceship in front of camera must be visible at starting position");
 
-  // Camera looking in opposite direction culls the spaceship
+  // Turning away leaves visibility intact; the renderer culls individual meshes.
   camera.lookAt(-SHIP1_POS.x, SHIP1_POS.y, -SHIP1_POS.z);
   camera.updateMatrixWorld();
   camera.updateProjectionMatrix();
   system.step(1 / 30, { ...SPAWN, y: floor + 0.85 });
-  assert.equal(ship.visible, false, "Spaceship outside camera frustum must be culled");
+  assert.equal(ship.visible, true, "camera orientation must not hide the ship container");
+  assert.equal(ship.frustumCulled, true);
+});
+
+test("Venus uses an opaque standard surface with its atmospheric cloud texture", () => {
+  const system = new InterplanetarySystem(new Scene(), new PerspectiveCamera());
+  const material = system.planets.get("venus")!.surfaceMesh.material as MeshStandardMaterial;
+  assert.equal(material.type, "MeshStandardMaterial");
+  assert.ok(material.map instanceof DataTexture);
+  assert.equal(material.transparent, false);
+  assert.equal(material.opacity, 1);
+});
+
+test("planet fallback surfaces and Saturn's rings survive detail loading and rapid camera turns", () => {
+  const scene = new Scene();
+  const camera = new PerspectiveCamera(60, 1, 0.1, 50000);
+  const system = new InterplanetarySystem(scene, camera);
+  for (const [id, entry] of system.planets) {
+    if (id === "warpgate") continue;
+    const detail = new Group();
+    detail.add(new Mesh(new SphereGeometry(entry.body.radius), new MeshStandardMaterial()));
+    entry.highDetail = detail;
+    // The asset has resolved, but its requestAnimationFrame mount is still pending.
+    system.step(0, { x: 0, y: 20, z: 0 });
+    assert.equal(entry.surfaceMesh.visible, true, `${id} must render while detail mounting is pending`);
+    entry.group.add(detail);
+  }
+  for (const height of [20, 1000, 20]) {
+    for (const yaw of [0, Math.PI, -Math.PI / 2, Math.PI / 2]) {
+      camera.rotation.y = yaw; // Deliberately leave camera matrices from the previous frame.
+      system.step(1 / 60, { x: 0, y: height, z: 0 });
+      for (const [id, entry] of system.planets) {
+        assert.equal(entry.group.visible, true, id);
+        assert.equal(entry.surfaceMesh.visible, true, `${id} fallback must stay visible`);
+        entry.group.traverse((node) => {
+          if (node instanceof Mesh) assert.equal(node.frustumCulled, true, id);
+        });
+        if (entry.highDetail) assert.equal(entry.highDetail.visible, true, id);
+        if (entry.rings) {
+          assert.equal(entry.rings.visible, true, id);
+          assert.ok(entry.rings.children.every(node => node.visible));
+        }
+      }
+    }
+  }
+});
+
+test("spawn entities stay visible on frame zero and native frusta track camera turns", () => {
+  const scene = new Scene();
+  const camera = new PerspectiveCamera(60, 1, 0.1, 10000);
+  const system = new InterplanetarySystem(scene, camera);
+  const entities = [...system.shipMeshes.values(), system.alien1Model!, system.alien2Model!, system.mineralsModel!];
+  const body = new Mesh(new SphereGeometry(2), new MeshStandardMaterial());
+  system.shipMeshes.get("skiff")!.add(body);
+  system.step(0, SHIP1_POS);
+  assert.ok(entities.every(entity => entity.visible), "frame zero must not hide spawn entities");
+  camera.position.copy(system.shipMeshes.get("skiff")!.position).add(new Vector3(0, 0, 30));
+  for (const facingShip of [true, false, true]) {
+    camera.rotation.set(0, facingShip ? 0 : Math.PI, 0);
+    system.step(1 / 60, SHIP1_POS);
+    assert.ok(entities.every(entity => entity.visible), "camera turns must not rewrite visibility");
+    scene.updateMatrixWorld(true);
+    camera.updateMatrixWorld(true);
+    const frustum = new Frustum().setFromProjectionMatrix(
+      new Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse),
+    );
+    assert.equal(body.frustumCulled, true);
+    assert.equal(frustum.intersectsObject(body), facingShip, "native mesh culling uses the current render matrices");
+  }
 });
