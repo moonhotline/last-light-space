@@ -325,13 +325,21 @@
     </div>
     <section id="hud" hidden aria-label="远征状态">
       <div class="objective">
+        <div class="tactical-bracket-tl" aria-hidden="true"></div>
+        <div class="tactical-bracket-br" aria-hidden="true"></div>
         <span id="objectiveIndex">01 / 03</span>
         <h2 id="objective">曙光之门</h2>
         <p id="objectiveDetail">沿晶体光点穿过峡谷</p>
       </div>
       <div id="team" class="team"></div>
       <div id="enemyLabels"></div>
-      <div class="reticle" aria-hidden="true"></div>
+      <div class="reticle" aria-hidden="true">
+        <div class="cockpit-ladder" aria-hidden="true">
+          <div class="ladder-bar bar-top"></div>
+          <div class="ladder-bar bar-mid"></div>
+          <div class="ladder-bar bar-bot"></div>
+        </div>
+      </div>
       <div id="hitFeedback" aria-hidden="true"></div>
       <div id="damageFeedback" aria-hidden="true"></div>
       <div id="targetMarker" class="target-marker" hidden>
@@ -402,13 +410,15 @@
           </div>
           <div class="telemetry">
             <b id="speed">00</b><span>m/s</span><i></i
-            ><span>离地 <b id="altitude">0 m</b></span>
+            ><span>高程 <b id="altitude">0 m</b></span>
+            <span id="layerBadge" class="layer-badge">BASIN // 地表</span>
           </div>
         </div>
         <div class="controls-hud">
           <div class="flight-controls">
+            <span id="flightModeBadge" class="flight-mode-badge">CRUISE // 巡航</span>
             <span><kbd>WASD</kbd> 推进</span><span><kbd>空格</kbd> 上升</span
-            ><span><kbd>X</kbd> 刹停下降</span><span><kbd>Shift</kbd> 加力</span
+            ><span><kbd>X</kbd> 刹停下降</span><span><kbd>Shift</kbd> 超燃加力</span
             ><span><kbd>V</kbd> 座舱视角</span>
           </div>
           <div id="controlsHint">

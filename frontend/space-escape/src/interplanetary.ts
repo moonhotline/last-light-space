@@ -22,9 +22,9 @@ import {
 
 type RenderShip = Pick<AdventureShip, "x" | "y" | "z" | "yaw" | "bank" | "seats"> & Partial<AdventureShip>;
 
-// A 6 km cloud envelope subtends ~13 degrees at spawn and fits the 30 km far plane.
-const KEPLER_SKY_POSITION = new THREE.Vector3(160, 26500, -2600);
-const KEPLER_SKY_SCALE = 6000 / (SOLAR_SYSTEM.kepler.radius * 2);
+// A majestic cloud and ring envelope in the forward celestial horizon, subtends ~24 degrees at spawn.
+const KEPLER_SKY_POSITION = new THREE.Vector3(2600, 4600, -8200);
+const KEPLER_SKY_SCALE = 3.6;
 
 export function normalizeModelContainer(
   obj: THREE.Object3D,
@@ -424,8 +424,11 @@ export class InterplanetarySystem {
       }
       pGroup.frustumCulled = true;
 
-      if (id === "warpgate") {
+      if (id.startsWith("warpgate")) {
         const gate = buildWarpGate(body);
+        if (id === "warpgate_south") pGroup.rotation.y = Math.PI;
+        else if (id === "warpgate_east") pGroup.rotation.y = -Math.PI / 2;
+        else if (id === "warpgate_west") pGroup.rotation.y = Math.PI / 2;
         // Keep the entry shape shared, but never give a portal a spherical shell.
         pGroup.add(...gate.group.children.slice());
         this.systemGroup.add(pGroup);

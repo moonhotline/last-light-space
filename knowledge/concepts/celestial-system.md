@@ -8,7 +8,7 @@ tags:
   - gravity
   - atmospheric-fog
   - coordinates
-timestamp: 2026-11-08T05:49:15.194Z
+timestamp: 2026-11-08T17:04:43.274Z
 sources:
   - "frontend/space-escape/shared/celestial.ts"
 ---

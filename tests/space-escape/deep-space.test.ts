@@ -13,7 +13,7 @@ test("orbital planet surfaces and atmospheres share elevated global coordinates"
     assert.deepEqual(planet.group.position.toArray(), Object.values(SOLAR_SYSTEM[id].position));
     assert.equal(planet.surfaceMesh.parent, planet.group);
     const atmosphere = planet.atmosphereMesh;
-    if (id === "warpgate") {
+    if (id.startsWith("warpgate")) {
       assert.equal(atmosphere, undefined, "a traversable gate has no spherical atmosphere shell");
       continue;
     }

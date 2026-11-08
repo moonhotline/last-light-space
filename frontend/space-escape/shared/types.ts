@@ -109,6 +109,8 @@ export interface AdventureShip extends Vec {
   thrust: number;
   flightTime: number;
   arrived: boolean;
+  boosting?: boolean;
+  braking?: boolean;
 }
 export type Ship = AdventureShip;
 export interface Adventure {

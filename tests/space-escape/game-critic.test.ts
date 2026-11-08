@@ -215,7 +215,7 @@ test("Game Critic Agent: Cycle 3 celestial richness and critical scoring", (t) =
 test("Game Critic Agent: rendered rings, landmarks and animated horizon match the catalog", () => {
   const system = new InterplanetarySystem(new THREE.Scene(), new THREE.PerspectiveCamera());
   for (const [id, entry] of system.planets) {
-    if (id === "warpgate") continue;
+    if (id.startsWith("warpgate")) continue;
     for (const landmark of entry.body.landmarks) {
       assert.ok(entry.group.getObjectByName(`landmark-${landmark.id}`), `${id}: ${landmark.name} must be rendered`);
     }

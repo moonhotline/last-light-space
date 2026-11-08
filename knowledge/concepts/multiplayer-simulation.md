@@ -8,7 +8,7 @@ tags:
   - authoritative-server
   - snapshot-interpolation
   - hermite-spline
-timestamp: 2026-11-07T13:54:08.025Z
+timestamp: 2026-11-08T17:04:43.274Z
 sources:
   - "frontend/space-escape/shared/simulation.ts"
 ---

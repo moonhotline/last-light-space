@@ -39,3 +39,4 @@
 | 2026-11-08 11:53 | Commit ca0ef52 | moonhotline | 渲染管线与 LOD | Merge pull request #35 from moonhotline/fix/kepler-overhead-model-and-x-descent |
 | 2026-11-08 12:28 | PR #36 (6e79c02) | moonhotline | 全库/配置同步 | Docs/remove placeholder art and agent rules |
 | 2026-11-08 12:50 | PR #36 (2015529) | moonhotline | 全库/配置同步 | Docs/remove placeholder art and agent rules |
+| 2026-11-09 01:04 | Commit 1589198 | developer | 天体物理与大气, 权威多人仿真, 渲染管线与 LOD | Merge pull request #36 from moonhotline/docs/remove-placeholder-art-and-agent-ru |

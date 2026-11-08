@@ -12,6 +12,7 @@ import {
   SPAWN_FLEET,
 } from "../shared/adventure-data";
 import { alignShipToGround, clean3DEntityText, normalizeModelContainer, updateShipTransform } from "./interplanetary";
+import { ShipPropulsionFX } from "./thruster-fx";
 import { groundAt, hash, HALF, type Vec } from "../shared/map";
 import type { Player, Snapshot } from "../shared/types";
 const v = (p: Vec) => new THREE.Vector3(p.x, p.y, p.z);
@@ -76,6 +77,8 @@ export class AdventureView {
     color: number;
   }[] = [];
   effects = new Map<string, number>();
+  propulsionFX: ShipPropulsionFX | null = null;
+  intergalacticPropulsionFX: ShipPropulsionFX | null = null;
   constructor(
     public scene: THREE.Scene,
     public burst: (p: Vec, n: number, c: number, s: number) => void,
@@ -121,6 +124,11 @@ export class AdventureView {
     const fighter = normalizeModelContainer(ship.scene, SPAWN_FLEET.light_fighter.modelSize);
     this.ship.userData.chassisClearance = fighter.userData.chassisClearance;
     this.ship.add(fighter);
+    this.propulsionFX = new ShipPropulsionFX("light_fighter");
+    this.ship.add(this.propulsionFX.rootGroup);
+    this.intergalacticPropulsionFX = new ShipPropulsionFX("intergalactic");
+    this.scene.add(this.intergalacticPropulsionFX.rootGroup);
+    this.intergalacticPropulsionFX.rootGroup.visible = false;
     clean3DEntityText(this.ship);
     this.scene.add(this.ship);
     alignShipToGround(this.ship, FIGHTER_POS.x, FIGHTER_POS.z, 0, 3.5, 5.5, 0.05);
@@ -415,7 +423,13 @@ export class AdventureView {
     this.effects.set(key, value);
     return previous !== undefined && value > previous;
   }
-  update(s: Snapshot | null, me: Player | null, dt: number, t: number) {
+  update(
+    s: Snapshot | null,
+    me: Player | null,
+    dt: number,
+    t: number,
+    pilotFlight?: { boosting: boolean; braking: boolean },
+  ) {
     if (!s) return;
     const a = s.adventure,
       ship = a.ship;
@@ -443,17 +457,45 @@ export class AdventureView {
         | undefined;
       if (engine) engine.visible = isFighter && ship.repaired;
     }
-    if (ship.repaired && !ship.grounded && hash(Math.floor(t * 45), 5) > 0.35) {
-      const dir = new THREE.Vector3(0, 2, 4.8).applyAxisAngle(
-        new THREE.Vector3(0, 1, 0),
-        ship.yaw,
-      );
-      this.burst(
-        { x: ship.x + dir.x, y: ship.y + dir.y, z: ship.z + dir.z },
-        2,
-        0x8edfff,
-        4,
-      );
+    const speed = Math.hypot(ship.vx ?? 0, ship.vy ?? 0, ship.vz ?? 0);
+    const isBoosting = pilotFlight
+      ? pilotFlight.boosting
+      : (ship.thrust || 0) > 1.8 || speed > 42;
+    const isBraking = pilotFlight
+      ? pilotFlight.braking
+      : (ship.vy ?? 0) < -15;
+    if (isFighter) {
+      if (this.propulsionFX) this.propulsionFX.rootGroup.visible = true;
+      this.propulsionFX?.update(dt, ship, null, isBoosting, isBraking);
+      if (this.intergalacticPropulsionFX) this.intergalacticPropulsionFX.rootGroup.visible = false;
+    } else {
+      if (this.propulsionFX) this.propulsionFX.rootGroup.visible = false;
+      if (this.intergalacticPropulsionFX) {
+        const hull = this.scene.getObjectByName("intergalactic-ship");
+        if (!ship.grounded && ship.repaired && hull) {
+          this.intergalacticPropulsionFX.rootGroup.visible = true;
+          this.intergalacticPropulsionFX.rootGroup.position.copy(hull.position);
+          this.intergalacticPropulsionFX.rootGroup.quaternion.copy(hull.quaternion);
+          this.intergalacticPropulsionFX.update(dt, ship, null, isBoosting, isBraking);
+        } else {
+          this.intergalacticPropulsionFX.rootGroup.visible = false;
+        }
+      }
+    }
+
+    if (isFighter && ship.repaired && !ship.grounded && hash(Math.floor(t * 60), 5) > 0.2) {
+      for (const side of [-1.15, 1.15]) {
+        const dir = new THREE.Vector3(side, 1.6, 4.8 + (isBoosting ? 3.0 : 0.8)).applyAxisAngle(
+          new THREE.Vector3(0, 1, 0),
+          ship.yaw,
+        );
+        this.burst(
+          { x: ship.x + dir.x, y: ship.y + dir.y, z: ship.z + dir.z },
+          isBoosting ? 3 : 1,
+          isBoosting ? 0xa5e5ff : 0x00e5ff,
+          isBoosting ? 5 : 2.5,
+        );
+      }
     }
     if (!ship.repaired && hash(Math.floor(t * 25), 3) > 0.85)
       this.burst({ x: ship.x, y: ship.y + 3, z: ship.z + 3 }, 2, 0xa78967, 1.6);

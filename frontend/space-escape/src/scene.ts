@@ -3,6 +3,7 @@ import { AdventureView, optimizeModel } from "./adventure-view";
 import { missionObjective } from "../shared/objectives";
 import { celestialCockpitPose, celestialFlightFrame } from "../shared/celestial-flight";
 import { InterplanetarySystem, computeCelestialAlignment } from "./interplanetary";
+import { cosmicAudio } from "./sound-engine";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
@@ -1048,15 +1049,22 @@ export class GameView {
     this.interplanetary.onModelLoaded = () => void this.compilePipeline();
     void this.compilePipeline();
   }
-  async audio() {
+  async audio(initialVolume?: number) {
     if (this.listener) {
       await this.listener.context.resume();
+      if (initialVolume !== undefined) {
+        this.listener.setMasterVolume(initialVolume);
+        cosmicAudio.setVolume(initialVolume);
+      }
       return;
     }
     this.listener = new THREE.AudioListener();
     this.camera.add(this.listener);
     await this.listener.context.resume();
-    this.listener.setMasterVolume(0.5);
+    const vol = initialVolume !== undefined ? initialVolume : 0.5;
+    this.listener.setMasterVolume(vol);
+    cosmicAudio.setVolume(vol);
+    void cosmicAudio.init(this.listener.context, this.listener.getInput());
     const ctx = this.listener.context,
       buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate),
       data = buffer.getChannelData(0);
@@ -1170,8 +1178,9 @@ export class GameView {
     t: number,
     playing: boolean,
     physics?: MovementWorld | null,
+    pilotFlight?: { boosting: boolean; braking: boolean },
   ) {
-    this.adventure.update(s, me, dt, t);
+    this.adventure.update(s, me, dt, t, pilotFlight);
     let cameraShip = s?.adventure.ship;
     if (cameraShip && me && me.seat >= 0) {
       const kind = cameraShip.kind ?? "light_fighter";
@@ -1406,6 +1415,38 @@ export class GameView {
         ctx.currentTime,
         0.12,
       );
+    }
+    if (s?.adventure.ship && playing) {
+      const ship = s.adventure.ship;
+      const speed = Math.hypot(ship.vx ?? 0, ship.vy ?? 0, ship.vz ?? 0);
+      const isBoosting = pilotFlight
+        ? pilotFlight.boosting
+        : (ship.thrust || 0) > 1.8 || speed > 42;
+      const isBraking = pilotFlight
+        ? pilotFlight.braking
+        : (ship.vy ?? 0) < -15;
+      const inDeepSpace = (ship.y ?? 0) > 850;
+      cosmicAudio.updateShipAudio({
+        speed,
+        altitude: ship.y ?? 0,
+        grounded: ship.grounded,
+        boosting: isBoosting,
+        braking: isBraking,
+        climbing: (ship.vy ?? 0) > 5,
+        repaired: ship.repaired,
+        inDeepSpace,
+      });
+
+      let nearestGateDist = Infinity;
+      for (const [id, planet] of this.interplanetary.planets) {
+        if (id.startsWith("warpgate")) {
+          const d = planet.group.position.distanceTo(this.camera.position);
+          if (d < nearestGateDist) nearestGateDist = d;
+        }
+      }
+      cosmicAudio.updatePortalProximity(nearestGateDist);
+    } else {
+      cosmicAudio.pause();
     }
     this.syncSkyCamera();
     this.musicLayers.forEach((a, i) => {
