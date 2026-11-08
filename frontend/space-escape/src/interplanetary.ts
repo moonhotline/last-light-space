@@ -473,9 +473,9 @@ export class InterplanetarySystem {
           emissiveIntensity: 0.3,
         });
       } else if (id === "venus") {
-        mat = new THREE.MeshPhysicalMaterial({
+        mat = new THREE.MeshStandardMaterial({
           color: 0xd9a441, roughness: 0.52, metalness: 0.02,
-          transmission: 0.08, thickness: 1.2, emissive: 0x8a4f16, emissiveIntensity: 0.18,
+          emissive: 0x8a4f16, emissiveIntensity: 0.18,
         });
       } else if (id === "mars") {
         mat = new THREE.MeshStandardMaterial({
@@ -545,27 +545,8 @@ export class InterplanetarySystem {
       if (rings) pGroup.add(rings);
       for (const landmark of body.landmarks) pGroup.add(buildLandmark(body, landmark));
 
-      if (id === "mercury") {
-        // Frame-sliced progressive mounting for alien planet surface & atmosphere to eliminate synchronous compile stalls
-        if (typeof requestAnimationFrame !== "undefined") {
-          requestAnimationFrame(() => {
-            pGroup.add(surfaceMesh);
-            requestAnimationFrame(() => {
-              pGroup.add(rayleighMesh);
-              pGroup.add(atmoMesh);
-              this.onModelLoaded?.();
-            });
-          });
-        } else {
-          pGroup.add(surfaceMesh);
-          pGroup.add(rayleighMesh);
-          pGroup.add(atmoMesh);
-        }
-      } else {
-        pGroup.add(surfaceMesh);
-        pGroup.add(rayleighMesh);
-        pGroup.add(atmoMesh);
-      }
+      // The fallback must exist from frame zero, before downloaded detail arrives.
+      pGroup.add(surfaceMesh, rayleighMesh, atmoMesh);
 
       // Planetary orbital ring line
       const orbitDist = Math.hypot(body.position.x, body.position.z);
@@ -842,12 +823,18 @@ export class InterplanetarySystem {
       if (entry.portal) entry.portal.material.uniforms.time.value += dt;
       entry.group.visible = true; // All planets must remain visible through frustum culling
       entry.group.frustumCulled = true;
+      entry.surfaceMesh.visible = true;
+      entry.surfaceMesh.frustumCulled = true;
+      if (id === "kepler") {
+        const mat = entry.surfaceMesh.material as THREE.MeshStandardMaterial;
+        mat.transparent = true;
+        mat.opacity = surfaceOpacity;
+      }
 
-      // Handle high detail vs surface mesh without ever hiding planets
+      // Keep both layers mounted, including while the detail mount is pending.
       if (entry.highDetail) {
         entry.highDetail.visible = true;
         entry.highDetail.frustumCulled = true;
-        entry.surfaceMesh.visible = false;
         if (id === "kepler") {
           entry.highDetail.traverse((c) => {
             if (c instanceof THREE.Mesh && c.material) {
@@ -858,14 +845,6 @@ export class InterplanetarySystem {
               }
             }
           });
-        }
-      } else {
-        entry.surfaceMesh.visible = true;
-        entry.surfaceMesh.frustumCulled = true;
-        if (id === "kepler" && entry.surfaceMesh.material) {
-          const mat = entry.surfaceMesh.material as THREE.MeshStandardMaterial;
-          mat.transparent = true;
-          mat.opacity = surfaceOpacity;
         }
       }
 
@@ -885,29 +864,7 @@ export class InterplanetarySystem {
         atmoMat.opacity = THREE.MathUtils.lerp(0.18, 0.42, rayleighBlend);
       }
     }
-    this.camera.updateMatrixWorld();
-    const frustum = new THREE.Frustum();
-    const projScreenMatrix = new THREE.Matrix4().multiplyMatrices(
-      this.camera.projectionMatrix,
-      this.camera.matrixWorldInverse,
-    );
-    frustum.setFromProjectionMatrix(projScreenMatrix);
-    const isInFrustum = (pos: THREE.Vector3, radius: number): boolean => {
-      return frustum.intersectsSphere(new THREE.Sphere(pos, radius));
-    };
-
-    for (const [id, ship] of this.shipMeshes) {
-      ship.visible = isInFrustum(ship.position, id === "intergalactic" ? 60 : 40);
-    }
-    if (this.alien1Model) {
-      this.alien1Model.visible = isInFrustum(this.alien1Model.position, 20);
-    }
-    if (this.alien2Model) {
-      this.alien2Model.visible = isInFrustum(this.alien2Model.position, 20);
-    }
-    if (this.mineralsModel) {
-      this.mineralsModel.visible = isInFrustum(this.mineralsModel.position, 20);
-    }
+    // Leave visibility to gameplay. Three.js culls each mesh with current render matrices.
     if (this.guideMixer) {
       this.guideMixer.update(dt);
     }
