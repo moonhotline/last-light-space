@@ -6,8 +6,9 @@ import { SOLAR_SYSTEM } from "../../frontend/space-escape/shared/celestial";
 import { groundAt, SPAWN } from "../../frontend/space-escape/shared/map";
 import { FIGHTER_POS } from "../../frontend/space-escape/shared/adventure-data";
 
-test("planet surface and atmosphere share elevated global coordinates", () => {
+test("orbital planet surfaces and atmospheres share elevated global coordinates", () => {
   const system = new InterplanetarySystem(new Scene(), new PerspectiveCamera());
+  system.step(0, { x: 0, y: 1000, z: 0 });
   for (const [id, planet] of system.planets) {
     assert.deepEqual(planet.group.position.toArray(), Object.values(SOLAR_SYSTEM[id].position));
     assert.equal(planet.surfaceMesh.parent, planet.group);

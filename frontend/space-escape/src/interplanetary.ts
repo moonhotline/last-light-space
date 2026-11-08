@@ -22,6 +22,10 @@ import {
 
 type RenderShip = Pick<AdventureShip, "x" | "y" | "z" | "yaw" | "bank" | "seats"> & Partial<AdventureShip>;
 
+// A 6 km cloud envelope subtends ~13 degrees at spawn and fits the 30 km far plane.
+const KEPLER_SKY_POSITION = new THREE.Vector3(160, 26500, -2600);
+const KEPLER_SKY_SCALE = 6000 / (SOLAR_SYSTEM.kepler.radius * 2);
+
 export function normalizeModelContainer(
   obj: THREE.Object3D,
   targetSize: number,
@@ -414,6 +418,10 @@ export class InterplanetarySystem {
     for (const [id, body] of Object.entries(SOLAR_SYSTEM)) {
       const pGroup = new THREE.Group();
       pGroup.position.set(body.position.x, body.position.y, body.position.z);
+      if (id === "kepler") {
+        pGroup.position.copy(KEPLER_SKY_POSITION);
+        pGroup.scale.setScalar(KEPLER_SKY_SCALE);
+      }
       pGroup.frustumCulled = true;
 
       if (id === "warpgate") {
@@ -480,8 +488,9 @@ export class InterplanetarySystem {
           metalness: 0.05,
           emissive: 0x102b3a,
           emissiveIntensity: 0.32,
-          transparent: true,
-          opacity: 0.38,
+          transparent: id !== "kepler",
+          opacity: id === "kepler" ? 1 : 0.38,
+          fog: id !== "kepler",
         });
       }
 
@@ -492,6 +501,8 @@ export class InterplanetarySystem {
       }
       const geo = new THREE.SphereGeometry(body.radius, 64, 48);
       const surfaceMesh = new THREE.Mesh(geo, mat);
+      // The GLTF includes clouds beyond its terrain: keep the backup under the crust.
+      if (id === "kepler") surfaceMesh.scale.setScalar(0.68);
       surfaceMesh.castShadow = true;
       surfaceMesh.receiveShadow = true;
       surfaceMesh.frustumCulled = true;
@@ -501,7 +512,8 @@ export class InterplanetarySystem {
       const rayleighMat = new THREE.MeshBasicMaterial({
         color: id === "kepler" ? 0x1b3547 : body.atmosphereColor,
         transparent: true,
-        opacity: id === "kepler" ? 0.78 : 0.18,
+        opacity: id === "kepler" ? 0.04 : 0.18,
+        fog: id !== "kepler",
         depthWrite: false,
         side: THREE.FrontSide,
       });
@@ -517,8 +529,10 @@ export class InterplanetarySystem {
         opacity: 0.18,
         side: THREE.BackSide,
         depthWrite: false,
+        fog: id !== "kepler",
       });
       const atmoMesh = new THREE.Mesh(atmoGeo, atmoMat);
+      if (id === "kepler") atmoMesh.scale.setScalar(body.radius * 1.06 / body.atmosphereRadius);
       atmoMesh.frustumCulled = true;
 
       const rings = body.hasRings ? buildPlanetaryRings(body) : undefined;
@@ -737,20 +751,20 @@ export class InterplanetarySystem {
     const tAtmo = THREE.MathUtils.clamp((shipPos.y - groundLevel) / (orbitAltitude - groundLevel), 0, 1);
     const spaceFactor = tAtmo * tAtmo * (3 - 2 * tAtmo); // smoothstep
     const rayleighBlend = 1.0 - spaceFactor;
-    const surfaceOpacity = THREE.MathUtils.lerp(0.38, 1.0, spaceFactor);
-
-    // Relative celestial distance & parallax factor for Kepler:
-    // On ground (spaceFactor = 0): Kepler is placed at distant sky position (160, 2800, -2600)
-    // As player ascends (spaceFactor -> 1): smoothly transitions to orbital solar system coordinates
+    // Enlarge the authored planet overhead on the surface; restore its physical
+    // position and radius before orbital capture so flight and landing still align.
     const keplerEntry = this.planets.get("kepler");
     if (keplerEntry) {
-      const distantSkyPos = new THREE.Vector3(160, 2800, -2600);
+      const inBasin = !capture && Math.abs(shipPos.x) < HALF - 10 && Math.abs(shipPos.z) < HALF - 10;
+      const keplerBlend = inBasin ? THREE.MathUtils.smoothstep(altitude, 350, 650) : 1;
       const orbitalPos = new THREE.Vector3(
         SOLAR_SYSTEM.kepler.position.x,
         SOLAR_SYSTEM.kepler.position.y,
         SOLAR_SYSTEM.kepler.position.z,
       );
-      keplerEntry.group.position.lerpVectors(distantSkyPos, orbitalPos, spaceFactor);
+      keplerEntry.group.position.lerpVectors(KEPLER_SKY_POSITION, orbitalPos, keplerBlend);
+      keplerEntry.group.scale.setScalar(THREE.MathUtils.lerp(KEPLER_SKY_SCALE, 1, keplerBlend));
+      keplerEntry.surfaceMesh.scale.setScalar(THREE.MathUtils.lerp(0.68, 1, keplerBlend));
     }
 
     // Update ALL planets:
@@ -768,27 +782,11 @@ export class InterplanetarySystem {
       entry.group.frustumCulled = true;
       entry.surfaceMesh.visible = true;
       entry.surfaceMesh.frustumCulled = true;
-      if (id === "kepler") {
-        const mat = entry.surfaceMesh.material as THREE.MeshStandardMaterial;
-        mat.transparent = true;
-        mat.opacity = surfaceOpacity;
-      }
 
-      // Keep both layers mounted, including while the detail mount is pending.
+      // Keep both layers mounted, including while the authored asset is loading.
       if (entry.highDetail) {
         entry.highDetail.visible = true;
         entry.highDetail.frustumCulled = true;
-        if (id === "kepler") {
-          entry.highDetail.traverse((c) => {
-            if (c instanceof THREE.Mesh && c.material) {
-              const mats = Array.isArray(c.material) ? c.material : [c.material];
-              for (const m of mats) {
-                m.transparent = true;
-                m.opacity = surfaceOpacity;
-              }
-            }
-          });
-        }
       }
 
       // Atmospheric Rayleigh scattering blending:
@@ -798,13 +796,13 @@ export class InterplanetarySystem {
         entry.rayleighMesh.visible = true;
         entry.rayleighMesh.frustumCulled = true;
         const mat = entry.rayleighMesh.material as THREE.MeshBasicMaterial;
-        mat.opacity = (id === "kepler" ? 0.75 : 0.18) * rayleighBlend;
+        mat.opacity = (id === "kepler" ? 0.04 : 0.18) * rayleighBlend;
       }
       if (entry.atmosphereMesh) {
         entry.atmosphereMesh.visible = true;
         entry.atmosphereMesh.frustumCulled = true;
         const atmoMat = entry.atmosphereMesh.material as THREE.MeshBasicMaterial;
-        atmoMat.opacity = THREE.MathUtils.lerp(0.18, 0.42, rayleighBlend);
+        atmoMat.opacity = id === "kepler" ? 0.12 : THREE.MathUtils.lerp(0.18, 0.42, rayleighBlend);
       }
     }
     // Leave visibility to gameplay. Three.js culls each mesh with current render matrices.
@@ -927,11 +925,20 @@ export class InterplanetarySystem {
       clean3DEntityText(model);
       model.visible = true;
       model.frustumCulled = true;
+      if (id === "kepler") {
+        model.traverse((node) => {
+          if (!(node instanceof THREE.Mesh)) return;
+          // Preserve the authored colors, ocean and clouds at sky distances.
+          node.castShadow = false;
+          node.receiveShadow = false;
+          for (const material of Array.isArray(node.material) ? node.material : [node.material]) {
+            material.fog = false;
+          }
+        });
+      }
       entry.highDetail = model;
-      requestAnimationFrame(() => {
-        entry.group.add(model);
-        this.onModelLoaded?.();
-      });
+      entry.group.add(model);
+      this.onModelLoaded?.();
     };
 
     for (const [id, key, url] of [
