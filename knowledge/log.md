@@ -36,3 +36,4 @@
 | 2026-11-08 05:00 | Commit a011e36 | moonhotline | 渲染管线与 LOD | Merge pull request #33 from moonhotline/fix/ship-vibration-and-celestial-renderi |
 | 2026-11-08 05:49 | Commit 833b1ef | moonhotline | 天体物理与大气, 运动物理系统, 渲染管线与 LOD | Merge pull request #34 from moonhotline/fix/purge-procedural-models-and-restore- |
 | 2026-11-08 05:52 | Commit 78034e8 | moonhotline | 全库/配置同步 | docs(readme): showcase cinematic Last Light identity and motion artwork |
+| 2026-11-08 11:53 | Commit ca0ef52 | moonhotline | 渲染管线与 LOD | Merge pull request #35 from moonhotline/fix/kepler-overhead-model-and-x-descent |
