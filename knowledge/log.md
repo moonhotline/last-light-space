@@ -35,3 +35,4 @@
 | 2026-11-07 16:09 | Commit f75097c | moonhotline | 全库/配置同步 | Merge pull request #32 from moonhotline/fix/preserve-authored-ship-models |
 | 2026-11-08 05:00 | Commit a011e36 | moonhotline | 渲染管线与 LOD | Merge pull request #33 from moonhotline/fix/ship-vibration-and-celestial-renderi |
 | 2026-11-08 05:49 | Commit 833b1ef | moonhotline | 天体物理与大气, 运动物理系统, 渲染管线与 LOD | Merge pull request #34 from moonhotline/fix/purge-procedural-models-and-restore- |
+| 2026-11-08 05:52 | Commit 78034e8 | moonhotline | 全库/配置同步 | docs(readme): showcase cinematic Last Light identity and motion artwork |
