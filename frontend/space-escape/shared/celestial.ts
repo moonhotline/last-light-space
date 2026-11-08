@@ -203,9 +203,7 @@ export type FlightFlightMode =
 
 /** Spaceship types */
 export type SpaceshipKind =
-  | "skiff" // Original Peregrine Skiff
   | "light_fighter" // High speed light fighter
-  | "cruiser" // Heavy, stable cruiser
   | "intergalactic"; // Long-range warp-drive starship
 
 export interface FlightSystemState {

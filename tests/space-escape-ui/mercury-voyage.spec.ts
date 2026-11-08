@@ -24,28 +24,28 @@ test("Mercury Voyage: dual ships at spawn, unarmed character, space cruise paral
   // Verify dual ships existence & spacing in the scene
   const dualShipsInfo = await page.evaluate(() => {
     const view = (window as any).__lastLight.view();
-    const skiff = view.adventure.ship;
-    const cruiser = view.interplanetary.cruiserModel;
+    const fighter = view.adventure.ship;
+    const cruiser = view.interplanetary.intergalacticModel;
     return {
-      skiffPos: { x: skiff.position.x, y: skiff.position.y, z: skiff.position.z },
+      fighterPos: { x: fighter.position.x, y: fighter.position.y, z: fighter.position.z },
       cruiserPos: cruiser ? { x: cruiser.position.x, y: cruiser.position.y, z: cruiser.position.z } : null,
-      skiffVisible: skiff.visible,
+      fighterVisible: fighter.visible,
       cruiserVisible: cruiser ? cruiser.visible : false,
       interactionHidden: document.getElementById("interaction")?.hidden,
       targetMarkerHidden: document.getElementById("targetMarker")?.hidden,
     };
   });
 
-  expect(dualShipsInfo.skiffVisible).toBe(true);
+  expect(dualShipsInfo.fighterVisible).toBe(true);
   expect(dualShipsInfo.cruiserVisible).toBe(true);
   expect(dualShipsInfo.cruiserPos).not.toBeNull();
 
   const shipSpacing = Math.hypot(
-    dualShipsInfo.skiffPos.x - dualShipsInfo.cruiserPos!.x,
-    dualShipsInfo.skiffPos.z - dualShipsInfo.cruiserPos!.z,
+    dualShipsInfo.fighterPos.x - dualShipsInfo.cruiserPos!.x,
+    dualShipsInfo.fighterPos.z - dualShipsInfo.cruiserPos!.z,
   );
-  expect(shipSpacing).toBeGreaterThanOrEqual(15);
-  expect(shipSpacing).toBeLessThanOrEqual(22);
+  expect(shipSpacing).toBeGreaterThanOrEqual(30);
+  expect(shipSpacing).toBeLessThanOrEqual(45);
 
   // Verify zero floating text labels over ships
   expect(dualShipsInfo.interactionHidden).toBe(true);
@@ -54,7 +54,7 @@ test("Mercury Voyage: dual ships at spawn, unarmed character, space cruise paral
   const hasFloatingShipText = await page.evaluate(() => {
     const view = (window as any).__lastLight.view();
     let foundText = false;
-    [view.adventure.ship, view.interplanetary.cruiserModel].forEach((root) => {
+    [view.adventure.ship, view.interplanetary.intergalacticModel].forEach((root) => {
       if (!root) return;
       root.traverse((c: any) => {
         if (c.isSprite) foundText = true;

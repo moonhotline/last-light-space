@@ -7,8 +7,6 @@ import {
 } from "../../frontend/space-escape/shared/map";
 import {
   SHIP_HOME,
-  SHIP1_POS,
-  SHIP2_POS,
   FIGHTER_POS,
   INTERGALACTIC_POS,
   ALIEN1_POS,
@@ -24,8 +22,6 @@ import {
 test("Spawn outpost entities layout guarantees non-clipping clearance and ground alignment", () => {
   const entities = {
     Player: { x: SPAWN.x, z: SPAWN.z },
-    Skiff: { x: SHIP1_POS.x, z: SHIP1_POS.z },
-    Cruiser: { x: SHIP2_POS.x, z: SHIP2_POS.z },
     Blerk: { x: 8, z: 335 },
     Fighter: { x: FIGHTER_POS.x, z: FIGHTER_POS.z },
     Intergalactic: { x: INTERGALACTIC_POS.x, z: INTERGALACTIC_POS.z },
@@ -76,7 +72,7 @@ test("Spawn outpost entities layout guarantees non-clipping clearance and ground
   );
 });
 
-test("InterplanetarySystem renders Fighter, Intergalactic, Alien1, Alien2 and Minerals at spawn from frame zero", () => {
+test("InterplanetarySystem reserves clean groups for downloaded spawn assets from frame zero", () => {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 5000);
   camera.position.set(SPAWN.x, groundAt(SPAWN.x, SPAWN.z) + 1.8, SPAWN.z);
@@ -92,6 +88,10 @@ test("InterplanetarySystem renders Fighter, Intergalactic, Alien1, Alien2 and Mi
   assert.ok(system.alien1Model, "Alien Crawler model must exist");
   assert.ok(system.alien2Model, "Reptillian Guardian model must exist");
   assert.ok(system.mineralsModel, "Minerals cluster model must exist");
+
+  for (const model of [system.fighterModel, system.intergalacticModel, system.alien1Model, system.alien2Model, system.mineralsModel]) {
+    assert.equal(model.children.length, 0, "pending assets must have no placeholder geometry");
+  }
 
   // Check coordinates
   assert.equal(system.fighterModel.position.x, FIGHTER_POS.x);

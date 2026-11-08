@@ -1,34 +1,34 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { authoredModel } from "./helpers/authored-model";
 import * as THREE from "three";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { AdventureView } from "../../frontend/space-escape/src/adventure-view";
 import { GameView } from "../../frontend/space-escape/src/scene";
-import { alignShipToGround } from "../../frontend/space-escape/src/interplanetary";
+import { alignShipToGround, normalizeModelContainer, InterplanetarySystem } from "../../frontend/space-escape/src/interplanetary";
 import { createAdventure } from "../../frontend/space-escape/shared/adventure";
-import { SHIP1_POS } from "../../frontend/space-escape/shared/adventure-data";
+import { FIGHTER_POS } from "../../frontend/space-escape/shared/adventure-data";
 import { celestialCockpitPose } from "../../frontend/space-escape/shared/celestial-flight";
 import type { Snapshot, Player } from "../../frontend/space-escape/shared/types";
 
 const dt = 1 / 60;
 
-async function skiffView() {
+async function fighterView() {
   const view = new AdventureView(new THREE.Scene(), () => {}, () => {});
-  assert.equal(view.ship.children.length, 0, "the skiff must wait in a clean Group");
-  const data = await readFile(new URL("../../frontend/space-escape/public/assets/skiff.glb", import.meta.url));
-  const gltf = await new GLTFLoader().parseAsync(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength), "");
-  view.ship.add(gltf.scene);
+  assert.equal(view.ship.children.length, 0, "the fighter must wait in a clean Group");
+  const gltf = await authoredModel("/assets/models/fighter/scene.gltf");
+  const model = normalizeModelContainer(gltf.scene, 11);
+  view.ship.userData.chassisClearance = model.userData.chassisClearance;
+  view.ship.add(model);
   view.scene.add(view.ship);
-  alignShipToGround(view.ship, SHIP1_POS.x, SHIP1_POS.z, Math.PI, 3.8, 5.5, 0.05);
+  alignShipToGround(view.ship, FIGHTER_POS.x, FIGHTER_POS.z, 0, 3.5, 5.5, 0.05);
   const state = { adventure: createAdventure(), players: [], time: 0 } as unknown as Snapshot;
   const step = () => view.update(state, null, dt, state.time += dt);
   for (let frame = 0; frame < 120; frame++) step();
   return { view, state, ship: state.adventure.ship, step };
 }
 
-test("boarding the authored skiff does not change its stationary ground pose", async () => {
-  const { view, ship, step } = await skiffView();
+test("boarding the authored fighter does not change its stationary ground pose", async () => {
+  const { view, ship, step } = await fighterView();
   const parked = view.ship.position.clone();
   const orientation = view.ship.quaternion.clone();
   ship.seats[0] = "pilot";
@@ -37,8 +37,8 @@ test("boarding the authored skiff does not change its stationary ground pose", a
   assert.ok(view.ship.quaternion.angleTo(orientation) < 1e-5, "boarding must retain the terrain slope");
 });
 
-test("slow skiff takeoff never dips as ground contact and landing gear change", async () => {
-  const { view, ship, step } = await skiffView();
+test("slow fighter takeoff never dips as ground contact and landing gear change", async () => {
+  const { view, ship, step } = await fighterView();
   ship.seats[0] = "pilot";
   let previousY = view.ship.position.y;
   for (let frame = 0; frame < 180; frame++) {
@@ -48,11 +48,11 @@ test("slow skiff takeoff never dips as ground contact and landing gear change", 
     assert.ok(view.ship.position.y >= previousY - 1e-5, `frame ${frame}: takeoff must not dip`);
     previousY = view.ship.position.y;
   }
-  assert.ok(view.ship.position.y > SHIP1_POS.y + 2, "the skiff must leave the pad");
+  assert.ok(view.ship.position.y > FIGHTER_POS.y + 2, "the fighter must leave the pad");
 });
 
-test("landed skiff keeps its pose when the pilot exits after a flight", async () => {
-  const { view, ship, step } = await skiffView();
+test("landed fighter keeps its pose when the pilot exits after a flight", async () => {
+  const { view, ship, step } = await fighterView();
   ship.seats[0] = "pilot";
   ship.flightTime = 10;
   for (let frame = 0; frame < 120; frame++) step();
@@ -63,8 +63,8 @@ test("landed skiff keeps its pose when the pilot exits after a flight", async ()
   assert.ok(view.ship.position.y > ship.y + 0.8, "landing must retain hull clearance");
 });
 
-test("deep-space skiff can fly below the basin without a phantom ground floor", async () => {
-  const { view, ship, step } = await skiffView();
+test("deep-space fighter can fly below the basin without a phantom ground floor", async () => {
+  const { view, ship, step } = await fighterView();
   Object.assign(ship, { x: 10000, y: -1000, z: 10000, grounded: false });
   view.ship.position.set(ship.x, ship.y, ship.z);
   step();
@@ -122,4 +122,46 @@ test("flight camera initializes bank and pitch from the current ship on entry an
     assert.equal(view.flightSpringArm.pitch, vy / 28 * 0.18);
     assert.equal(view.shake, 0);
   }
+});
+
+test("forward flight does not inherit per-frame terrain height or ground flag flicker", async () => {
+  const { view, ship, step } = await fighterView();
+  Object.assign(ship, { y: 80, vx: 24, vy: 0, grounded: false });
+  for (let frame = 0; frame < 100; frame++) step();
+  const height = view.ship.position.y;
+  for (let frame = 0; frame < 180; frame++) {
+    ship.x = -80 + frame * 0.4;
+    ship.z = 292;
+    ship.grounded = frame % 2 === 0;
+    step();
+    assert.ok(Math.abs(view.ship.position.y - height) < 1e-6,
+      `frame ${frame}: flight Y must follow the snapshot instead of terrain`);
+  }
+});
+
+test("heavy starship interpolates consecutive snapshots instead of teleporting", () => {
+  const system = new InterplanetarySystem(new THREE.Scene(), new THREE.PerspectiveCamera());
+  const ship = { ...createAdventure().ship, kind: "intergalactic" as const,
+    x: 100, y: 900, z: -100, grounded: false };
+  system.setShipState(ship, dt);
+  ship.x += 12;
+  ship.y += 6;
+  system.setShipState(ship, dt);
+  const model = system.intergalacticModel!;
+  assert.ok(model.position.x > 100 && model.position.x < ship.x);
+  assert.ok(model.position.y > 900 && model.position.y < ship.y);
+  for (let frame = 0; frame < 120; frame++) system.setShipState(ship, dt);
+  assert.ok(model.position.distanceTo(new THREE.Vector3(ship.x, ship.y, ship.z)) < 1e-6);
+});
+
+test("cockpit smooths stepped flight altitude without applying a terrain floor", () => {
+  const { view, state, step } = cameraView(false);
+  Object.assign(state.adventure.ship, { x: 10000, y: -1000, z: 10000 });
+  step();
+  const previous = view.camera.position.clone();
+  state.adventure.ship.y += 6;
+  step();
+  assert.ok(view.camera.position.y > previous.y);
+  assert.ok(view.camera.position.y < previous.y + 6);
+  assert.ok(view.camera.position.y < -990, "deep-space flight must not snap to the basin floor");
 });

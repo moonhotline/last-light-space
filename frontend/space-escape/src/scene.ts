@@ -235,6 +235,8 @@ export class GameView {
   earth = new THREE.Group();
   giant = new THREE.Group();
   moon = new THREE.Group();
+  private flightPosition: THREE.Vector3 | null = null;
+  private flightShipKind: string | null = null;
   sun = new THREE.DirectionalLight(0xffe2b3, 3.1);
   ready = false;
   frames = 0;
@@ -711,7 +713,36 @@ export class GameView {
       }),
     );
     this.sky.add(starfield);
-    // Removed old procedural billboard giant and old meshes so real high-detail solar system planets shine in sky.
+    // Decorative Kepler stays in the camera-relative sky pass at every altitude.
+    this.giant.name = "kepler-sky";
+    this.sky.add(this.giant);
+    this.giant.position.set(4800, 4500, -9200);
+    const gas = new THREE.Mesh(
+      new THREE.SphereGeometry(1350, 96, 64),
+      new THREE.ShaderMaterial({
+        vertexShader: vertex,
+        fragmentShader: `varying vec2 vUv;varying vec3 vNormal;void main(){float q=vUv.y+sin(vUv.x*22.+vUv.y*45.)*.003;float b=.5+.13*sin(q*94.)+.065*sin(q*210.+sin(vUv.x*31.))+.04*sin(q*470.);vec3 c=mix(vec3(.28,.19,.12),vec3(.78,.62,.40),b);float l=smoothstep(-.25,.7,dot(normalize(vNormal),normalize(vec3(-.9,.22,.32))));c*=.035+l;gl_FragColor=vec4(c,1.);}`,
+      }),
+    );
+    gas.name = "kepler-cloud-bands";
+    this.giant.add(gas);
+    const ringGeo = new THREE.RingGeometry(1770, 3440, 240, 10);
+    const ring = new THREE.Mesh(
+      ringGeo,
+      new THREE.ShaderMaterial({
+        side: THREE.DoubleSide,
+        transparent: true,
+        depthWrite: false,
+        vertexShader: vertex,
+        fragmentShader: `varying vec3 vPosition;void main(){float r=length(vPosition.xy);float t=(r-1770.)/1670.;float bands=.62+.08*sin(r*.19)+.12*sin(r*.048)+.045*sin(r*.81);float gap=1.-.91*exp(-pow((t-.45)/.018,2.));gap*=1.-.5*exp(-pow((t-.73)/.015,2.));vec3 c=mix(vec3(.39,.29,.18),vec3(.92,.76,.47),bands);float shadow=smoothstep(600.,1800.,vPosition.x+abs(vPosition.y)*1.3);c*=mix(.23,1.,shadow);float edge=smoothstep(0.,.04,t)*(1.-smoothstep(.90,1.,t));gl_FragColor=vec4(c,bands*gap*edge*.93);}`,
+      }),
+    );
+    ring.rotation.x = 1.42;
+    ring.rotation.z = 0;
+    this.giant.rotation.z = 0.42;
+    ring.name = "kepler-rings";
+    this.giant.add(ring);
+    this.atmosphere(this.giant, 1356, 0xe3c197, 0.24);
     // A distant sun with a soft optical halo.
     const sun = new THREE.Mesh(
       new THREE.SphereGeometry(75, 24, 16),
@@ -737,11 +768,13 @@ export class GameView {
     halo.scale.set(2100, 2100, 1);
     this.sky.add(halo);
 
-    // The rising moon (unlocked upon completing all 3 beacons / star map constellation)
-    this.moon.position.set(0, -350, -6500);
+    // The moon is visible from the first frame, independent of mission progress.
+    this.moon.name = "moon-sky";
+    this.moon.position.set(-3600, 1400, -8500);
     const moonTex = typeof document !== "undefined"
       ? new THREE.TextureLoader().load("/assets/moon.jpg")
       : null;
+    if (moonTex) moonTex.colorSpace = THREE.SRGBColorSpace;
     const moonMesh = new THREE.Mesh(
       new THREE.SphereGeometry(180, 32, 24),
       new THREE.MeshBasicMaterial({
@@ -767,6 +800,14 @@ export class GameView {
       this.moon.add(moonHalo);
     }
     this.sky.add(this.moon);
+  }
+  syncSkyCamera() {
+    this.sky.position.copy(this.camera.position);
+    this.skyCamera.position.copy(this.camera.position);
+    this.skyCamera.quaternion.copy(this.camera.quaternion);
+    this.skyCamera.fov = this.camera.fov;
+    this.skyCamera.aspect = this.camera.aspect;
+    this.skyCamera.updateProjectionMatrix();
   }
   radialTexture() {
     if (typeof document === "undefined") return null;
@@ -1161,6 +1202,18 @@ export class GameView {
     physics?: MovementWorld | null,
   ) {
     this.adventure.update(s, me, dt, t);
+    let cameraShip = s?.adventure.ship;
+    if (cameraShip && me && me.seat >= 0) {
+      const kind = cameraShip.kind ?? "light_fighter";
+      if (!this.flightPosition || this.flightShipKind !== kind) this.flightPosition = v3(cameraShip);
+      this.flightShipKind = kind;
+      // Share the hull's response rate; never clamp an airborne camera to terrain.
+      this.flightPosition.lerp(v3(cameraShip), 1 - Math.exp(-dt * 16));
+      cameraShip = { ...cameraShip, x: this.flightPosition.x, y: this.flightPosition.y, z: this.flightPosition.z };
+    } else {
+      this.flightPosition = null;
+      this.flightShipKind = null;
+    }
     this.toolModel.visible = !!me && !this.thirdPerson && me.seat < 0 && this.activeWeapon !== "none";
     this.rifleFill.visible = this.toolModel.visible && this.activeWeapon === "rifle";
     if (this.fpHandRig) this.fpHandRig.visible = this.toolModel.visible;
@@ -1196,7 +1249,7 @@ export class GameView {
       }
       const speed = Math.hypot(me.vx, me.vz);
       if (me.seat >= 0 && s) {
-        const ship = s.adventure.ship;
+        const ship = cameraShip!;
         const shipSpeed = Math.hypot(ship.vx, ship.vy, ship.vz);
         const speedRatio = clamp(shipSpeed / (ship.kind === "intergalactic" ? 400 : 320), 0, 1.0);
         let fov = 60 + speedRatio * 18; // smooth 60° -> 78°
@@ -1220,7 +1273,7 @@ export class GameView {
       this.cameraObstructed = false;
       if (me.seat >= 0 && s && this.thirdPerson) {
         // Flight Spring Arm Lag & Roll/Pitch Linkage
-        const ship = s.adventure.ship;
+        const ship = cameraShip!;
         const celestialAlign = computeCelestialAlignment(ship, ship.yaw, ship.bank);
         const localUp = celestialAlign.captureWeight > 0.05 ? celestialAlign.up.clone() : new THREE.Vector3(0, 1, 0);
 
@@ -1235,7 +1288,7 @@ export class GameView {
           this.flightSpringArm.focus.lerp(idealFocus, 1 - Math.exp(-dt * 10));
         }
 
-        const hull = SPAWN_FLEET[ship.kind ?? "skiff"];
+        const hull = SPAWN_FLEET[ship.kind ?? "light_fighter"];
         const baseDist = Math.max(22, hull.halfLength * 3);
         const baseH = Math.max(6.5, hull.halfWidth * 1.7);
         const shipSpeed = Math.hypot(ship.vx, ship.vy, ship.vz);
@@ -1293,7 +1346,7 @@ export class GameView {
           this.cameraRange = 0;
           this.camera.position.copy(target);
           if (me.seat >= 0 && s) {
-            const ship = s.adventure.ship;
+            const ship = cameraShip!;
             const cockpit = celestialCockpitPose(ship, ship.yaw, me.yaw, me.pitch);
             this.camera.position.copy(cockpit.position);
             this.camera.up.copy(cockpit.up);
@@ -1364,7 +1417,7 @@ export class GameView {
         .add(new THREE.Vector3(-240, 190, -140));
     }
     this.camera.updateMatrixWorld();
-    this.interplanetary.setShipState(s?.adventure.ship || null);
+    this.interplanetary.setShipState(s?.adventure.ship || null, dt);
     this.interplanetary.step(dt, me || { x: 0, y: 0, z: 0 });
     if (this.jetGain && this.listener) {
       const ctx = this.listener.context;
@@ -1384,12 +1437,7 @@ export class GameView {
         0.12,
       );
     }
-    this.sky.position.copy(this.camera.position);
-    this.skyCamera.position.copy(this.camera.position);
-    this.skyCamera.quaternion.copy(this.camera.quaternion);
-    this.skyCamera.fov = this.camera.fov;
-    this.skyCamera.aspect = this.camera.aspect;
-    this.skyCamera.updateProjectionMatrix();
+    this.syncSkyCamera();
     this.musicLayers.forEach((a, i) => {
       const goal =
         i === 0
@@ -1401,8 +1449,6 @@ export class GameView {
               : 0;
       a.setVolume(THREE.MathUtils.damp(a.getVolume(), goal, 1, dt));
     });
-    const moonTargetY = (s && (s.completedAt > 0 || level >= 3)) ? 1400 : -350;
-    this.moon.position.y = THREE.MathUtils.damp(this.moon.position.y, moonTargetY, 0.8, dt);
     for (const [index, b] of this.beacons.entries()) {
       const data = s?.beacons[index],
         active = data?.active || false,

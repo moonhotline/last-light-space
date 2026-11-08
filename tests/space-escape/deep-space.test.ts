@@ -4,7 +4,7 @@ import { Scene, PerspectiveCamera, Vector3, Group, Mesh, SphereGeometry, MeshSta
 import { InterplanetarySystem } from "../../frontend/space-escape/src/interplanetary";
 import { SOLAR_SYSTEM } from "../../frontend/space-escape/shared/celestial";
 import { groundAt, SPAWN } from "../../frontend/space-escape/shared/map";
-import { SHIP1_POS } from "../../frontend/space-escape/shared/adventure-data";
+import { FIGHTER_POS } from "../../frontend/space-escape/shared/adventure-data";
 
 test("planet surface and atmosphere share elevated global coordinates", () => {
   const system = new InterplanetarySystem(new Scene(), new PerspectiveCamera());
@@ -55,7 +55,8 @@ test("Mercury surfaceMesh possesses visible cosmic emissive glow against deep sp
 test("Blerk equips hoverboard and activates repulsor surfing when following at speed", () => {
   const scene = new Scene();
   const system = new InterplanetarySystem(scene, new PerspectiveCamera());
-  const placeholder = system["makePlaceholder"]("npc", 2.2);
+  const placeholder = new Group();
+  system.downloadedAssets.set("hoverboard", new Group());
   system.guideModel = placeholder;
   scene.add(placeholder);
 
@@ -95,21 +96,21 @@ test("InterplanetarySystem preserves all planets and docks spaceship at starting
   assert.ok(system.planets.has("mercury"), "Mercury planet must exist");
   assert.ok(system.planets.has("stylized"), "Stylized planet must exist");
 
-  // Spaceship is docked at starting position SHIP1_POS
-  const ship = system.shipMeshes.get("skiff");
+  // Spaceship is docked at starting position FIGHTER_POS
+  const ship = system.shipMeshes.get("light_fighter");
   assert.ok(ship, "Spaceship model must exist");
-  assert.equal(ship.position.x, SHIP1_POS.x, "Ship x coordinate must match SHIP1_POS starting position");
-  assert.equal(ship.position.z, SHIP1_POS.z, "Ship z coordinate must match SHIP1_POS starting position");
+  assert.equal(ship.position.x, FIGHTER_POS.x, "Ship x coordinate must match FIGHTER_POS starting position");
+  assert.equal(ship.position.z, FIGHTER_POS.z, "Ship z coordinate must match FIGHTER_POS starting position");
 
-  // Camera pointing at SHIP1_POS starting position
-  camera.lookAt(SHIP1_POS.x, SHIP1_POS.y, SHIP1_POS.z);
+  // Camera pointing at FIGHTER_POS starting position
+  camera.lookAt(FIGHTER_POS.x, FIGHTER_POS.y, FIGHTER_POS.z);
   camera.updateMatrixWorld();
   camera.updateProjectionMatrix();
   system.step(1 / 30, { ...SPAWN, y: floor + 0.85 });
   assert.equal(ship.visible, true, "Spaceship in front of camera must be visible at starting position");
 
   // Turning away leaves visibility intact; the renderer culls individual meshes.
-  camera.lookAt(-SHIP1_POS.x, SHIP1_POS.y, -SHIP1_POS.z);
+  camera.lookAt(-FIGHTER_POS.x, FIGHTER_POS.y, -FIGHTER_POS.z);
   camera.updateMatrixWorld();
   camera.updateProjectionMatrix();
   system.step(1 / 30, { ...SPAWN, y: floor + 0.85 });
@@ -166,13 +167,13 @@ test("spawn entities stay visible on frame zero and native frusta track camera t
   const system = new InterplanetarySystem(scene, camera);
   const entities = [...system.shipMeshes.values(), system.alien1Model!, system.alien2Model!, system.mineralsModel!];
   const body = new Mesh(new SphereGeometry(2), new MeshStandardMaterial());
-  system.shipMeshes.get("skiff")!.add(body);
-  system.step(0, SHIP1_POS);
+  system.shipMeshes.get("light_fighter")!.add(body);
+  system.step(0, FIGHTER_POS);
   assert.ok(entities.every(entity => entity.visible), "frame zero must not hide spawn entities");
-  camera.position.copy(system.shipMeshes.get("skiff")!.position).add(new Vector3(0, 0, 30));
+  camera.position.copy(system.shipMeshes.get("light_fighter")!.position).add(new Vector3(0, 0, 30));
   for (const facingShip of [true, false, true]) {
     camera.rotation.set(0, facingShip ? 0 : Math.PI, 0);
-    system.step(1 / 60, SHIP1_POS);
+    system.step(1 / 60, FIGHTER_POS);
     assert.ok(entities.every(entity => entity.visible), "camera turns must not rewrite visibility");
     scene.updateMatrixWorld(true);
     camera.updateMatrixWorld(true);

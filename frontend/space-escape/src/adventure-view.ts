@@ -8,9 +8,10 @@ import {
   RESOURCE_SITES,
   OUTPOST,
   DESTINATION,
-  SHIP1_POS,
+  FIGHTER_POS,
+  SPAWN_FLEET,
 } from "../shared/adventure-data";
-import { alignShipToGround, clean3DEntityText, computeCelestialAlignment, computeChassisAlignment } from "./interplanetary";
+import { alignShipToGround, clean3DEntityText, normalizeModelContainer, updateShipTransform } from "./interplanetary";
 import { groundAt, hash, HALF, type Vec } from "../shared/map";
 import type { Player, Snapshot } from "../shared/types";
 const v = (p: Vec) => new THREE.Vector3(p.x, p.y, p.z);
@@ -59,6 +60,7 @@ export function optimizeModel(root: THREE.Object3D) {
     }
 }
 export class AdventureView {
+  private lastShipKind: string | null = null;
   ship = new THREE.Group();
   nodes: THREE.Group[] = [];
   clues: THREE.Group[] = [];
@@ -94,7 +96,7 @@ export class AdventureView {
       throw error;
     };
     const [ship, lab, drone, bullet] = await Promise.all([
-      load("/assets/skiff.glb"),
+      load(SPAWN_FLEET.light_fighter.asset),
       load("/assets/dawn-lab.glb"),
       load("/assets/drone.glb"),
       load("/assets/kinetic-bullet.glb"),
@@ -106,7 +108,7 @@ export class AdventureView {
         o.receiveShadow = false;
       }
     });
-    [ship.scene, lab.scene, drone.scene].forEach((root) => {
+    [lab.scene, drone.scene].forEach((root) => {
       root.traverse((o) => {
         if (o instanceof THREE.Mesh) {
           o.castShadow = o.receiveShadow = true;
@@ -116,10 +118,12 @@ export class AdventureView {
       weatherMaterials(root);
     });
     clean3DEntityText(ship.scene);
-    this.ship.add(ship.scene);
+    const fighter = normalizeModelContainer(ship.scene, SPAWN_FLEET.light_fighter.modelSize);
+    this.ship.userData.chassisClearance = fighter.userData.chassisClearance;
+    this.ship.add(fighter);
     clean3DEntityText(this.ship);
     this.scene.add(this.ship);
-    alignShipToGround(this.ship, SHIP1_POS.x, SHIP1_POS.z, Math.PI, 3.8, 5.5, 0.05);
+    alignShipToGround(this.ship, FIGHTER_POS.x, FIGHTER_POS.z, 0, 3.5, 5.5, 0.05);
     this.ship.visible = true;
     lab.scene.position.copy(v(LAB));
     this.scene.add(lab.scene);
@@ -415,38 +419,29 @@ export class AdventureView {
     if (!s) return;
     const a = s.adventure,
       ship = a.ship;
-    const isSkiff = (ship.kind ?? "skiff") === "skiff";
-
-    const targetPosition = isSkiff ? v(ship) : v(SHIP1_POS);
-    const yaw = isSkiff ? ship.yaw + Math.PI : Math.PI;
-    const celestialAlign = computeCelestialAlignment(targetPosition, yaw, isSkiff ? ship.bank : 0);
-    const targetQuaternion = celestialAlign.quaternion;
-    const overBasin = Math.abs(targetPosition.x) <= HALF - 10 && Math.abs(targetPosition.z) <= HALF - 10;
-    if (celestialAlign.captureWeight <= 0.05 && overBasin && targetPosition.y <= 650) {
-      const ground = computeChassisAlignment(this.ship, targetPosition.x, targetPosition.z, yaw, 3.8, 5.5, 0.05);
-      // Boarding, ground contact and takeoff share one chassis height floor.
-      // Never move down toward the simulation's lower origin when leaving the pad.
-      const airborne = THREE.MathUtils.smoothstep(targetPosition.y, ground.position.y, ground.position.y + 4);
-      targetPosition.y = Math.max(targetPosition.y, ground.position.y);
-      const groundQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(ground.pitch, yaw, -ground.roll));
-      targetQuaternion.copy(groundQuaternion.slerp(targetQuaternion, airborne));
-    }
-    this.ship.position.lerp(targetPosition, 1 - Math.exp(-dt * 16));
-    this.ship.quaternion.slerp(targetQuaternion, 1 - Math.exp(-dt * 12));
+    const isFighter = (ship.kind ?? "light_fighter") === "light_fighter";
+    const spawn = SPAWN_FLEET.light_fighter;
+    const kind = ship.kind ?? "light_fighter";
+    const switched = this.lastShipKind !== null && this.lastShipKind !== kind;
+    this.lastShipKind = kind;
+    updateShipTransform(this.ship, isFighter ? ship : {
+      ...FIGHTER_POS, kind: "light_fighter", yaw: spawn.yaw, bank: 0,
+      vx: 0, vy: 0, vz: 0, grounded: true, seats: [],
+    }, switched ? Infinity : dt);
     this.ship.visible = true;
     for (const side of [-1, 1]) {
       const gear = this.ship.getObjectByName("gear_" + side);
       if (gear)
         gear.rotation.z = THREE.MathUtils.damp(
           gear.rotation.z,
-          !isSkiff || ship.grounded ? 0 : side * 0.65,
+          !isFighter || ship.grounded ? 0 : side * 0.65,
           3,
           dt,
         );
       const engine = this.ship.getObjectByName("engine_glow_" + side) as
         | THREE.Mesh
         | undefined;
-      if (engine) engine.visible = isSkiff && ship.repaired;
+      if (engine) engine.visible = isFighter && ship.repaired;
     }
     if (ship.repaired && !ship.grounded && hash(Math.floor(t * 45), 5) > 0.35) {
       const dir = new THREE.Vector3(0, 2, 4.8).applyAxisAngle(

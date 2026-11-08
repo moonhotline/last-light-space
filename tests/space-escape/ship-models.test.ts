@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, access } from "node:fs/promises";
+import { authoredModel } from "./helpers/authored-model";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { InterplanetarySystem } from "../../frontend/space-escape/src/interplanetary";
@@ -9,8 +10,6 @@ import { SPAWN_FLEET } from "../../frontend/space-escape/shared/adventure-data";
 import type { SpaceshipKind } from "../../frontend/space-escape/shared/celestial";
 
 const shipAssets = [
-  ["skiff", "skiff", "/assets/skiff.glb"],
-  ["cruiser", "lander", "/assets/lander.glb"],
   ["light_fighter", "fighter", "/assets/models/fighter/scene.gltf"],
   ["intergalactic", "intergalactic", "/assets/models/intergalactic/scene.gltf"],
 ] as const;
@@ -57,11 +56,11 @@ test("ships wait for asset files without generating hull geometry", () => {
   }
 });
 
-test("all four ship assets render in their fleet containers and preserve flight state", async () => {
+test("both downloaded ship assets render in their fleet containers and preserve flight state", async () => {
   const system = createSystem();
   const { loader, requests, models } = fixtureLoader(shipAssets.map(([, , url]) => url));
   const state = createAdventure().ship;
-  Object.assign(state, { kind: "cruiser", x: 120, y: 900, z: -80, grounded: false });
+  Object.assign(state, { kind: "intergalactic", x: 120, y: 900, z: -80, grounded: false });
   system.setShipState(state);
   await system.loadAssets(loader);
 
@@ -76,29 +75,29 @@ test("all four ship assets render in their fleet containers and preserve flight 
     assert.equal(model.parent!.position.x, expected.x);
     assert.equal(model.parent!.position.z, expected.z);
   }
-  assert.ok(system.cruiserModel === system.shipMeshes.get("cruiser"));
-  assert.ok(system.cruiserModel!.position.y >= state.y);
+  assert.ok(system.intergalacticModel === system.shipMeshes.get("intergalactic"));
+  assert.ok(system.intergalacticModel!.position.y >= state.y);
 });
 
-test("registering AdventureView's skiff preserves the previous rendered model", async () => {
+test("registering AdventureView's fighter removes the duplicate fleet container", async () => {
   const system = createSystem();
-  const previous = system.shipMeshes.get("skiff")!;
+  const previous = system.shipMeshes.get("light_fighter")!;
   previous.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial()));
-  const externalSkiff = new THREE.Group();
-  externalSkiff.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial()));
-  externalSkiff.position.set(25, 900, -80);
-  system.scene.add(externalSkiff);
-  system.setShipReference(externalSkiff);
+  const externalFighter = new THREE.Group();
+  externalFighter.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial()));
+  externalFighter.position.set(25, 900, -80);
+  system.scene.add(externalFighter);
+  system.setShipReference(externalFighter);
 
   const { loader, requests } = fixtureLoader(shipAssets.map(([, , url]) => url));
   system.setShipState({ ...createAdventure().ship, x: 100, y: 900, z: -100, grounded: false });
   await system.loadAssets(loader);
-  assertVisibleInScene(previous, system.scene);
-  assertVisibleInScene(externalSkiff, system.scene);
-  assert.ok(system.shipMeshes.get("skiff") === externalSkiff);
-  assert.equal(externalSkiff.children.length, 1, "AdventureView owns loading the skiff asset");
-  assert.equal(requests.includes("/assets/skiff.glb"), false, "do not duplicate AdventureView's skiff");
-  assert.deepEqual(externalSkiff.position.toArray(), [25, 900, -80], "AdventureView owns skiff animation");
+  assert.equal(previous.parent, null, "retired container must not leave a duplicate hull in the scene");
+  assertVisibleInScene(externalFighter, system.scene);
+  assert.ok(system.shipMeshes.get("light_fighter") === externalFighter);
+  assert.equal(externalFighter.children.length, 1, "AdventureView owns loading the fighter asset");
+  assert.equal(requests.includes("/assets/models/fighter/scene.gltf"), false, "do not duplicate AdventureView's fighter");
+  assert.deepEqual(externalFighter.position.toArray(), [25, 900, -80], "AdventureView owns fighter animation");
 });
 
 test("asset hydration retains every existing corridor, ship, alien and mineral node", async () => {
@@ -141,29 +140,52 @@ test("failed ship downloads preserve rendered models and never synthesize fallba
   assertVisibleInScene(existing, system.scene);
 });
 
-test("authored skiff and lander GLBs load with their original meshes intact", async () => {
+test("downloaded fighter and heavy starship preserve original GLTF meshes", async () => {
   const system = createSystem();
-  const parser = new GLTFLoader();
   const meshes = new Map<SpaceshipKind, THREE.Mesh[]>();
   const loader = {
     async loadAsync(url: string) {
-      if (url !== "/assets/skiff.glb" && url !== "/assets/lander.glb") throw new Error("Unused fixture asset");
-      const data = await readFile(new URL(`../../frontend/space-escape/public${url}`, import.meta.url));
-      const gltf = await parser.parseAsync(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength), "");
-      const originalMeshes: THREE.Mesh[] = [];
-      gltf.scene.traverse((node) => { if (node instanceof THREE.Mesh) originalMeshes.push(node); });
-      meshes.set(url.includes("skiff") ? "skiff" : "cruiser", originalMeshes);
+      const asset = shipAssets.find(([, , path]) => path === url);
+      if (!asset) throw new Error("Unused fixture asset");
+      const gltf = await authoredModel(url);
+      const original: THREE.Mesh[] = [];
+      gltf.scene.traverse(node => { if (node instanceof THREE.Mesh) original.push(node); });
+      meshes.set(asset[0], original);
       return gltf;
     },
   } as unknown as GLTFLoader;
   await system.loadAssets(loader);
-  for (const kind of ["skiff", "cruiser"] as const) {
-    const originalMeshes = meshes.get(kind);
-    assert.ok(originalMeshes?.length, `${kind} must load geometry from its GLB`);
+  for (const [kind] of shipAssets) {
+    const original = meshes.get(kind)!;
+    assert.ok(original.length > 0);
     const mounted: THREE.Mesh[] = [];
-    system.shipMeshes.get(kind)!.traverse((node) => { if (node instanceof THREE.Mesh) mounted.push(node); });
-    assert.equal(mounted.length, originalMeshes.length);
-    assert.ok(mounted.every((mesh, index) => mesh === originalMeshes[index]), "original meshes must survive hydration");
+    system.shipMeshes.get(kind)!.traverse(node => { if (node instanceof THREE.Mesh) mounted.push(node); });
+    assert.deepEqual(mounted.map(node => node.uuid), original.map(node => node.uuid));
     for (const mesh of mounted) assertVisibleInScene(mesh, system.scene);
+  }
+});
+
+test("retired generated hull files and placeholder factories cannot return to the spawn fleet", async () => {
+  assert.deepEqual(Object.keys(SPAWN_FLEET), ["light_fighter", "intergalactic"]);
+  assert.equal(createAdventure().ship.kind, "light_fighter");
+  for (const name of ["skiff", "lander"]) {
+    await assert.rejects(access(new URL(`../../frontend/space-escape/public/assets/${name}.glb`, import.meta.url)));
+  }
+  const source = await readFile(new URL("../../frontend/space-escape/src/interplanetary.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /makePlaceholder|CapsuleGeometry|OctahedronGeometry/);
+});
+
+test("spawn aliens and minerals mount only downloaded assets and remain empty on failure", async () => {
+  for (const succeeds of [false, true]) {
+    const system = createSystem();
+    const entries = [["alien1", system.alien1Model!], ["alien2", system.alien2Model!],
+      ["minerals", system.mineralsModel!]] as const;
+    const urls = entries.map(([key]) => `/assets/models/${key}/scene.gltf`);
+    const { loader, models } = fixtureLoader(succeeds ? urls : []);
+    await system.loadAssets(loader);
+    for (const [key, container] of entries) {
+      assert.equal(container.children.length, succeeds ? 1 : 0);
+      if (succeeds) assertVisibleInScene(models.get(`/assets/models/${key}/scene.gltf`)!, system.scene);
+    }
   }
 });

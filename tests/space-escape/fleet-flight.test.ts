@@ -15,7 +15,7 @@ import { InterplanetarySystem } from "../../frontend/space-escape/src/interplane
 
 await initPhysics();
 
-function setup(t: TestContext, kind: SpaceshipKind = "skiff") {
+function setup(t: TestContext, kind: SpaceshipKind = "light_fighter") {
   const sim = new Simulation(2026);
   t.after(() => sim.dispose());
   const p = sim.add("pilot");
@@ -71,7 +71,7 @@ for (const spawn of Object.values(SPAWN_FLEET)) {
   });
 }
 
-test("advanced ships board directly even while carrying skiff repair materials", (t) => {
+test("advanced ships board directly even while carrying fighter repair materials", (t) => {
   const { sim, p, ship } = setup(t);
   ship.seats[0] = "";
   ship.repaired = false;
@@ -134,7 +134,7 @@ test("intergalactic Mercury disembarking and reboarding retains the selected hul
 
 test("fighter responds faster and banks farther than the stable cruiser, then levels out", (t) => {
   const fighter = setup(t, "light_fighter");
-  const cruiser = setup(t, "cruiser");
+  const cruiser = setup(t, "intergalactic");
   for (const flight of [fighter, cruiser]) {
     Object.assign(flight.ship, { x: 0, y: 1000, z: 0, yaw: 0, grounded: false });
     flight.fly({ forward: 1, yaw: 2.5 }, 30);
@@ -143,7 +143,7 @@ test("fighter responds faster and banks farther than the stable cruiser, then le
   assert.ok(fighter.ship.yaw <= 1.8 + 1e-6, "fighter turn rate is limited to 1.8 rad/s");
   assert.ok(Math.abs(fighter.ship.bank) > 0.48);
   assert.ok(Math.abs(fighter.ship.bank) <= 0.52);
-  assert.ok(Math.abs(cruiser.ship.bank) <= 0.32);
+  assert.ok(Math.abs(cruiser.ship.bank) <= 0.4);
   assert.ok(Math.hypot(fighter.ship.vx, fighter.ship.vz) > Math.hypot(cruiser.ship.vx, cruiser.ship.vz) * 1.5);
   fighter.fly({ yaw: fighter.ship.yaw }, 60);
   assert.ok(Math.abs(fighter.ship.bank) < 0.01, "roll settles when yaw stops");
@@ -161,13 +161,13 @@ test("turns take the short path across the yaw wrap and can bank in both directi
 });
 
 test("cruiser preserves coasting momentum and releasing boost does not snap speed", (t) => {
-  const cruiser = setup(t, "cruiser");
+  const cruiser = setup(t, "intergalactic");
   const fighter = setup(t, "light_fighter");
   for (const flight of [cruiser, fighter]) {
     Object.assign(flight.ship, { x: 0, y: 1000, z: 0, vx: 100, grounded: false });
     flight.fly({}, 60);
   }
-  assert.ok(cruiser.ship.vx > 85);
+  assert.ok(cruiser.ship.vx > 80);
   assert.ok(fighter.ship.vx < 65);
   Object.assign(cruiser.ship, { vx: 0, vz: -260 });
   cruiser.fly({}, 1);
@@ -187,7 +187,7 @@ test("Shift alone accelerates forward and never suppresses climb thrust", (t) =>
   assert.ok(boost.ship.thrust > normal.ship.thrust);
 });
 
-test("legacy snapshots without kind retain balanced skiff handling", (t) => {
+test("legacy snapshots without kind retain balanced fighter handling", (t) => {
   const current = setup(t);
   const legacy = setup(t);
   delete legacy.ship.kind;
@@ -209,7 +209,7 @@ test("snapshots move only the selected hull while all other hulls stay parked", 
   for (const kind of Object.keys(SPAWN_FLEET) as SpaceshipKind[]) {
     ship.kind = kind;
     system.setShipState(ship);
-    system.switchShip(kind === "cruiser" ? "skiff" : "cruiser");
+    system.switchShip(kind === "intergalactic" ? "light_fighter" : "intergalactic");
     assert.equal(system.activeShip, kind, "local model selection cannot override authoritative kind");
     camera.position.set(ship.x, ship.y + 10, ship.z + 30);
     camera.lookAt(ship.x, ship.y, ship.z);
@@ -227,7 +227,7 @@ test("snapshots move only the selected hull while all other hulls stay parked", 
   }
   delete ship.kind;
   system.setShipState(ship);
-  assert.equal(system.activeShip, "skiff");
+  assert.equal(system.activeShip, "light_fighter");
 });
 
 test("downloaded hull hydration preserves the active ship's flight position", async () => {

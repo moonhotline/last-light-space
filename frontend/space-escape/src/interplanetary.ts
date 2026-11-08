@@ -11,7 +11,7 @@ import {
 } from "../shared/celestial";
 import { buildLandmark, buildPlanetaryRings, buildWarpGate, planetTexture } from "./celestial-visuals";
 import { celestialFlightFrame } from "../shared/celestial-flight";
-import { groundAt } from "../shared/map";
+import { groundAt, HALF } from "../shared/map";
 import type { AdventureShip } from "../shared/types";
 import {
   ALIEN1_POS,
@@ -51,6 +51,7 @@ export function normalizeModelContainer(
   });
 
   container.add(obj);
+  container.userData.chassisClearance = Math.max(0.82, scaledBox.getSize(new THREE.Vector3()).y / 2);
   return container;
 }
 
@@ -110,9 +111,10 @@ export function computeChassisAlignment(
 
   model.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(model);
-  const bottomClearance = !box.isEmpty()
+  const bottomClearance = model.userData.chassisClearance ?? (!box.isEmpty()
     ? Math.max(0.82, model.position.y - box.min.y)
-    : 0.82;
+    : 0.82);
+  if (!box.isEmpty()) model.userData.chassisClearance = bottomClearance;
   const targetY = maxH + bottomClearance + groundOffset;
 
   return {
@@ -121,6 +123,33 @@ export function computeChassisAlignment(
     roll,
     groundHeight: maxH,
   };
+}
+
+/** Smooth authoritative flight positions; terrain alignment is only for a resting hull. */
+export function updateShipTransform(model: THREE.Group, ship: RenderShip, dt: number) {
+  const spawn = SPAWN_FLEET[ship.kind ?? "light_fighter"];
+  const position = new THREE.Vector3(ship.x, ship.y, ship.z);
+  const alignment = computeCelestialAlignment(position, ship.yaw, ship.bank);
+  const quaternion = alignment.quaternion;
+  const overBasin = Math.abs(ship.x) <= HALF - 10 && Math.abs(ship.z) <= HALF - 10 && ship.y <= 650;
+  const clearance = model.userData.chassisClearance ?? 0.82;
+  if (alignment.captureWeight > 0.05) {
+    position.addScaledVector(alignment.up, clearance);
+  } else if (overBasin) {
+    const resting = ship.grounded && Math.hypot(ship.vx ?? 0, ship.vz ?? 0) < 3;
+    if (resting) {
+      const ground = computeChassisAlignment(model, ship.x, ship.z, ship.yaw,
+        spawn.halfWidth, spawn.halfLength, spawn.clearance);
+      // Save the pad clearance once; airborne Y never resamples the terrain.
+      model.userData.launchOffset ??= Math.max(clearance + spawn.clearance, ground.position.y - ship.y);
+      position.y = Math.max(ground.position.y, ship.y + model.userData.launchOffset);
+      quaternion.setFromEuler(new THREE.Euler(ground.pitch, ship.yaw, -ground.roll));
+    } else {
+      position.y += model.userData.launchOffset ?? clearance + spawn.clearance;
+    }
+  }
+  model.position.lerp(position, 1 - Math.exp(-dt * 16));
+  model.quaternion.slerp(quaternion, 1 - Math.exp(-dt * 12));
 }
 
 /**
@@ -268,7 +297,7 @@ export class InterplanetarySystem {
 
   // Flight Cruise State
   flightMode: FlightFlightMode = "surface";
-  activeShip: SpaceshipKind = "skiff";
+  activeShip: SpaceshipKind = "light_fighter";
   private shipState: RenderShip | null = null;
   currentPlanet = "kepler";
   targetPlanet = "mercury";
@@ -279,7 +308,6 @@ export class InterplanetarySystem {
 
   // Spaceship models in flight
   shipMeshes: Map<SpaceshipKind, THREE.Group> = new Map();
-  cruiserModel: THREE.Group | null = null;
   fighterModel: THREE.Group | null = null;
   intergalacticModel: THREE.Group | null = null;
   alien1Model: THREE.Group | null = null;
@@ -288,8 +316,11 @@ export class InterplanetarySystem {
   private adventureShip: THREE.Group | null = null;
 
   setShipReference(shipGroup: THREE.Group) {
+    const previous = this.shipMeshes.get("light_fighter");
+    if (previous && previous !== shipGroup) this.scene.remove(previous);
     this.adventureShip = shipGroup;
-    this.shipMeshes.set("skiff", shipGroup);
+    this.fighterModel = shipGroup;
+    this.shipMeshes.set("light_fighter", shipGroup);
   }
 
   // Mineral specimens placed in world
@@ -321,66 +352,16 @@ export class InterplanetarySystem {
       return this.guideHoverboard;
     }
 
-    const board = new THREE.Group();
+    const asset = this.downloadedAssets.get("hoverboard");
+    if (!asset) return null;
+    const board = asset.clone(true);
     board.name = "blerk-hoverboard";
-
-    const deckGeo = new THREE.BoxGeometry(0.55, 0.05, 1.35);
-    const deckMat = new THREE.MeshStandardMaterial({
-      color: 0x0f172a,
-      metalness: 0.8,
-      roughness: 0.2,
-    });
-    board.add(new THREE.Mesh(deckGeo, deckMat));
-
-    const glowGeo = new THREE.BoxGeometry(0.58, 0.02, 1.38);
-    const glowMat = new THREE.MeshBasicMaterial({
-      color: 0x38bdf8,
-      transparent: true,
-      opacity: 0.85,
-    });
-    board.add(new THREE.Mesh(glowGeo, glowMat));
 
     board.position.set(0, 0.05, 0);
     board.visible = false;
     this.guideModel.add(board);
     this.guideHoverboard = board;
     return board;
-  }
-
-  makePlaceholder(kind: "npc" | "mineral", targetSize: number): THREE.Group {
-    const group = new THREE.Group();
-    group.userData.placeholder = true;
-    const inner = new THREE.Group();
-    inner.name = "placeholder_inner";
-    if (kind === "npc") {
-      const mesh = new THREE.Mesh(
-        new THREE.CapsuleGeometry(0.45, 1.1, 4, 12),
-        new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.6, emissive: 0x0c4a6e, emissiveIntensity: 0.4 }),
-      );
-      mesh.position.y = 1.1;
-      mesh.castShadow = true;
-      inner.add(mesh);
-    } else if (kind === "mineral") {
-      const crystal = new THREE.Mesh(
-        new THREE.OctahedronGeometry(targetSize * 0.4, 0),
-        new THREE.MeshStandardMaterial({
-          color: 0x38bdf8,
-          roughness: 0.2,
-          metalness: 0.1,
-          emissive: 0x0284c7,
-          emissiveIntensity: 0.6,
-        }),
-      );
-      crystal.position.y = targetSize * 0.35;
-      crystal.castShadow = true;
-      inner.add(crystal);
-    }
-    const box = new THREE.Box3().setFromObject(inner);
-    const size = box.getSize(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z) || 1;
-    inner.scale.setScalar(targetSize / maxDim);
-    group.add(inner);
-    return group;
   }
 
   constructor(scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
@@ -394,30 +375,29 @@ export class InterplanetarySystem {
     this.corridorGroup.visible = false;
 
     // Stable flight containers receive authored assets when their files load.
-    for (const kind of ["skiff", "cruiser", "light_fighter", "intergalactic"] as const) {
+    for (const kind of Object.keys(SPAWN_FLEET) as SpaceshipKind[]) {
       const ship = new THREE.Group();
       ship.name = `${kind}-ship`;
       this.parkShip(kind, ship);
       this.shipMeshes.set(kind, ship);
       this.scene.add(ship);
     }
-    this.cruiserModel = this.shipMeshes.get("cruiser")!;
     this.fighterModel = this.shipMeshes.get("light_fighter")!;
     this.intergalacticModel = this.shipMeshes.get("intergalactic")!;
 
-    this.alien1Model = this.makePlaceholder("npc", 2.2);
+    this.alien1Model = new THREE.Group();
     this.alien1Model.position.set(ALIEN1_POS.x, ALIEN1_POS.y, ALIEN1_POS.z);
     this.alien1Model.rotation.set(0, 1.2, 0);
     this.alien1Model.visible = true;
     this.scene.add(this.alien1Model);
 
-    this.alien2Model = this.makePlaceholder("npc", 2.6);
+    this.alien2Model = new THREE.Group();
     this.alien2Model.position.set(ALIEN2_POS.x, ALIEN2_POS.y, ALIEN2_POS.z);
     this.alien2Model.rotation.set(0, -0.8, 0);
     this.alien2Model.visible = true;
     this.scene.add(this.alien2Model);
 
-    this.mineralsModel = this.makePlaceholder("mineral", 2.5);
+    this.mineralsModel = new THREE.Group();
     this.mineralsModel.position.set(MINERALS_POS.x, MINERALS_POS.y, MINERALS_POS.z);
     this.mineralsModel.rotation.set(0, 0.3, 0);
     this.mineralsModel.visible = true;
@@ -657,10 +637,9 @@ export class InterplanetarySystem {
 
   /**
    * Mineral Specimen Outcrops:
-   * Generates interactive crystal clusters across planetary sites.
+   * Empty site containers receive clones of the downloaded mineral asset.
    */
   private buildMineralSpecimens() {
-    const crystalGeo = new THREE.OctahedronGeometry(0.85, 0);
     const sites = [
       { id: "calcite", pos: { x: -35, y: 19, z: 120 } },
       { id: "pyrite", pos: { x: 145, y: 38, z: -40 } },
@@ -675,31 +654,6 @@ export class InterplanetarySystem {
       const cluster = new THREE.Group();
       cluster.position.set(site.pos.x, site.pos.y, site.pos.z);
       cluster.userData = { mineralId: spec.id, mineral: spec };
-
-      const cMat = new THREE.MeshPhysicalMaterial({
-        color: new THREE.Color(spec.color),
-        roughness: 0.15,
-        transmission: 0.6,
-        thickness: 1.2,
-        emissive: new THREE.Color(spec.color).multiplyScalar(0.25),
-      });
-
-      for (let i = 0; i < 4; i++) {
-        const cMesh = new THREE.Mesh(crystalGeo, cMat);
-        const scale = 0.5 + Math.random() * 0.7;
-        cMesh.scale.set(scale, scale * 1.5, scale);
-        cMesh.position.set(
-          (Math.random() - 0.5) * 1.6,
-          scale * 0.7,
-          (Math.random() - 0.5) * 1.6,
-        );
-        cMesh.rotation.set(
-          Math.random() * 0.4,
-          Math.random() * Math.PI,
-          Math.random() * 0.4,
-        );
-        cluster.add(cMesh);
-      }
 
       this.mineralNodes.add(cluster);
     }
@@ -723,7 +677,7 @@ export class InterplanetarySystem {
 
   /** Switch between Spaceship models */
   switchShip(kind: SpaceshipKind) {
-    this.activeShip = this.shipState ? this.shipState.kind ?? "skiff" : kind;
+    this.activeShip = this.shipState ? this.shipState.kind ?? "light_fighter" : kind;
   }
   guideDialogue(player: { x: number; y: number; z: number }, pressed: boolean) {
     const guide = this.guideModel;
@@ -740,29 +694,18 @@ export class InterplanetarySystem {
   private parkShip(kind: SpaceshipKind, model: THREE.Group) {
     const spawn = SPAWN_FLEET[kind];
     alignShipToGround(model, spawn.position.x, spawn.position.z,
-      spawn.yaw + (kind === "skiff" ? Math.PI : 0),
+      spawn.yaw,
       spawn.halfWidth, spawn.halfLength, spawn.clearance);
   }
 
-  setShipState(ship: RenderShip | null) {
+  setShipState(ship: RenderShip | null, dt = Infinity) {
+    const changed = this.activeShip !== (ship?.kind ?? "light_fighter");
     this.shipState = ship;
-    this.activeShip = ship?.kind ?? "skiff";
+    this.activeShip = ship?.kind ?? "light_fighter";
     for (const [kind, model] of this.shipMeshes) {
+      if (model === this.adventureShip) continue;
       if (ship && kind === this.activeShip) {
-        // AdventureView animates its skiff; standalone asset containers follow snapshots here.
-        if (model === this.adventureShip) continue;
-        const spawn = SPAWN_FLEET[kind];
-        const celestialAlign = computeCelestialAlignment(ship, ship.yaw + (kind === "skiff" ? Math.PI : 0), ship.bank);
-        if (celestialAlign.captureWeight > 0.05) {
-          model.position.set(ship.x, ship.y, ship.z).addScaledVector(celestialAlign.up, 1.2);
-          model.quaternion.copy(celestialAlign.quaternion);
-        } else if (ship.grounded) {
-          alignShipToGround(model, ship.x, ship.z, ship.yaw + (kind === "skiff" ? Math.PI : 0),
-            spawn.halfWidth, spawn.halfLength, spawn.clearance);
-        } else {
-          model.position.set(ship.x, ship.y + 1.8, ship.z);
-          model.rotation.set(0, ship.yaw + (kind === "skiff" ? Math.PI : 0), -ship.bank);
-        }
+        updateShipTransform(model, ship, changed ? Infinity : dt);
       } else {
         this.parkShip(kind, model);
       }
@@ -966,18 +909,13 @@ export class InterplanetarySystem {
       return model;
     };
 
-    await Promise.all(([
-      ["skiff", "skiff", "/assets/skiff.glb", 12],
-      ["cruiser", "lander", "/assets/lander.glb", 14],
-      ["light_fighter", "fighter", "/assets/models/fighter/scene.gltf", 11],
-      ["intergalactic", "intergalactic", "/assets/models/intergalactic/scene.gltf", 18],
-    ] as const).map(async ([kind, key, url, size]) => {
-      // AdventureView already loads and animates the main skiff from skiff.glb.
-      if (kind === "skiff" && this.adventureShip) return;
-      const container = this.shipMeshes.get(kind)!;
-      const model = await loadModel(key, url, size);
+    await Promise.all(Object.values(SPAWN_FLEET).map(async (spawn) => {
+      if (spawn.kind === "light_fighter" && this.adventureShip) return;
+      const container = this.shipMeshes.get(spawn.kind)!;
+      const model = await loadModel(spawn.assetKey, spawn.asset, spawn.modelSize);
       if (!model) return;
       container.add(model);
+      container.userData.chassisClearance = model.userData.chassisClearance;
       this.setShipState(this.shipState);
       this.onModelLoaded?.();
     }));
@@ -1020,6 +958,7 @@ export class InterplanetarySystem {
         }
       }
     }
+    await loadModel("hoverboard", "/assets/models/hoverboard/scene.gltf", 1.35);
     await Promise.allSettled([
       loadModel("blerk", "/assets/models/blerk/scene-web.glb", 2.2).then((model) => {
         if (model) {
@@ -1088,6 +1027,7 @@ export class InterplanetarySystem {
           this.guideActions.idle = mixer.clipAction(idleClip);
           this.guideActions.run = mixer.clipAction(runClip);
           this.guideActions.shoot = mixer.clipAction(shootClip);
+          this.attachBlerkHoverboard();
           this.guideActions.idle.play();
           this.guideState = "idle";
         }
@@ -1100,14 +1040,6 @@ export class InterplanetarySystem {
       }),
       loadModel("alien2", "/assets/models/alien2/scene.gltf", 2.6).then((model) => {
         if (model && this.alien2Model) {
-          model.traverse((o: any) => {
-            if (o.isMesh && o.material) {
-              o.material.color = new THREE.Color(0x475569);
-              o.material.roughness = 0.45;
-              o.material.metalness = 0.25;
-              o.material.needsUpdate = true;
-            }
-          });
           clean3DEntityText(model);
           this.alien2Model.add(model);
         }
@@ -1116,6 +1048,9 @@ export class InterplanetarySystem {
         if (model && this.mineralsModel) {
           clean3DEntityText(model);
           this.mineralsModel.add(model);
+          for (const cluster of this.mineralNodes.children) {
+            if (cluster.userData.mineralId && cluster.children.length === 0) cluster.add(model.clone(true));
+          }
         }
       }),
     ]);

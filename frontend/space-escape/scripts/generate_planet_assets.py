@@ -64,14 +64,4 @@ for i in range(18):
 for side in [-1,1]:box('Arch footing',(side*14,0,2),(6,7,4),edge,.2)
 save('observatory')
 
-sphere('Lander hull',(0,0,2.8),(3.7,2.3,1.5),ceramic)
-sphere('Cockpit',(0,-1.65,3.0),(2.2,.8,.75),visor)
-box('Engine block',(0,1.8,2.5),(4,2,1.5),carbon,.2)
-for side in [-1,1]:
-    box('Outrigger',(side*3.5,0,1.6),(3,.4,.3),carbon,.1)
-    cylinder('Landing foot',(side*4.6,0,.3),.85,.4,stone,24)
-    o=box('Landing leg',(side*4.15,0,.95),(.22,.35,1.6),ceramic,.06);o.rotation_euler.y=side*.4
-    cylinder('Rear engine',(side*1.4,1.9,1.45),.55,.6,carbon,32)
-    ring('Engine ring',1.14,.4,.05,cyan)
-save('lander')
 print('Planet expedition assets exported')

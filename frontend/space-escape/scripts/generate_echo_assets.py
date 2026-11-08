@@ -69,42 +69,6 @@ for side,name in [(-1,'L'),(1,'R')]:
     for j in range(3):bind(box('Boot tread',(side*.15,-.19+j*.13,.026),(.27,.06,.035),titanium,.005),knee)
 save('explorer-v2')
 
-# PEREGRINE utility skiff: longitudinal loft, glazing, twin nacelles, folding gear.
-def loft(name,sections,mat):
-    verts=[]
-    for y,w,h,z in sections:
-        for a in [0,math.pi/4,3*math.pi/4,math.pi,5*math.pi/4,7*math.pi/4]: verts.append((math.cos(a)*w,y,z+math.sin(a)*h))
-    faces=[]
-    for i in range(len(sections)-1):
-        for j in range(6):faces.append((i*6+j,i*6+(j+1)%6,(i+1)*6+(j+1)%6,(i+1)*6+j))
-    faces.extend([tuple(range(5,-1,-1)),tuple((len(sections)-1)*6+j for j in range(6))])
-    me=bpy.data.meshes.new(name);me.from_pydata(verts,[],faces);me.update();o=bpy.data.objects.new(name,me);bpy.context.collection.objects.link(o);finish(o,mat)
-    be=o.modifiers.new('Radiused aerospace seams','BEVEL');be.width=.09;be.segments=3;o.modifiers.new('Normals','WEIGHTED_NORMAL');return o
-loft('Primary pressure hull',[(-6.5,.28,.24,2.6),(-4.7,1.8,.65,2.7),(-1.6,2.7,1.45,2.8),(2.8,2.5,1.15,2.6),(4.1,1.7,.75,2.45)],ceramic)
-loft('Panoramic canopy',[(-5,.6,.08,3.05),(-3.4,1.65,.52,3.63),(-1.5,1.75,.48,3.88),(-.7,1.65,.17,3.84)],visor)
-for x in [-1,1]:
-    tube('Canopy spar',[(x*.6,-5,3.05),(x*1.65,-3.4,3.99),(x*1.75,-1.5,4.22),(x*1.65,-.7,3.84)],.055,titanium)
-    loft('Swept outrigger '+str(x),[(-1.4,1,.12,2.0),(2.6,1,.20,2.0),(3.7,.6,.15,2.0)],titanium).location.x=x*3.3
-    loft('Engine nacelle '+str(x),[(-2.8,.6,.55,2.1),(-1.8,.87,.78,2.15),(3.4,.82,.72,2.05),(4.4,.56,.52,2.05)],titanium).location.x=x*4.1
-    for y in [-1.4,0,1.4]:box('Nacelle ceramic plates',(x*4.1,y,2.89),(1.08,1.16,.13),ceramic,.05)
-    for j in range(8):box('Engine vents',(x*4.12,2+j*.21,2.75),(1.05,.08,.055),carbon,.01)
-    nozzle=cylinder('Engine exhaust',(x*4.1,4.45,2.05),.49,.25,carbon,32);nozzle.rotation_euler.x=math.pi/2
-    aperture=cylinder('engine_glow_'+str(x),(x*4.1,4.59,2.05),.36,.03,blue,32);aperture.rotation_euler.x=math.pi/2
-    box('Navigation lamp',(x*4.75,-1.6,2.12),(.055,.35,.07),blue if x<0 else red,.012)
-    leg=pivot('gear_'+str(x),(x*2.4,1.3,1.9))
-    for y in [-2.8,2.4]:
-        bind(tube('Landing strut',[(x*2.4,y,1.8),(x*3.35,y,.48)],.105,titanium),leg)
-        bind(box('Landing skid',(x*3.35,y,.22),(.8,1.4,.28),carbon,.07),leg)
-    for j in range(4):box('Hull fastener',(x*2.58,-.5+j*.82,2.72),(.04,.14,.1),carbon,.01)
-    box('Rescue stripe',(x*2.53,.7,3.24),(.17,3,.06),amber,.018)
-    fin=box('Tail stabilizer',(x*1.6,3.1,3.62),(.16,1.8,1.65),titanium,.09);fin.rotation_euler.y=x*.34
-for j in range(6):box('Dorsal heat exchanger',(0,.2+j*.48,3.81),(.95,.19,.11),carbon,.025)
-box('Repair hatch',(0,2.8,3.62),(1.25,1.22,.1),amber,.07)
-lettering('PEREGRINE',(0,-5.75,2.8),.21,titanium)
-lettering('07',(0,-5.77,2.45),.19,amber)
-box('Landing floodlight',(0,-5.66,2.28),(.45,.07,.1),white,.025)
-save('skiff')
-
 # Walkable abandoned research lab. Geometry exactly matches LAB_BOXES dimensions.
 wall=material('Oxidised lab cladding',(.18,.24,.24),.5)
 concrete=material('Porous basalt concrete',(.20,.24,.23),.1)
@@ -139,4 +103,4 @@ wb('Entrance strip',0,5.36,13.4,7,.10,.06,white,.01)
 lettering('DAWN / RESEARCH 07',(0,-13.32,6.25),.5,ceramic,(math.pi/2,0,0))
 lettering('DO NOT RESTART',(0,12.69,4.6),.5,amber)
 save('dawn-lab')
-print('Echo assets exported: explorer-v2, skiff, dawn-lab')
+print('Echo assets exported: explorer-v2, dawn-lab')

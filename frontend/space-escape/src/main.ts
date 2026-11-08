@@ -918,7 +918,7 @@ function hud() {
       target.title.includes("战舰") ||
       target.title.includes("巡航") ||
       target.title.toLowerCase().includes("cruiser") ||
-      target.title.toLowerCase().includes("skiff") ||
+      target.title.toLowerCase().includes("fighter") ||
       target.title.includes("登舰");
     const point = !isShipTarget ? view.project(target.p) : null;
     $("targetMarker").hidden = !point;

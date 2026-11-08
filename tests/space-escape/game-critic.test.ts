@@ -209,7 +209,7 @@ test("Game Critic Agent: Cycle 3 celestial richness and critical scoring", (t) =
   console.log("==============================================\n");
 
   assert.equal(report.celestialRichnessScore, 100, "Cycle 3 must supply all worlds, named landmarks, rings and a warp gate");
-  assert.ok(report.overallScore >= 90, "Cycle 3 must retain fleet and flight quality while expanding the cosmos");
+  assert.equal(report.overallScore, 100, "flight, fleet, camera and cosmos must all pass the critic at full marks");
 });
 
 test("Game Critic Agent: rendered rings, landmarks and animated horizon match the catalog", () => {
@@ -241,16 +241,16 @@ test("Game Critic Agent: rendered rings, landmarks and animated horizon match th
   assert.equal(gate.atmosphereMesh, undefined, "the portal horizon must not be hidden by a solid sphere");
 });
 
-test("skiff keeps its authored forward direction when entering planetary capture", () => {
+test("fighter keeps its authored forward direction when entering planetary capture", () => {
   const system = new InterplanetarySystem(new THREE.Scene(), new THREE.PerspectiveCamera());
   const ship = createAdventure().ship;
   const venus = SOLAR_SYSTEM.venus;
   Object.assign(ship, venus.position, { y: venus.position.y + venus.atmosphereRadius + 250,
     yaw: 0.6, bank: 0, grounded: false });
   system.setShipState(ship);
-  const cruise = system.shipMeshes.get("skiff")!.quaternion.clone();
+  const cruise = system.shipMeshes.get("light_fighter")!.quaternion.clone();
   ship.y = venus.position.y + venus.radius + 0.2;
   system.setShipState(ship);
-  assert.ok(cruise.angleTo(system.shipMeshes.get("skiff")!.quaternion) < 1e-6,
-    "a north-pole approach must not turn the skiff 180 degrees");
+  assert.ok(cruise.angleTo(system.shipMeshes.get("light_fighter")!.quaternion) < 1e-6,
+    "a north-pole approach must not turn the fighter 180 degrees");
 });
