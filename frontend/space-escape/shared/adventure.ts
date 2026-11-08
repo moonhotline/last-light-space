@@ -60,6 +60,8 @@ export function createAdventure(): Adventure {
       thrust: 0,
       flightTime: 0,
       arrived: false,
+      boosting: false,
+      braking: false,
     },
   };
 }
@@ -494,6 +496,8 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
     }
     s.thrust =
       Math.abs(forward) + Math.abs(i.side) + (isClimbing ? 1.5 : 0);
+    s.boosting = boosting && !s.grounded;
+    s.braking = !!pilot && Boolean(i.brake);
     if (!s.grounded && pilot) s.flightTime += DT;
     if (
       !s.arrived &&

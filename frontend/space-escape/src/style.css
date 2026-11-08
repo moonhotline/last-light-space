@@ -445,25 +445,54 @@ body[data-phase] .landing-caption {
   position: absolute;
   top: 22px;
   left: 38px;
-  border-left: 1px solid var(--amber);
-  padding-left: 15px;
+  background: rgba(8, 16, 26, 0.72);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(176, 226, 236, 0.16);
+  border-left: 3px solid var(--amber);
+  border-radius: 4px;
+  padding: 14px 22px 14px 18px;
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.45);
   text-shadow: 0 2px 9px #0008;
+  max-width: 320px;
+}
+.tactical-bracket-tl {
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  width: 8px;
+  height: 8px;
+  border-top: 2px solid var(--amber);
+  border-left: 2px solid var(--amber);
+}
+.tactical-bracket-br {
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  width: 8px;
+  height: 8px;
+  border-bottom: 2px solid rgba(176, 226, 236, 0.5);
+  border-right: 2px solid rgba(176, 226, 236, 0.5);
 }
 .objective > span {
   font:
     10px ui-monospace,
     monospace;
   color: var(--amber);
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 .objective h2 {
-  font-size: 20px;
-  margin: 9px 0;
+  font-size: 19px;
+  margin: 6px 0 8px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  color: #f1f5f9;
 }
 .objective p {
   font-size: 11px;
-  color: #d1dde3;
+  color: #cbd5e1;
   margin: 0;
+  line-height: 1.5;
 }
 .team {
   position: absolute;
@@ -537,9 +566,56 @@ body[data-phase] .landing-caption {
   gap: 20px;
 }
 .vitals {
-  width: 250px;
+  width: 280px;
   flex-shrink: 0;
+  background: rgba(8, 16, 26, 0.72);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(176, 226, 236, 0.14);
+  border-radius: 6px;
+  padding: 14px 18px;
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.45);
   text-shadow: 0 1px 6px #0005;
+}
+.health-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font: 10px ui-monospace, monospace;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+}
+.health-line b {
+  color: #38bdf8;
+  font-size: 15px;
+  font-weight: 500;
+}
+#healthBar,
+#fuelBar {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 5px;
+  width: 100%;
+  display: block;
+  margin: 6px 0 10px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 0;
+  overflow: hidden;
+}
+#healthBar::-webkit-progress-bar,
+#fuelBar::-webkit-progress-bar {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+}
+#healthBar::-webkit-progress-value {
+  background: linear-gradient(90deg, #0284c7, #38bdf8);
+  border-radius: 3px;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.6);
+}
+#fuelBar::-webkit-progress-value {
+  background: linear-gradient(90deg, #d97706, #fbbf24);
+  border-radius: 3px;
+  box-shadow: 0 0 8px rgba(251, 191, 36, 0.6);
 }
 .pack-label {
   display: flex;
@@ -563,12 +639,6 @@ body[data-phase] .landing-caption {
   font-size: 8px;
   color: var(--muted);
 }
-#fuelBar {
-  height: 3px;
-  width: 100%;
-  display: block;
-  margin: 10px 0;
-}
 .pack-footer {
   display: flex;
   justify-content: space-between;
@@ -577,18 +647,21 @@ body[data-phase] .landing-caption {
 }
 .telemetry {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
-  margin-top: 18px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--muted);
   font:
     9px ui-monospace,
     monospace;
 }
 .telemetry > b {
-  font-size: 27px;
-  color: #eff7f8;
+  font-size: 26px;
+  color: #f8fafc;
   font-weight: 300;
+  letter-spacing: -0.02em;
 }
 .telemetry i {
   width: 1px;
@@ -600,6 +673,88 @@ body[data-phase] .landing-caption {
   font-weight: 400;
   color: #e1ecee;
   margin-left: 6px;
+}
+.layer-badge {
+  font: 9px ui-monospace, monospace;
+  letter-spacing: 0.1em;
+  padding: 3px 8px;
+  border-radius: 3px;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  color: #7dd3fc;
+  margin-left: auto;
+  text-transform: uppercase;
+}
+.flight-mode-badge {
+  font: 10px ui-monospace, monospace;
+  letter-spacing: 0.12em;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+  margin-right: 12px;
+}
+.flight-mode-badge.cruise {
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: #bae6fd;
+}
+.flight-mode-badge.boost {
+  background: rgba(99, 102, 241, 0.28);
+  border: 1px solid rgba(129, 140, 248, 0.6);
+  color: #e0e7ff;
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.5);
+}
+.flight-mode-badge.brake {
+  background: rgba(245, 158, 11, 0.25);
+  border: 1px solid rgba(245, 158, 11, 0.6);
+  color: #fef3c7;
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.45);
+}
+.cockpit-ladder {
+  display: none;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 140px;
+  height: 90px;
+  pointer-events: none;
+}
+.aboard .cockpit-ladder {
+  display: block;
+}
+.ladder-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: rgba(56, 189, 248, 0.28);
+}
+.ladder-bar::before,
+.ladder-bar::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  width: 1px;
+  height: 9px;
+  background: rgba(56, 189, 248, 0.4);
+}
+.ladder-bar::before {
+  left: 0;
+}
+.ladder-bar::after {
+  right: 0;
+}
+.ladder-bar.bar-top {
+  top: 18px;
+}
+.ladder-bar.bar-mid {
+  top: 45px;
+  background: rgba(56, 189, 248, 0.45);
+}
+.ladder-bar.bar-bot {
+  top: 72px;
 }
 .controls-hud {
   text-align: center;

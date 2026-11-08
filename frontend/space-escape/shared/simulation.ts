@@ -208,7 +208,7 @@ export class Simulation {
       p.grounded = false;
       p.ollieUntil = this.s.time + 0.8;
       p.trickScore = (p.trickScore || 0) + 300;
-      this.emit(`${p.name} 完成了 🛹 OLLIE 360 特技 (+300)`);
+      this.emit(`${p.name} 完成了 OLLIE 360 特技 (+300)`);
       this.physics.reset(p.id, p);
     }
     if (typeof command === "string" && command.startsWith("trick:")) {

@@ -57,7 +57,7 @@ jobs:
       - name: Generate PR Summary Report
         if: steps.commit-step.outputs.has_changes == 'true'
         run: |
-          echo "### 📚 OKF Knowledge Bundle Dynamically Updated" >> $GITHUB_STEP_SUMMARY
+          echo "### [OKF] Knowledge Bundle Dynamically Updated" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Trigger**: ${{ github.event_name }} (${{ github.head_ref || github.ref_name }})" >> $GITHUB_STEP_SUMMARY
           echo "- **Target Directory**: \`knowledge/\`" >> $GITHUB_STEP_SUMMARY

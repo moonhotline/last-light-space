@@ -1,5 +1,6 @@
 import "./style.css";
 import * as THREE from "three";
+import { cosmicAudio } from "./sound-engine";
 import {
   ITEMS,
   REPAIR,
@@ -206,13 +207,15 @@ function show(next: typeof panel) {
   if (next) document.exitPointerLock();
 }
 function unlockAudio() {
+  const vol = muted ? 0 : Number($<HTMLInputElement>("volume").value);
+  cosmicAudio.setVolume(vol);
   void view
-    .audio()
-    .then(() =>
-      view.listener?.setMasterVolume(
-        muted ? 0 : Number($<HTMLInputElement>("volume").value),
-      ),
-    )
+    .audio(vol)
+    .then(() => {
+      const currentVol = muted ? 0 : Number($<HTMLInputElement>("volume").value);
+      view.listener?.setMasterVolume(currentVol);
+      cosmicAudio.setVolume(currentVol);
+    })
     .catch(() => notice("音频暂时不可用"));
 }
 function lock() {
@@ -431,14 +434,14 @@ function toggleHoverboard() {
   if (panel || !state || state.phase === "lobby" || !me) return;
   isSkating = !isSkating;
   view.sound(isSkating ? "jump" : "dash", 1.2);
-  notice(isSkating ? "🏄‍♂️ 反重力滑板已装备 (按 K 收起)" : "反重力滑板已收起");
+  notice(isSkating ? "反重力滑板已装备 (按 K 收起)" : "反重力滑板已收起");
   const btn = $("toggleSkate");
   if (btn) btn.textContent = isSkating ? "收起滑板 (K)" : "装备滑板 (K)";
 }
 function recordTrick(title: string, points: number) {
   localTrickScore += points;
   command(`trick:${points}`);
-  stuntText = `⚡ ${title} +${points}`;
+  stuntText = `[STUNT] ${title} +${points}`;
   stuntUntil = performance.now() + 2200;
   view.sound("trick", 1.25);
 }
@@ -468,7 +471,7 @@ function updateStunts(dt: number) {
       const tick = speed * 3.5 * dt * comboMult;
       swingTickScore += tick;
       localTrickScore += tick;
-      stuntText = `⚡ 摆荡滞空 ${swingAirTime.toFixed(1)}s · 连击 ×${comboMult.toFixed(1)} · 实时 +${Math.floor(swingTickScore)}`;
+      stuntText = `[SWING] 摆荡滞空 ${swingAirTime.toFixed(1)}s · 连击 ×${comboMult.toFixed(1)} · 实时 +${Math.floor(swingTickScore)}`;
       stuntUntil = performance.now() + 600;
     }
 
@@ -857,10 +860,35 @@ function hud() {
   if (panel === "inventory") paintInventory();
   text("packLevel", `ION PACK ${p.level >= 1 ? "II" : "I"}`);
   text("speed", Math.round(Math.hypot(p.vx, p.vz)).toString().padStart(2, "0"));
-  text(
-    "altitude",
-    `${Math.round(Math.max(0, p.y - groundAt(p.x, p.z) - 0.85))} m`,
-  );
+  const alt = Math.round(Math.max(0, p.y - groundAt(p.x, p.z) - 0.85));
+  text("altitude", `${alt} m`);
+  const layerEl = document.getElementById("layerBadge");
+  if (layerEl) {
+    if (p.y > 6000) layerEl.textContent = "DEEP SPACE // 深空";
+    else if (p.y > 2500) layerEl.textContent = "ORBIT // 轨道";
+    else if (p.y > 850) layerEl.textContent = "STRATO // 平流层";
+    else if (p.y > 350) layerEl.textContent = "TROPO // 对流层";
+    else layerEl.textContent = "BASIN // 地表";
+  }
+  const flightModeEl = document.getElementById("flightModeBadge");
+  if (flightModeEl && me.seat >= 0) {
+    const ship = state.adventure.ship;
+    const isPilot = me.seat === 0 && ship.seats?.[0] === me.id;
+    const isBraking = isPilot ? keys.has("KeyX") : Boolean(ship.braking);
+    const isBoosting = isPilot
+      ? (keys.has("ShiftLeft") || keys.has("ShiftRight")) && !keys.has("KeyX")
+      : Boolean(ship.boosting);
+    if (isBraking) {
+      flightModeEl.textContent = "RETRO-BRAKE // 逆喷制动";
+      flightModeEl.className = "flight-mode-badge brake";
+    } else if (isBoosting) {
+      flightModeEl.textContent = "AFTERBURNER // 超燃加力";
+      flightModeEl.className = "flight-mode-badge boost";
+    } else {
+      flightModeEl.textContent = "CRUISE // 巡航推进";
+      flightModeEl.className = "flight-mode-badge cruise";
+    }
+  }
   text("cargo", `${me.crystals.toString().padStart(2, "0")} 晶体 · 特技 ${me.trickScore || localTrickScore}`);
   const now = performance.now();
   if (stuntUntil > now) {
@@ -989,6 +1017,18 @@ function frame(now: number) {
             pitch,
           }
         : null;
+  const isPilot = !!(me && me.seat === 0 && state?.adventure.ship.seats?.[0] === me.id);
+  const pilotFlight = state?.adventure.ship
+    ? isPilot
+      ? {
+          boosting: (keys.has("ShiftLeft") || keys.has("ShiftRight")) && !keys.has("KeyX"),
+          braking: keys.has("KeyX"),
+        }
+      : {
+          boosting: Boolean(state.adventure.ship.boosting),
+          braking: Boolean(state.adventure.ship.braking),
+        }
+    : undefined;
   view.render(
     state,
     state?.phase === "lobby" ? null : cameraPlayer,
@@ -996,6 +1036,7 @@ function frame(now: number) {
     now / 1000,
     !panel,
     sim?.physics || prediction,
+    pilotFlight,
   );
   measured++;
   measureSeconds += elapsed;
@@ -1071,10 +1112,11 @@ $("fullscreen").onclick = () => {
       .requestFullscreen()
       .catch(() => notice("全屏不可用"));
 };
-$("volume").oninput = () =>
-  view.listener?.setMasterVolume(
-    muted ? 0 : Number($<HTMLInputElement>("volume").value),
-  );
+$("volume").oninput = () => {
+  const vol = muted ? 0 : Number($<HTMLInputElement>("volume").value);
+  view.listener?.setMasterVolume(vol);
+  cosmicAudio.setVolume(vol);
+};
 $<HTMLInputElement>("effects").value = String(view.effects);
 $("effects").oninput = () => {
   view.effects = Number($<HTMLInputElement>("effects").value);
@@ -1082,6 +1124,8 @@ $("effects").oninput = () => {
 $("sound").onclick = () => {
   muted = !muted;
   unlockAudio();
+  const vol = muted ? 0 : Number($<HTMLInputElement>("volume").value);
+  cosmicAudio.setVolume(vol);
   $("sound").innerHTML =
     `<i data-lucide="${muted ? "volume-x" : "volume-2"}"></i>`;
   $("sound").setAttribute("aria-label", muted ? "开启声音" : "静音");
@@ -1258,6 +1302,10 @@ canvas.addEventListener("mousedown", (e) => {
   }
 });
 addEventListener("mouseup", () => keys.delete("Mouse0"));
+document.addEventListener("click", (e) => {
+  const target = (e.target as HTMLElement)?.closest("button, .wep-slot, [role='tab'], .icon");
+  if (target) cosmicAudio.playUIClick();
+}, { passive: true });
 function holdKey(el: HTMLElement, key: string) {
   el.onpointerdown = (e) => {
     e.preventDefault();
@@ -1332,7 +1380,7 @@ $("feedbackSnap") && ($("feedbackSnap").onclick = () => {
     attachedFeedbackImg = canvas.toDataURL("image/jpeg", 0.85);
     $<HTMLImageElement>("feedbackPreviewImg").src = attachedFeedbackImg;
     $("feedbackPreviewContainer").hidden = false;
-    notice("已截取当前游戏画面作为建议附件 📸");
+    notice("已截取当前游戏画面作为建议附件");
   } catch {
     notice("截取画面失败");
   }
@@ -1411,7 +1459,7 @@ $("submitFeedback") && ($("submitFeedback").onclick = () => {
   attachedFeedbackImg = "";
   $("feedbackPreviewContainer").hidden = true;
   renderEchoes();
-  notice("建议已发射至开普勒基站，感谢探索员！✨");
+  notice("建议已发射至开普勒基站，感谢探索员！");
 });
 
 $("feedbackBtn") && ($("feedbackBtn").onclick = () => {
@@ -1463,11 +1511,11 @@ function handleChatCommand(cmdText: string) {
           s.vy *= 2.5;
           s.vz *= 2.5;
         }
-        notice("🚀 战舰曲率引擎过载加速");
+        notice("战舰曲率引擎过载加速");
       } else if (me) {
         me.vx *= 2.5;
         me.vz *= 2.5;
-        notice("⚡ 喷气推进动力超频");
+        notice("喷气推进动力超频");
       }
     } else {
       notice("联机模式暂仅房主可调试");
@@ -1501,7 +1549,7 @@ function handleChatCommand(cmdText: string) {
           sim.physics.reset(me.id, me);
         }
       }
-      notice("🪐 已降落停靠至水星表面高曲率空域");
+      notice("已降落停靠至水星表面高曲率空域");
     }
     return;
   }
@@ -1509,13 +1557,13 @@ function handleChatCommand(cmdText: string) {
     if (sim) {
       sim.s.adventure.ship.repaired = true;
       sim.s.adventure.ship.progress = 1;
-      notice("🛠️ 飞船已完成修复与动力检定");
+      notice("飞船已完成修复与动力检定");
     }
     return;
   }
   if (cmd === "/corridor") {
     view.interplanetary.toggleCorridor(!view.interplanetary.inCorridor);
-    notice(view.interplanetary.inCorridor ? "🚪 已进入飞船内部走廊" : "🚪 已返回外部空间");
+    notice(view.interplanetary.inCorridor ? "已进入飞船内部走廊" : "已返回外部空间");
     return;
   }
   if (cmd === "/help") {

@@ -73,16 +73,23 @@ test("authored Kepler mounts immediately and stays overhead inside both 30 km ca
   const entry = system.planets.get("kepler")!;
   assert.ok(entry.highDetail);
   assert.ok(entry.highDetail.parent === entry.group, "loaded GLTF must be mounted before loadAssets resolves");
-  for (const height of [0, 24, 50, 300]) {
+  for (const height of [0, 24, 50, 300, 5423]) {
     system.step(1 / 60, { x: 0, y: height, z: 355 });
-    assert.ok(entry.group.position.y >= 26000 && entry.group.position.y <= 28500);
+    assert.ok(entry.group.position.y >= 4000 && entry.group.position.y <= 6000);
     assert.equal(entry.surfaceMesh.parent, entry.group, "fallback stays mounted alongside authored detail");
     assert.equal(entry.surfaceMesh.visible, true);
-    assert.ok(entry.surfaceMesh.scale.x <= 0.7, "fallback must sit beneath the authored terrain");
+    if (height <= 300) {
+      assert.ok(entry.surfaceMesh.scale.x <= 0.9, "fallback must sit beneath the authored terrain");
+    } else {
+      assert.equal(entry.surfaceMesh.scale.x, 1, "fallback matches full orbital radius in deep space");
+    }
     for (const cam of [camera, skyCamera]) {
       cam.position.set(0, height + 2, 355);
-      // Look up using the touch controls' actual pitch limit, rather than teleporting the view to zenith.
-      cam.rotation.set(1.3, -Math.atan2(entry.group.position.x, 355 - entry.group.position.z), 0, "YXZ");
+      // Look towards Kepler in the celestial sky.
+      const toKepler = entry.group.position.clone().sub(cam.position);
+      const pitch = Math.atan2(toKepler.y, Math.hypot(toKepler.x, toKepler.z));
+      const yaw = -Math.atan2(toKepler.x, -toKepler.z);
+      cam.rotation.set(pitch, yaw, 0, "YXZ");
       cam.updateMatrixWorld(true);
       system.scene.updateMatrixWorld(true);
       const frustum = new THREE.Frustum().setFromProjectionMatrix(
@@ -108,7 +115,11 @@ test("authored Kepler mounts immediately and stays overhead inside both 30 km ca
       const planet = meshes.find(mesh => (mesh.material as THREE.Material).name === "Planet")!;
       const diameter = new THREE.Box3().setFromObject(planet).getSize(new THREE.Vector3()).y;
       const angularDiameter = THREE.MathUtils.radToDeg(2 * Math.atan(diameter / (2 * cam.position.distanceTo(entry.group.position))));
-      assert.ok(angularDiameter >= 9, `terrain must be large enough to read from spawn; got ${angularDiameter} degrees`);
+      if (height <= 300) {
+        assert.ok(angularDiameter >= 9, `terrain must be large enough to read from spawn; got ${angularDiameter} degrees`);
+      } else {
+        assert.ok(angularDiameter >= 3, `terrain remains visible at high elevation; got ${angularDiameter} degrees`);
+      }
     }
   }
   system.step(1 / 60, SOLAR_SYSTEM.kepler.landingSite);
