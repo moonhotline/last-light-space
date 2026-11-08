@@ -5,9 +5,49 @@ import { Simulation } from "../../frontend/space-escape/shared/simulation";
 import { tickShip } from "../../frontend/space-escape/shared/adventure";
 import { groundAt } from "../../frontend/space-escape/shared/map";
 import { LAB } from "../../frontend/space-escape/shared/adventure-data";
-import { idleInput } from "../../frontend/space-escape/shared/types";
+import { DT, idleInput } from "../../frontend/space-escape/shared/types";
 
 await initPhysics();
+
+for (const kind of ["light_fighter", "intergalactic"] as const) {
+  test(`${kind}: X descends promptly, brakes forward thrust and settles safely on the basin floor`, (t) => {
+    const sim = new Simulation(42);
+    t.after(() => sim.dispose());
+    const pilot = sim.add("pilot");
+    sim.start(pilot.id);
+    pilot.seat = 0;
+    const ship = sim.s.adventure.ship;
+    Object.assign(ship, { kind, x: 0, y: 500, z: 355, vx: 0, vy: 0, vz: -60,
+      repaired: true, grounded: false, seats: [pilot.id, "", "", ""] });
+    const inputs = new Map([[pilot.id, { ...idleInput(), brake: true, sprint: true }]]);
+    for (let frame = 0; frame < 3 / DT; frame++) tickShip(sim, inputs);
+    assert.ok(ship.vy <= -35 && ship.vy >= -60, `surface descent must reach 35–60 m/s; got ${ship.vy}`);
+    assert.ok(Math.hypot(ship.vx, ship.vz) < 1, "X must retain horizontal braking priority over boost");
+    for (let frame = 0; frame < 12 / DT; frame++) {
+      tickShip(sim, inputs);
+      assert.ok(ship.y >= groundAt(ship.x, ship.z), "fast descent must never cross the floor");
+    }
+    assert.equal(ship.grounded, true);
+    assert.equal(ship.vy, 0);
+  });
+}
+
+test("X supplies stronger deep-space descent and releases back to a gentle drift", (t) => {
+  const sim = new Simulation(42);
+  t.after(() => sim.dispose());
+  const pilot = sim.add("pilot");
+  sim.start(pilot.id);
+  pilot.seat = 0;
+  const ship = sim.s.adventure.ship;
+  Object.assign(ship, { x: 0, y: 2000, z: 355, vx: 0, vy: 0, vz: 0,
+    repaired: true, grounded: false, seats: [pilot.id, "", "", ""] });
+  const inputs = new Map([[pilot.id, { ...idleInput(), brake: true }]]);
+  for (let frame = 0; frame < 3 / DT; frame++) tickShip(sim, inputs);
+  assert.ok(ship.vy < -100 && ship.vy >= -160, `deep-space descent must be stronger; got ${ship.vy}`);
+  inputs.set(pilot.id, idleInput());
+  for (let frame = 0; frame < 3 / DT; frame++) tickShip(sim, inputs);
+  assert.ok(ship.vy > -3, "releasing X must stop powered descent");
+});
 
 test("low flight over basin slopes preserves forward momentum while the floor resolves contact", (t) => {
   const sim = new Simulation(42);

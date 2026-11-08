@@ -233,7 +233,6 @@ export class GameView {
   bloom: UnrealBloomPass;
   sky = new THREE.Group();
   earth = new THREE.Group();
-  giant = new THREE.Group();
   moon = new THREE.Group();
   private flightPosition: THREE.Vector3 | null = null;
   private flightShipKind: string | null = null;
@@ -713,36 +712,7 @@ export class GameView {
       }),
     );
     this.sky.add(starfield);
-    // Decorative Kepler stays in the camera-relative sky pass at every altitude.
-    this.giant.name = "kepler-sky";
-    this.sky.add(this.giant);
-    this.giant.position.set(4800, 4500, -9200);
-    const gas = new THREE.Mesh(
-      new THREE.SphereGeometry(1350, 96, 64),
-      new THREE.ShaderMaterial({
-        vertexShader: vertex,
-        fragmentShader: `varying vec2 vUv;varying vec3 vNormal;void main(){float q=vUv.y+sin(vUv.x*22.+vUv.y*45.)*.003;float b=.5+.13*sin(q*94.)+.065*sin(q*210.+sin(vUv.x*31.))+.04*sin(q*470.);vec3 c=mix(vec3(.28,.19,.12),vec3(.78,.62,.40),b);float l=smoothstep(-.25,.7,dot(normalize(vNormal),normalize(vec3(-.9,.22,.32))));c*=.035+l;gl_FragColor=vec4(c,1.);}`,
-      }),
-    );
-    gas.name = "kepler-cloud-bands";
-    this.giant.add(gas);
-    const ringGeo = new THREE.RingGeometry(1770, 3440, 240, 10);
-    const ring = new THREE.Mesh(
-      ringGeo,
-      new THREE.ShaderMaterial({
-        side: THREE.DoubleSide,
-        transparent: true,
-        depthWrite: false,
-        vertexShader: vertex,
-        fragmentShader: `varying vec3 vPosition;void main(){float r=length(vPosition.xy);float t=(r-1770.)/1670.;float bands=.62+.08*sin(r*.19)+.12*sin(r*.048)+.045*sin(r*.81);float gap=1.-.91*exp(-pow((t-.45)/.018,2.));gap*=1.-.5*exp(-pow((t-.73)/.015,2.));vec3 c=mix(vec3(.39,.29,.18),vec3(.92,.76,.47),bands);float shadow=smoothstep(600.,1800.,vPosition.x+abs(vPosition.y)*1.3);c*=mix(.23,1.,shadow);float edge=smoothstep(0.,.04,t)*(1.-smoothstep(.90,1.,t));gl_FragColor=vec4(c,bands*gap*edge*.93);}`,
-      }),
-    );
-    ring.rotation.x = 1.42;
-    ring.rotation.z = 0;
-    this.giant.rotation.z = 0.42;
-    ring.name = "kepler-rings";
-    this.giant.add(ring);
-    this.atmosphere(this.giant, 1356, 0xe3c197, 0.24);
+    // Kepler's authored terrain and cloud model is owned by InterplanetarySystem.
     // A distant sun with a soft optical halo.
     const sun = new THREE.Mesh(
       new THREE.SphereGeometry(75, 24, 16),

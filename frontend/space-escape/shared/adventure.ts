@@ -419,11 +419,13 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
       .addScaledVector(frame.forward, forward * acceleration * DT);
     const isClimbing = (i.jump || i.jet) && !!pilot;
     const climbForce = isClimbing ? tuning.climbForce : 0;
-    const vyDamping = i.brake ? 4 : (isClimbing ? 0.9 : 1.8);
+    const vyDamping = i.brake ? 1.5 : (isClimbing ? 0.9 : 1.8);
+    // X brakes lateral travel while actively descending; the floor resolves contact.
+    const descentForce = i.brake ? (inDeepSpace ? 170 : 85) : 0;
     const gravity = frame.capture
       ? frame.capture.body.gravity * frame.capture.weight : 3;
     let radial = radialSpeed * Math.exp(-vyDamping * DT) +
-      (climbForce - (i.brake ? 28 : 0) - (frame.capture ? 0 : gravity)) * DT;
+      (climbForce - descentForce - (frame.capture ? 0 : gravity)) * DT;
     const speed = tangent.length();
     const speedLimit = inDeepSpace
       ? (boosting ? tuning.cruiseBoost : tuning.cruiseSpeed)
