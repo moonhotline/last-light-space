@@ -1,5 +1,7 @@
 # LAST LIGHT / 余晖 — 回声协议
 
+![Beneath the Rings — an unmarked astronaut overlooking an icy alien basin beneath a ringed gas giant](assets/readme/beneath-the-rings.png)
+
 **A signal worth chasing. A world worth exploring.**
 
 [Play the expedition](https://last-light-space.vercel.app) · [Expedition guide](docs/space-escape/echo-design.md) · [Verification](docs/space-escape/echo-verification.md)
@@ -15,7 +17,6 @@ A cooperative browser expedition built with TypeScript, Three.js, Rapier, Colyse
 
 A hand-authored polar basin, 3.58 km across, where blue ice shelves meet red-rock fractures. Traverse abandoned research sites, chase the Echo Protocol's signal, upgrade at optional beacons, and pilot the **PEREGRINE-07** with friends. The ringed giant is your compass; the expedition is yours to make.
 
-Promotional key art is pending a verified, original raster image featuring an astronaut beneath the rings, without national flags or insignia. Do not substitute handcrafted SVG artwork or present gameplay screenshots as generated key art.
 
 ## Run locally
 
