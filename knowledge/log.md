@@ -33,3 +33,4 @@
 | 2026-11-07 08:18 | Commit c35da08 | moonhotline | 渲染管线与 LOD | Merge pull request #30 from moonhotline/fix/spawn-fleet-scaling-and-frustum |
 | 2026-11-07 13:54 | Commit 9d96089 | moonhotline | 天体物理与大气, 运动物理系统, 权威多人仿真, 渲染管线与 LOD | Merge pull request #31 from moonhotline/feat/rsi-fleet-celestial-cosmos |
 | 2026-11-07 16:09 | Commit f75097c | moonhotline | 全库/配置同步 | Merge pull request #32 from moonhotline/fix/preserve-authored-ship-models |
+| 2026-11-08 05:48 | PR #34 (40f7da1) | moonhotline | 天体物理与大气, 运动物理系统, 渲染管线与 LOD | fix(space): purge all procedural models, eliminate forward flight stutter, and r |
