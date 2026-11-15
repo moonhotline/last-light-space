@@ -45,3 +45,4 @@
 | 2026-11-15 12:50 | PR #38 (f9c8734) | moonhotline | 渲染管线与 LOD | fix: correct ship heading, propulsion alignment and adjacent gate travel |
 | 2026-11-15 12:56 | PR #38 (54a4797) | moonhotline | 渲染管线与 LOD | fix: correct ship heading, propulsion alignment and adjacent gate travel |
 | 2026-11-15 15:05 | PR #39 (f497a24) | moonhotline | 渲染管线与 LOD | fix: align heavy ship propulsion, enable 600 m/s flight and restore Kepler landi |
+| 2026-11-15 15:36 | PR #39 (2e1e669) | moonhotline | 渲染管线与 LOD | fix: align heavy ship propulsion, enable 600 m/s flight and restore Kepler landi |
