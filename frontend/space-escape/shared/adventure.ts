@@ -13,6 +13,7 @@ import {
   RESOURCE_SITES,
   FIGHTER_POS,
   SPAWN_FLEET,
+  SHIP_MAX_SPEED,
   OUTPOST,
   LORE,
   DESTINATION,
@@ -370,13 +371,13 @@ interface FlightTuning {
 const FLIGHT_TUNING: Record<SpaceshipKind, FlightTuning> = {
   light_fighter: {
     turnRate: 1.8, turnResponse: 12, maxBank: 0.52, rollResponse: 12,
-    acceleration: 46, drag: 0.28, surfaceSpeed: 96, surfaceBoost: 160,
-    cruiseSpeed: 280, cruiseBoost: 360, climbForce: 150,
+    acceleration: 46, drag: 0.28, surfaceSpeed: 96, surfaceBoost: SHIP_MAX_SPEED,
+    cruiseSpeed: 280, cruiseBoost: SHIP_MAX_SPEED, climbForce: 150,
   },
   intergalactic: {
     turnRate: 0.8, turnResponse: 4, maxBank: 0.4, rollResponse: 5,
-    acceleration: 24, drag: 0.11, surfaceSpeed: 64, surfaceBoost: 110,
-    cruiseSpeed: 260, cruiseBoost: 400, climbForce: 112.5,
+    acceleration: 24, drag: 0.11, surfaceSpeed: 64, surfaceBoost: SHIP_MAX_SPEED,
+    cruiseSpeed: 260, cruiseBoost: SHIP_MAX_SPEED, climbForce: 112.5,
   },
 };
 
@@ -460,9 +461,9 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
     const tangent = velocity.clone().addScaledVector(frame.up, -radialSpeed);
     const previousSpeed = tangent.length();
     // Shift ignites forward afterburners even without W. Braking takes priority.
-    const boostMultiplier = inDeepSpace && kind === "intergalactic" ? 4 : 2.5;
+    const boostMultiplier = kind === "intergalactic" ? 4 : 2.5;
     const forward = boosting ? Math.max(0, i.forward) + boostMultiplier - 1 : i.forward;
-    const acceleration = tuning.acceleration * (inDeepSpace && boosting ? 1.5 : 1);
+    const acceleration = tuning.acceleration * (boosting ? 1.5 : 1);
     tangent.multiplyScalar(drag)
       .addScaledVector(frame.right, i.side * acceleration * DT)
       .addScaledVector(frame.forward, forward * acceleration * DT);
@@ -486,6 +487,8 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
     radial = clamp(radial, -maxVy, maxVy);
     velocity.copy(tangent).addScaledVector(frame.up, radial);
     if (frame.capture) velocity.addScaledVector(new Vector3().copy(frame.capture.normal), -gravity * DT);
+    // Cap the complete velocity after climb and gravity, including diagonal boost.
+    velocity.clampLength(0, SHIP_MAX_SPEED);
     s.vx = velocity.x;
     s.vy = velocity.y;
     s.vz = velocity.z;

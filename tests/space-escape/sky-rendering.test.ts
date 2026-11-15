@@ -78,11 +78,7 @@ test("authored Kepler mounts immediately and stays overhead inside both 30 km ca
     assert.ok(entry.group.position.y >= 4000 && entry.group.position.y <= 6000);
     assert.equal(entry.surfaceMesh.parent, entry.group, "fallback stays mounted alongside authored detail");
     assert.equal(entry.surfaceMesh.visible, true);
-    if (height <= 300) {
-      assert.ok(entry.surfaceMesh.scale.x <= 0.9, "fallback must sit beneath the authored terrain");
-    } else {
-      assert.equal(entry.surfaceMesh.scale.x, 1, "fallback matches full orbital radius in deep space");
-    }
+    assert.equal(entry.surfaceMesh.scale.x, 0.98, "fallback stays beneath the spherical authored crust");
     for (const cam of [camera, skyCamera]) {
       cam.position.set(0, height + 2, 355);
       // Look towards Kepler in the celestial sky.
@@ -115,11 +111,7 @@ test("authored Kepler mounts immediately and stays overhead inside both 30 km ca
       const planet = meshes.find(mesh => (mesh.material as THREE.Material).name === "Planet")!;
       const diameter = new THREE.Box3().setFromObject(planet).getSize(new THREE.Vector3()).y;
       const angularDiameter = THREE.MathUtils.radToDeg(2 * Math.atan(diameter / (2 * cam.position.distanceTo(entry.group.position))));
-      if (height <= 300) {
-        assert.ok(angularDiameter >= 9, `terrain must be large enough to read from spawn; got ${angularDiameter} degrees`);
-      } else {
-        assert.ok(angularDiameter >= 3, `terrain remains visible at high elevation; got ${angularDiameter} degrees`);
-      }
+      assert.ok(angularDiameter >= 3, `physical terrain remains readable; got ${angularDiameter} degrees`);
     }
   }
   system.step(1 / 60, SOLAR_SYSTEM.kepler.landingSite);

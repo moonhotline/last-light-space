@@ -22,10 +22,6 @@ import {
 
 type RenderShip = Pick<AdventureShip, "x" | "y" | "z" | "yaw" | "bank" | "seats"> & Partial<AdventureShip>;
 
-// A majestic cloud and ring envelope in the forward celestial horizon, subtends ~24 degrees at spawn.
-const KEPLER_SKY_POSITION = new THREE.Vector3(2600, 4600, -8200);
-const KEPLER_SKY_SCALE = 3.6;
-
 export function normalizeModelContainer(
   obj: THREE.Object3D,
   targetSize: number,
@@ -58,6 +54,46 @@ export function normalizeModelContainer(
 
   container.add(obj);
   container.userData.chassisClearance = Math.max(0.82, scaledBox.getSize(new THREE.Vector3()).y / 2);
+  return container;
+}
+
+/** Keep the authored crust on the same sphere used by landing physics; clouds retain their geometry. */
+export function normalizePlanetModel(obj: THREE.Object3D, radius: number): THREE.Group {
+  obj.updateMatrixWorld(true);
+  const terrain: THREE.Mesh[] = [];
+  obj.traverse(node => {
+    if (node instanceof THREE.Mesh && (Array.isArray(node.material) ? node.material : [node.material])
+      .some(material => material.name === "Planet")) terrain.push(node);
+  });
+  if (!terrain.length) return normalizeModelContainer(obj, radius * 2);
+  const point = new THREE.Vector3();
+  let radialSum = 0, vertices = 0;
+  for (const mesh of terrain) {
+    const positions = mesh.geometry.getAttribute("position");
+    for (let index = 0; index < positions.count; index++) {
+      radialSum += point.fromBufferAttribute(positions, index).applyMatrix4(mesh.matrixWorld).length();
+      vertices++;
+    }
+  }
+  // Scale by the solid terrain, never by the asymmetric outer cloud envelope.
+  obj.scale.multiplyScalar(radius / (radialSum / vertices));
+  obj.updateMatrixWorld(true);
+  for (const mesh of terrain) {
+    mesh.geometry = mesh.geometry.clone();
+    const positions = mesh.geometry.getAttribute("position");
+    const inverse = mesh.matrixWorld.clone().invert();
+    for (let index = 0; index < positions.count; index++) {
+      point.fromBufferAttribute(positions, index).applyMatrix4(mesh.matrixWorld)
+        .normalize().multiplyScalar(radius).applyMatrix4(inverse);
+      positions.setXYZ(index, point.x, point.y, point.z);
+    }
+    positions.needsUpdate = true;
+    mesh.geometry.computeVertexNormals();
+    mesh.geometry.computeBoundingBox();
+    mesh.geometry.computeBoundingSphere();
+  }
+  const container = new THREE.Group();
+  container.add(obj);
   return container;
 }
 
@@ -425,10 +461,6 @@ export class InterplanetarySystem {
     for (const [id, body] of Object.entries(SOLAR_SYSTEM)) {
       const pGroup = new THREE.Group();
       pGroup.position.set(body.position.x, body.position.y, body.position.z);
-      if (id === "kepler") {
-        pGroup.position.copy(KEPLER_SKY_POSITION);
-        pGroup.scale.setScalar(KEPLER_SKY_SCALE);
-      }
       pGroup.frustumCulled = true;
 
       if (id.startsWith("warpgate")) {
@@ -512,7 +544,7 @@ export class InterplanetarySystem {
       const geo = new THREE.SphereGeometry(body.radius, 64, 48);
       const surfaceMesh = new THREE.Mesh(geo, mat);
       // The GLTF includes clouds beyond its terrain: keep the backup under the crust.
-      if (id === "kepler") surfaceMesh.scale.setScalar(0.68);
+      if (id === "kepler") surfaceMesh.scale.setScalar(0.98);
       surfaceMesh.castShadow = true;
       surfaceMesh.receiveShadow = true;
       surfaceMesh.frustumCulled = true;
@@ -761,22 +793,6 @@ export class InterplanetarySystem {
     const tAtmo = THREE.MathUtils.clamp((shipPos.y - groundLevel) / (orbitAltitude - groundLevel), 0, 1);
     const spaceFactor = tAtmo * tAtmo * (3 - 2 * tAtmo); // smoothstep
     const rayleighBlend = 1.0 - spaceFactor;
-    // Enlarge the authored planet overhead on the surface; restore its physical
-    // position and radius before orbital capture so flight and landing still align.
-    const keplerEntry = this.planets.get("kepler");
-    if (keplerEntry) {
-      const inBasin = !capture && Math.abs(shipPos.x) < HALF - 10 && Math.abs(shipPos.z) < HALF - 10;
-      const keplerBlend = inBasin ? THREE.MathUtils.smoothstep(altitude, 350, 650) : 1;
-      const orbitalPos = new THREE.Vector3(
-        SOLAR_SYSTEM.kepler.position.x,
-        SOLAR_SYSTEM.kepler.position.y,
-        SOLAR_SYSTEM.kepler.position.z,
-      );
-      keplerEntry.group.position.lerpVectors(KEPLER_SKY_POSITION, orbitalPos, keplerBlend);
-      keplerEntry.group.scale.setScalar(THREE.MathUtils.lerp(KEPLER_SKY_SCALE, 1, keplerBlend));
-      keplerEntry.surfaceMesh.scale.setScalar(THREE.MathUtils.lerp(0.68, 1, keplerBlend));
-    }
-
     // Update ALL planets:
     // STRICT RULE: NEVER set visible = false in surface mode! All planets remain visible and rely on frustum culling.
     for (const [id, entry] of this.planets) {
@@ -911,8 +927,10 @@ export class InterplanetarySystem {
     const loadModel = async (key: string, url: string, targetSize = 1) => {
       const gltf = await loadSafe(url);
       if (!gltf) return null;
-      const model = normalizeModelContainer(gltf.scene, targetSize,
-        key === "fighter" || key === "intergalactic" ? Math.PI : 0);
+      const model = key === "kepler_surface"
+        ? normalizePlanetModel(gltf.scene, targetSize / 2)
+        : normalizeModelContainer(gltf.scene, targetSize,
+          key === "fighter" || key === "intergalactic" ? Math.PI : 0);
       this.downloadedAssets.set(key, model);
       this.assetLibrary.add(model);
       return model;

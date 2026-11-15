@@ -34,7 +34,7 @@ import {
 import type { Snapshot, Player } from "../shared/types";
 import type { MovementWorld } from "../shared/physics";
 import { SOLAR_SYSTEM } from "../shared/celestial";
-import { SPAWN_FLEET } from "../shared/adventure-data";
+import { SPAWN_FLEET, SHIP_MAX_SPEED } from "../shared/adventure-data";
 import { FOOT_OFFSET, playerUp, surfaceOrientation, eyePosition, viewOrientation } from "../shared/surface";
 import { createHandRig, equipmentModel, attachHeldModel } from "./hand-rig";
 const COLORS = [0x9eeafa, 0xffc98b, 0xff9f81, 0xa6baff];
@@ -1180,6 +1180,7 @@ export class GameView {
     pilotFlight?: { boosting: boolean; braking: boolean },
   ) {
     this.adventure.update(s, me, dt, t, pilotFlight);
+    this.interplanetary.setShipState(s?.adventure.ship || null, dt);
     let cameraShip = s?.adventure.ship;
     if (cameraShip && me && me.seat >= 0) {
       const kind = cameraShip.kind ?? "light_fighter";
@@ -1229,7 +1230,7 @@ export class GameView {
       if (me.seat >= 0 && s) {
         const ship = cameraShip!;
         const shipSpeed = Math.hypot(ship.vx, ship.vy, ship.vz);
-        const speedRatio = clamp(shipSpeed / (ship.kind === "intergalactic" ? 400 : 320), 0, 1.0);
+        const speedRatio = clamp(shipSpeed / SHIP_MAX_SPEED, 0, 1.0);
         let fov = 60 + speedRatio * 18; // smooth 60° -> 78°
         if (this.activeWeapon === "camera") {
           fov = fov / Math.max(1, this.cameraZoom);
@@ -1255,7 +1256,8 @@ export class GameView {
         const celestialAlign = computeCelestialAlignment(ship, ship.yaw, ship.bank);
         const localUp = celestialAlign.captureWeight > 0.05 ? celestialAlign.up.clone() : new THREE.Vector3(0, 1, 0);
 
-        const shipPos = new THREE.Vector3(ship.x, ship.y, ship.z);
+        const hullModel = this.interplanetary.shipMeshes?.get(ship.kind ?? "light_fighter");
+        const shipPos = hullModel ? hullModel.position.clone() : v3(ship);
         const shipForward = celestialFlightFrame(ship, ship.yaw).forward;
 
         const idealFocus = shipPos.clone().addScaledVector(localUp, 1.8).addScaledVector(shipForward, 4.0);
@@ -1391,7 +1393,6 @@ export class GameView {
         .add(new THREE.Vector3(-240, 190, -140));
     }
     this.camera.updateMatrixWorld();
-    this.interplanetary.setShipState(s?.adventure.ship || null, dt);
     this.interplanetary.step(dt, me || { x: 0, y: 0, z: 0 });
     if (this.jetGain && this.listener) {
       const ctx = this.listener.context;

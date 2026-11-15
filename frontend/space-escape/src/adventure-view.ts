@@ -131,7 +131,8 @@ export class AdventureView {
     this.intergalacticPropulsionFX.rootGroup.visible = false;
     clean3DEntityText(this.ship);
     this.scene.add(this.ship);
-    alignShipToGround(this.ship, FIGHTER_POS.x, FIGHTER_POS.z, 0, 3.5, 5.5, 0.05);
+    alignShipToGround(this.ship, FIGHTER_POS.x, FIGHTER_POS.z, SPAWN_FLEET.light_fighter.yaw,
+      SPAWN_FLEET.light_fighter.halfWidth, SPAWN_FLEET.light_fighter.halfLength, SPAWN_FLEET.light_fighter.clearance);
     this.ship.visible = true;
     lab.scene.position.copy(v(LAB));
     this.scene.add(lab.scene);
@@ -474,8 +475,12 @@ export class AdventureView {
         const hull = this.scene.getObjectByName("intergalactic-ship");
         if (!ship.grounded && ship.repaired && hull) {
           this.intergalacticPropulsionFX.rootGroup.visible = true;
-          this.intergalacticPropulsionFX.rootGroup.position.copy(hull.position);
-          this.intergalacticPropulsionFX.rootGroup.quaternion.copy(hull.quaternion);
+          // The nozzle frame follows the hull in the same render tick, as on the fighter.
+          if (this.intergalacticPropulsionFX.rootGroup.parent !== hull) {
+            hull.add(this.intergalacticPropulsionFX.rootGroup);
+            this.intergalacticPropulsionFX.rootGroup.position.set(0, 0, 0);
+            this.intergalacticPropulsionFX.rootGroup.quaternion.identity();
+          }
           this.intergalacticPropulsionFX.update(dt, ship, null, isBoosting, isBraking);
         } else {
           this.intergalacticPropulsionFX.rootGroup.visible = false;

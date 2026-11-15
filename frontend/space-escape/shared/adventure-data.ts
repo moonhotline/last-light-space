@@ -71,16 +71,18 @@ export interface SpawnShip {
   assetKey: string;
   modelSize: number;
 }
+export const SHIP_MAX_SPEED = 600;
+
 export const SPAWN_FLEET: Record<SpaceshipKind, SpawnShip> = {
   light_fighter: {
     asset: "/assets/models/fighter/scene.gltf", assetKey: "fighter", modelSize: 11,
     kind: "light_fighter", name: "轻型战机", position: FIGHTER_POS,
-    boardingRadius: 12, yaw: 0, halfWidth: 3.5, halfLength: 5.5, clearance: 0.05,
+    boardingRadius: 12, yaw: 0, halfWidth: 5.5, halfLength: 4.85, clearance: 0.05,
   },
   intergalactic: {
     asset: "/assets/models/intergalactic/scene.gltf", assetKey: "intergalactic", modelSize: 18,
     kind: "intergalactic", name: "跃迁级星舰", position: INTERGALACTIC_POS,
-    boardingRadius: 20, yaw: -0.15, halfWidth: 5, halfLength: 9, clearance: 0.08,
+    boardingRadius: 20, yaw: -0.15, halfWidth: 9, halfLength: 5.45, clearance: 0.08,
   },
 };
 export const ALIEN1_POS = atGround(-11, 352, 0.9);      // 异星潜行者 (Alien Crawler / Stalker)
