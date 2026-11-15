@@ -177,6 +177,16 @@ function main() {
   const nowStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 
   const context = getPRContext();
+  // The PR diff still contains source changes after our generated commit. Do not
+  // refresh that same bundle again solely because the sync itself triggered CI.
+  const headSubject = runGit("log -1 --pretty=%s");
+  const headFiles = runGit("diff-tree --no-commit-id --name-only -r HEAD").split("\n").filter(Boolean);
+  const pendingFiles = runGit("diff --name-only HEAD").split("\n").filter(Boolean);
+  if (headSubject.startsWith("chore(okf):") && headFiles.length > 0 &&
+      [...headFiles, ...pendingFiles].every((file) => file.startsWith("knowledge/"))) {
+    console.log("[OKF Sync] Generated knowledge commit is already synchronized.");
+    return;
+  }
   const changedFiles = getChangedFiles();
   console.log(`Detected changes across ${changedFiles.length} file(s).`);
 
