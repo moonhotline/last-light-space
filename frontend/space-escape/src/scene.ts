@@ -849,7 +849,7 @@ export class GameView {
     THREE.DefaultLoadingManager.onError = () => {};
     const loader = new GLTFLoader(),
       textureLoader = new THREE.TextureLoader();
-    const loadGltf = async (url: string, fallback?: string) => {
+    const loadGltf = async (url: string) => {
       let error: unknown;
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
@@ -859,7 +859,6 @@ export class GameView {
           await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
         }
       }
-      if (fallback) return loadGltf(fallback);
       throw error;
     };
     const loadTexture = async (url: string) => {
@@ -884,7 +883,7 @@ export class GameView {
       cameraGltf,
       obeliskGltf,
     ] = await Promise.all([
-      loadGltf("/assets/explorer-v4.glb", "/assets/explorer-v3.glb"),
+      loadGltf("/assets/explorer-v4.glb"),
       loadGltf("/assets/beacon.glb"),
       loadGltf("/assets/observatory.glb"),
       loadGltf("/assets/hoverboard.glb"),
