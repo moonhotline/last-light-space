@@ -29,8 +29,10 @@ const KEPLER_SKY_SCALE = 3.6;
 export function normalizeModelContainer(
   obj: THREE.Object3D,
   targetSize: number,
+  yawOffset = 0,
 ): THREE.Group {
   const container = new THREE.Group();
+  obj.rotation.y += yawOffset;
   obj.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(obj);
   const size = new THREE.Vector3();
@@ -152,8 +154,13 @@ export function updateShipTransform(model: THREE.Group, ship: RenderShip, dt: nu
       position.y += model.userData.launchOffset ?? clearance + spawn.clearance;
     }
   }
-  model.position.lerp(position, 1 - Math.exp(-dt * 16));
-  model.quaternion.slerp(quaternion, 1 - Math.exp(-dt * 12));
+  if (dt === Infinity || model.position.distanceTo(position) > 600) {
+    model.position.copy(position);
+    model.quaternion.copy(quaternion);
+  } else {
+    model.position.lerp(position, 1 - Math.exp(-dt * 16));
+    model.quaternion.slerp(quaternion, 1 - Math.exp(-dt * 12));
+  }
 }
 
 /**
@@ -904,7 +911,8 @@ export class InterplanetarySystem {
     const loadModel = async (key: string, url: string, targetSize = 1) => {
       const gltf = await loadSafe(url);
       if (!gltf) return null;
-      const model = normalizeModelContainer(gltf.scene, targetSize);
+      const model = normalizeModelContainer(gltf.scene, targetSize,
+        key === "fighter" || key === "intergalactic" ? Math.PI : 0);
       this.downloadedAssets.set(key, model);
       this.assetLibrary.add(model);
       return model;

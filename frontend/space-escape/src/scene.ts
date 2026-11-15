@@ -136,7 +136,7 @@ export class StardustParallaxStream {
     cameraPos: THREE.Vector3,
     cameraQuat: THREE.Quaternion,
     velocity: THREE.Vector3,
-    thrust: number,
+    _thrust: number,
     isDriving: boolean,
     dt: number,
   ) {
@@ -144,12 +144,11 @@ export class StardustParallaxStream {
     this.group.quaternion.copy(cameraQuat);
 
     const speed = velocity.length();
-    const effectiveSpeed = isDriving ? Math.max(speed, thrust * 25) : speed;
-    const isFlightAtSpeed = isDriving && effectiveSpeed > 10;
-    const flightSpeedRatio = isFlightAtSpeed ? clamp((effectiveSpeed - 10) / 60, 0, 1) : 0;
-    const baseOpacity = isFlightAtSpeed ? (0.2 + 0.65 * flightSpeedRatio) : 0;
+    const isFlightAtSpeed = isDriving && speed > 35;
+    const flightSpeedRatio = isFlightAtSpeed ? clamp((speed - 35) / 55, 0, 1) : 0;
+    const baseOpacity = isFlightAtSpeed ? (0.15 + 0.55 * flightSpeedRatio) : 0;
 
-    const speedFactor = Math.max(10, effectiveSpeed);
+    const speedFactor = Math.max(10, speed);
 
     for (const layer of this.layers) {
       const mat = layer.points.material as THREE.PointsMaterial;
@@ -1184,7 +1183,7 @@ export class GameView {
     let cameraShip = s?.adventure.ship;
     if (cameraShip && me && me.seat >= 0) {
       const kind = cameraShip.kind ?? "light_fighter";
-      if (!this.flightPosition || this.flightShipKind !== kind) this.flightPosition = v3(cameraShip);
+      if (!this.flightPosition || this.flightShipKind !== kind || this.flightPosition.distanceTo(v3(cameraShip)) > 600) this.flightPosition = v3(cameraShip);
       this.flightShipKind = kind;
       // Share the hull's response rate; never clamp an airborne camera to terrain.
       this.flightPosition.lerp(v3(cameraShip), 1 - Math.exp(-dt * 16));
@@ -1261,12 +1260,6 @@ export class GameView {
 
         const idealFocus = shipPos.clone().addScaledVector(localUp, 1.8).addScaledVector(shipForward, 4.0);
 
-        if (!this.flightSpringArm.initialized) {
-          this.flightSpringArm.focus.copy(idealFocus);
-        } else {
-          this.flightSpringArm.focus.lerp(idealFocus, 1 - Math.exp(-dt * 10));
-        }
-
         const hull = SPAWN_FLEET[ship.kind ?? "light_fighter"];
         const baseDist = Math.max(22, hull.halfLength * 3);
         const baseH = Math.max(6.5, hull.halfWidth * 1.7);
@@ -1280,12 +1273,14 @@ export class GameView {
         const radialVelocity = new THREE.Vector3(ship.vx, ship.vy, ship.vz).dot(localUp);
         const targetPitch = clamp(radialVelocity / 28, -0.3, 0.3) * 0.18;
 
-        if (!this.flightSpringArm.initialized) {
+        if (!this.flightSpringArm.initialized || this.flightSpringArm.position.distanceTo(idealCamPos) > 600) {
+          this.flightSpringArm.focus.copy(idealFocus);
           this.flightSpringArm.position.copy(idealCamPos);
           this.flightSpringArm.roll = targetRoll;
           this.flightSpringArm.pitch = targetPitch;
           this.flightSpringArm.initialized = true;
         } else {
+          this.flightSpringArm.focus.lerp(idealFocus, 1 - Math.exp(-dt * 10));
           this.flightSpringArm.position.lerp(idealCamPos, 1 - Math.exp(-dt * 8));
           this.flightSpringArm.roll = THREE.MathUtils.damp(this.flightSpringArm.roll, targetRoll, 7, dt);
           this.flightSpringArm.pitch = THREE.MathUtils.damp(this.flightSpringArm.pitch, targetPitch, 6, dt);

@@ -20,7 +20,7 @@ import {
 } from "./adventure-data";
 import { groundAt, distance3, distance, HALF, clamp, type Vec } from "./map";
 import { eyePosition, viewDirection, FOOT_OFFSET, surfaceOrientation } from "./surface";
-import { celestialCapture, geodesicArcDistance, projectToSphere, type SpaceshipKind } from "./celestial";
+import { SOLAR_SYSTEM, celestialCapture, geodesicArcDistance, projectToSphere, type SpaceshipKind } from "./celestial";
 import { celestialFlightFrame } from "./celestial-flight";
 import { Vector3 } from "three";
 import type { Simulation } from "./simulation";
@@ -371,19 +371,66 @@ const FLIGHT_TUNING: Record<SpaceshipKind, FlightTuning> = {
   light_fighter: {
     turnRate: 1.8, turnResponse: 12, maxBank: 0.52, rollResponse: 12,
     acceleration: 46, drag: 0.28, surfaceSpeed: 96, surfaceBoost: 160,
-    cruiseSpeed: 280, cruiseBoost: 360, climbForce: 100,
+    cruiseSpeed: 280, cruiseBoost: 360, climbForce: 150,
   },
   intergalactic: {
     turnRate: 0.8, turnResponse: 4, maxBank: 0.4, rollResponse: 5,
     acceleration: 24, drag: 0.11, surfaceSpeed: 64, surfaceBoost: 110,
-    cruiseSpeed: 260, cruiseBoost: 400, climbForce: 75,
+    cruiseSpeed: 260, cruiseBoost: 400, climbForce: 112.5,
   },
 };
 
+// Clockwise adjacent-horizon route; the visible portal lies in the local XY plane.
+const WARP_ROUTE = ["warpgate", "warpgate_east", "warpgate_south", "warpgate_west"] as const;
+
+function tickWarpGates(sim: Simulation, previous: Vec, inputs: Map<string, Input>) {
+  const ship = sim.s.adventure.ship;
+  if (!ship.repaired || ship.grounded || !sim.player(ship.seats[0]) ||
+      (ship.warpUntil ?? 0) > sim.s.time) return;
+  const previousWarp = ship.warpUntil ?? 0;
+  for (const [index, id] of WARP_ROUTE.entries()) {
+    const source = SOLAR_SYSTEM[id];
+    const target = SOLAR_SYSTEM[WARP_ROUTE[(index + 1) % WARP_ROUTE.length]];
+    const normal = new Vector3().subVectors(source.landingSite, source.position).normalize();
+    const before = new Vector3().subVectors(previous, source.position);
+    const after = new Vector3().subVectors(ship, source.position);
+    const fromPlane = before.dot(normal), toPlane = after.dot(normal);
+    // Swept plane crossing avoids tunnelling and excludes flying beside the frame.
+    if (fromPlane === toPlane || fromPlane * toPlane > 0) continue;
+    const crossing = before.lerp(after, fromPlane / (fromPlane - toPlane));
+    const aperture = source.radius * 0.81 - SPAWN_FLEET[ship.kind ?? "light_fighter"].halfWidth;
+    if (crossing.length() > aperture) continue;
+    const exitNormal = new Vector3().subVectors(target.landingSite, target.position).normalize();
+    const entryDirection = normal.clone().multiplyScalar(fromPlane >= 0 ? -1 : 1);
+    const turn = Math.atan2(exitNormal.x, exitNormal.z) - Math.atan2(entryDirection.x, entryDirection.z);
+    const velocity = new Vector3(ship.vx, ship.vy, ship.vz).applyAxisAngle(new Vector3(0, 1, 0), turn);
+    Object.assign(ship, target.landingSite, {
+      vx: velocity.x, vy: velocity.y, vz: velocity.z, yaw: ship.yaw + turn,
+      yawVelocity: 0, grounded: false, warpUntil: sim.s.time + 3,
+    });
+    for (const player of sim.s.players) {
+      if (player.seat < 0) continue;
+      const input = inputs.get(player.id);
+      player.yaw = (input && (input.warpUntil ?? 0) === previousWarp ? input.yaw : player.yaw) + turn;
+      if (input) {
+        input.yaw = player.yaw;
+        input.warpUntil = ship.warpUntil;
+      }
+      sim.queues.get(player.id)?.splice(0);
+    }
+    sim.emit(`星门跃迁 · ${source.name} → ${target.name}`);
+    return;
+  }
+}
+
 export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
   const s = sim.s.adventure.ship;
+  const previous = { x: s.x, y: s.y, z: s.z };
   const pilot = sim.player(s.seats[0]);
-  const i = pilot ? inputs.get(pilot.id) || idleInput() : idleInput();
+  const rawInput = pilot ? inputs.get(pilot.id) || idleInput() : idleInput();
+  // In-flight packets from before a warp must never turn the ship back around.
+  const i = (rawInput.warpUntil ?? 0) === (s.warpUntil ?? 0)
+    ? rawInput : { ...rawInput, yaw: s.yaw };
   if (s.repaired) {
     const kind = s.kind ?? "light_fighter";
     const tuning = FLIGHT_TUNING[kind];
@@ -513,6 +560,7 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
       sim.emit("抵达回声林地 · 在不该有生命的地方，树木仍在呼吸");
     }
   }
+  tickWarpGates(sim, previous, inputs);
   const passengerFrame = celestialFlightFrame(s, s.yaw);
   s.flightRotation = { x: passengerFrame.surfaceRotation.x, y: passengerFrame.surfaceRotation.y,
     z: passengerFrame.surfaceRotation.z, w: passengerFrame.surfaceRotation.w };
@@ -532,7 +580,7 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
         jetting: false,
       });
       const input = inputs.get(p.id);
-      if (input) {
+      if (input && (input.warpUntil ?? 0) === (s.warpUntil ?? 0)) {
         p.yaw = input.yaw;
         p.pitch = input.pitch;
       }
