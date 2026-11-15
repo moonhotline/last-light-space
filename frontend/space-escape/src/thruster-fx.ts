@@ -112,7 +112,7 @@ export class ShipPropulsionFX {
 
     // Dual nozzle offsets based on ship kind
     const nozzleOffsets = kind === "intergalactic"
-      ? [{ x: -4.0, y: 0.0, z: 4.2 }, { x: 4.0, y: 0.0, z: 4.2 }]
+      ? [{ x: -2.1, y: 0.0, z: 4.9 }, { x: 2.1, y: 0.0, z: 4.9 }]
       : [{ x: -1.0, y: 0.50, z: 4.3 }, { x: 1.0, y: 0.50, z: 4.3 }];
 
     for (const offset of nozzleOffsets) {
@@ -153,7 +153,7 @@ export class ShipPropulsionFX {
 
     // Engine Exhaust Point Light (illuminates aft hull and ground/asteroids)
     this.engineLight = new THREE.PointLight(0x00f0ff, 0, 24, 1.8);
-    this.engineLight.position.set(0, 0.50, 5.0);
+    this.engineLight.position.set(0, kind === "intergalactic" ? 0 : 0.50, 5.0);
     this.rootGroup.add(this.engineLight);
   }
 
