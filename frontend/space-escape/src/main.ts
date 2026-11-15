@@ -284,8 +284,14 @@ async function loadSimulation() {
 function receive(next: Snapshot) {
   const previous = state?.phase;
   const previousCompleted = state?.completedAt ?? -1;
+  const previousWarp = state?.adventure.ship.warpUntil ?? 0;
   state = next;
   me = state.players.find((p) => p.id === (room?.sessionId || "local")) || null;
+  if (me && me.seat >= 0 && (next.adventure.ship.warpUntil ?? 0) > previousWarp) {
+    yaw = me.yaw;
+    pending = [];
+    correction = { x: 0, y: 0, z: 0 };
+  }
   if (mode === "coop" && me && next.phase !== "lobby") {
     if (!prediction && MovementWorldCtor) {
       prediction = new MovementWorldCtor();
@@ -541,6 +547,7 @@ function makeInput(): Input {
   const active = !panel && !reconnecting;
   const input: Input = {
     seq: ++sequence,
+    warpUntil: state?.adventure.ship.warpUntil ?? 0,
     forward: active
       ? Number(keys.has("KeyW") || keys.has("ArrowUp")) -
         Number(keys.has("KeyS") || keys.has("ArrowDown"))

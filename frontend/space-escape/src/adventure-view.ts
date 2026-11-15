@@ -121,7 +121,7 @@ export class AdventureView {
       weatherMaterials(root);
     });
     clean3DEntityText(ship.scene);
-    const fighter = normalizeModelContainer(ship.scene, SPAWN_FLEET.light_fighter.modelSize);
+    const fighter = normalizeModelContainer(ship.scene, SPAWN_FLEET.light_fighter.modelSize, Math.PI);
     this.ship.userData.chassisClearance = fighter.userData.chassisClearance;
     this.ship.add(fighter);
     this.propulsionFX = new ShipPropulsionFX("light_fighter");
@@ -483,14 +483,11 @@ export class AdventureView {
       }
     }
 
-    if (isFighter && ship.repaired && !ship.grounded && hash(Math.floor(t * 60), 5) > 0.2) {
-      for (const side of [-1.15, 1.15]) {
-        const dir = new THREE.Vector3(side, 1.6, 4.8 + (isBoosting ? 3.0 : 0.8)).applyAxisAngle(
-          new THREE.Vector3(0, 1, 0),
-          ship.yaw,
-        );
+    if (isFighter && ship.repaired && !ship.grounded && (isBoosting || speed > 25) && hash(Math.floor(t * 60), 5) > 0.3) {
+      for (const side of [-1.0, 1.0]) {
+        const dir = new THREE.Vector3(side, 0.50, 4.4 + (isBoosting ? 2.5 : 0.6)).applyQuaternion(this.ship.quaternion).add(this.ship.position);
         this.burst(
-          { x: ship.x + dir.x, y: ship.y + dir.y, z: ship.z + dir.z },
+          { x: dir.x, y: dir.y, z: dir.z },
           isBoosting ? 3 : 1,
           isBoosting ? 0xa5e5ff : 0x00e5ff,
           isBoosting ? 5 : 2.5,

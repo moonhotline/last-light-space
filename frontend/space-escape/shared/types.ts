@@ -18,6 +18,7 @@ export interface Input {
   fire: boolean;
   brake: boolean;
   skate?: boolean;
+  warpUntil?: number;
 }
 export interface Player extends Vec {
   planet: string | null;
@@ -111,6 +112,7 @@ export interface AdventureShip extends Vec {
   arrived: boolean;
   boosting?: boolean;
   braking?: boolean;
+  warpUntil?: number;
 }
 export type Ship = AdventureShip;
 export interface Adventure {
@@ -164,6 +166,7 @@ export function parseInput(raw: unknown): Input | null {
   if (!Number.isSafeInteger(v.seq) || (v.seq as number) < 0) return null;
   return {
     seq: v.seq as number,
+    warpUntil: typeof v.warpUntil === "number" && Number.isFinite(v.warpUntil) && v.warpUntil >= 0 ? v.warpUntil : 0,
     forward: Math.max(-1, Math.min(1, v.forward as number)),
     side: Math.max(-1, Math.min(1, v.side as number)),
     yaw: (v.yaw as number) % (Math.PI * 2),
