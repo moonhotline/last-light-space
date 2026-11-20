@@ -47,3 +47,4 @@
 | 2026-11-15 15:05 | PR #39 (f497a24) | moonhotline | 渲染管线与 LOD | fix: align heavy ship propulsion, enable 600 m/s flight and restore Kepler landi |
 | 2026-11-15 15:36 | PR #39 (2e1e669) | moonhotline | 渲染管线与 LOD | fix: align heavy ship propulsion, enable 600 m/s flight and restore Kepler landi |
 | 2026-11-20 16:20 | PR #40 (d1eb966) | moonhotline | 天体物理与大气, 运动物理系统, 权威多人仿真, 渲染管线与 LOD | feat: upgrade flight feel, propulsion VFX/audio, planetary visuals, and world co |
+| 2026-11-20 18:29 | PR #41 (b8dbcc0) | moonhotline | 运动物理系统, 权威多人仿真, 渲染管线与 LOD | feat: 添加可手动放置的双向传送门 |
