@@ -3,7 +3,9 @@ import { AdventureView, optimizeModel } from "./adventure-view";
 import { missionObjective } from "../shared/objectives";
 import { celestialCockpitPose, celestialFlightFrame } from "../shared/celestial-flight";
 import { InterplanetarySystem, computeCelestialAlignment } from "./interplanetary";
+import { buildAtmosphereMaterial } from "./celestial-visuals";
 import { cosmicAudio } from "./sound-engine";
+import { HOME_PLANET_SPHERE } from "../shared/colliders";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
@@ -59,10 +61,9 @@ interface Particle {
 }
 
 /**
- * Near-field Stardust Parallax Stream:
- * Multi-layered particle field surrounding the camera view frustum.
- * Particles stream backward at varying relative speeds (1.8x, 1.0x, 0.5x),
- * creating an unmistakable cinematic speed frame of reference.
+ * Near-field Stardust Parallax & Velocity-Stretched Warp Streak Field:
+ * Combines 3 subtle parallax mote layers with 640 sharp velocity-stretched luminous
+ * speed lines so high-speed flight & afterburner feel razor-sharp instead of snowy dots.
  */
 export class StardustParallaxStream {
   group = new THREE.Group();
@@ -71,6 +72,11 @@ export class StardustParallaxStream {
     speedMult: number;
     count: number;
   }[] = [];
+  private streakLines: THREE.LineSegments;
+  private streakCount = 340;
+  private streakSeeds: Float32Array;
+  private streakPositions: Float32Array;
+  private streakColors: Float32Array;
 
   private createMoteTexture(): THREE.CanvasTexture | null {
     if (typeof document === "undefined") return null;
@@ -81,21 +87,20 @@ export class StardustParallaxStream {
     if (!ctx) return null;
     const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
     g.addColorStop(0, "rgba(255, 255, 255, 1)");
-    g.addColorStop(0.25, "rgba(200, 235, 255, 0.8)");
-    g.addColorStop(0.55, "rgba(100, 190, 255, 0.3)");
+    g.addColorStop(0.22, "rgba(205, 240, 255, 0.72)");
+    g.addColorStop(0.5, "rgba(96, 185, 255, 0.2)");
     g.addColorStop(1, "rgba(0, 0, 0, 0)");
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, 64, 64);
-    const tex = new THREE.CanvasTexture(canvas);
-    return tex;
+    return new THREE.CanvasTexture(canvas);
   }
 
   constructor() {
     const moteTex = this.createMoteTexture();
     const layerConfigs = [
-      { count: 320, speedMult: 1.8, size: 1.8, color: 0x93c5fd, boxRadius: 36, depth: 85 }, // Layer 1: Fast warp streaks
-      { count: 480, speedMult: 1.0, size: 1.4, color: 0x38bdf8, boxRadius: 45, depth: 100 }, // Layer 2: Mid-speed stardust
-      { count: 360, speedMult: 0.5, size: 1.0, color: 0xa78bfa, boxRadius: 55, depth: 120 }, // Layer 3: Distant motes
+      { count: 240, speedMult: 1.8, size: 0.46, color: 0xbae6fd, boxRadius: 42, depth: 95 },
+      { count: 320, speedMult: 1.0, size: 0.36, color: 0x7dd3fc, boxRadius: 52, depth: 115 },
+      { count: 260, speedMult: 0.5, size: 0.28, color: 0xc4b5fd, boxRadius: 64, depth: 135 },
     ];
 
     for (const cfg of layerConfigs) {
@@ -130,13 +135,45 @@ export class StardustParallaxStream {
         count: cfg.count,
       });
     }
+
+    // Crisp velocity-stretched warp streaks around camera frustum perimeter
+    this.streakSeeds = new Float32Array(this.streakCount * 4); // x, y, z, speedMult
+    this.streakPositions = new Float32Array(this.streakCount * 2 * 3);
+    this.streakColors = new Float32Array(this.streakCount * 2 * 3);
+    for (let i = 0; i < this.streakCount; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      // Keep center cockpit reticle unobstructed; concentrate streaks in sleek peripheral cone
+      const radial = 11.5 + Math.pow(Math.random(), 0.78) * 52;
+      const i4 = i * 4;
+      this.streakSeeds[i4] = Math.cos(angle) * radial;
+      this.streakSeeds[i4 + 1] = Math.sin(angle) * radial * 0.72;
+      this.streakSeeds[i4 + 2] = -10 - Math.random() * 120;
+      this.streakSeeds[i4 + 3] = 0.75 + Math.random() * 1.35;
+    }
+
+    const sGeo = new THREE.BufferGeometry();
+    sGeo.setAttribute("position", new THREE.BufferAttribute(this.streakPositions, 3));
+    sGeo.setAttribute("color", new THREE.BufferAttribute(this.streakColors, 3));
+    this.streakLines = new THREE.LineSegments(
+      sGeo,
+      new THREE.LineBasicMaterial({
+        vertexColors: true,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    this.streakLines.frustumCulled = false;
+    this.streakLines.name = "velocity-warp-streaks";
+    this.group.add(this.streakLines);
   }
 
   update(
     cameraPos: THREE.Vector3,
     cameraQuat: THREE.Quaternion,
     velocity: THREE.Vector3,
-    _thrust: number,
+    thrust: number,
     isDriving: boolean,
     dt: number,
   ) {
@@ -145,18 +182,17 @@ export class StardustParallaxStream {
 
     const speed = velocity.length();
     const isFlightAtSpeed = isDriving && speed > 35;
-    const flightSpeedRatio = isFlightAtSpeed ? clamp((speed - 35) / 55, 0, 1) : 0;
-    const baseOpacity = isFlightAtSpeed ? (0.15 + 0.55 * flightSpeedRatio) : 0;
-
+    const flightSpeedRatio = isFlightAtSpeed ? clamp((speed - 35) / 140, 0, 1) : 0;
+    const boostGlow = isFlightAtSpeed ? clamp((thrust - 1.5) / 1.5, 0, 1) : 0;
+    const baseOpacity = isFlightAtSpeed ? 0.1 + 0.32 * flightSpeedRatio : 0;
     const speedFactor = Math.max(10, speed);
 
     for (const layer of this.layers) {
       const mat = layer.points.material as THREE.PointsMaterial;
-      mat.opacity = baseOpacity * (layer.speedMult > 1.2 ? 1.0 : 0.7);
+      mat.opacity = baseOpacity * (layer.speedMult > 1.2 ? 0.85 : 0.55);
 
       const posAttr = layer.points.geometry.getAttribute("position") as THREE.BufferAttribute;
       const posArray = posAttr.array as Float32Array;
-
       const step = speedFactor * layer.speedMult * dt;
 
       for (let i = 0; i < layer.count; i++) {
@@ -164,13 +200,55 @@ export class StardustParallaxStream {
         posArray[i3 + 2] += step;
 
         if (posArray[i3 + 2] > -6) {
-          posArray[i3] = (Math.random() - 0.5) * 60;
-          posArray[i3 + 1] = (Math.random() - 0.5) * 45;
-          posArray[i3 + 2] = -85 - Math.random() * 35;
+          posArray[i3] = (Math.random() - 0.5) * 70;
+          posArray[i3 + 1] = (Math.random() - 0.5) * 52;
+          posArray[i3 + 2] = -95 - Math.random() * 35;
         }
       }
       posAttr.needsUpdate = true;
     }
+
+    const streakMat = this.streakLines.material as THREE.LineBasicMaterial;
+    streakMat.opacity = isFlightAtSpeed ? 0.14 + 0.32 * flightSpeedRatio + 0.12 * boostGlow : 0;
+    if (!isFlightAtSpeed) return;
+
+    const streakLenBase = 1.2 + Math.min(speed * 0.032, 12) + boostGlow * 3.5;
+    for (let i = 0; i < this.streakCount; i++) {
+      const i4 = i * 4;
+      const mult = this.streakSeeds[i4 + 3];
+      this.streakSeeds[i4 + 2] += speedFactor * mult * 1.15 * dt;
+      if (this.streakSeeds[i4 + 2] > -4) {
+        const angle = Math.random() * Math.PI * 2;
+        const radial = 11.5 + Math.pow(Math.random(), 0.78) * 52;
+        this.streakSeeds[i4] = Math.cos(angle) * radial;
+        this.streakSeeds[i4 + 1] = Math.sin(angle) * radial * 0.72;
+        this.streakSeeds[i4 + 2] = -100 - Math.random() * 45;
+      }
+
+      const sx = this.streakSeeds[i4];
+      const sy = this.streakSeeds[i4 + 1];
+      const sz = this.streakSeeds[i4 + 2];
+      const len = streakLenBase * mult;
+      const depthFade = clamp(1 - (-sz) / 135, 0.15, 1);
+
+      const p6 = i * 6;
+      this.streakPositions[p6] = sx;
+      this.streakPositions[p6 + 1] = sy;
+      this.streakPositions[p6 + 2] = sz;
+      this.streakPositions[p6 + 3] = sx;
+      this.streakPositions[p6 + 4] = sy;
+      this.streakPositions[p6 + 5] = sz - len;
+
+      // Luminous white-cyan leading tip fading into deep electric blue/violet tail
+      this.streakColors[p6] = (0.76 + boostGlow * 0.24) * depthFade;
+      this.streakColors[p6 + 1] = (0.94 + boostGlow * 0.06) * depthFade;
+      this.streakColors[p6 + 2] = 1.0 * depthFade;
+      this.streakColors[p6 + 3] = (0.14 + boostGlow * 0.3) * depthFade * 0.35;
+      this.streakColors[p6 + 4] = (0.48 + boostGlow * 0.1) * depthFade * 0.35;
+      this.streakColors[p6 + 5] = 0.95 * depthFade * 0.42;
+    }
+    (this.streakLines.geometry.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;
+    (this.streakLines.geometry.getAttribute("color") as THREE.BufferAttribute).needsUpdate = true;
   }
 }
 function createNameplateSprite(name: string, colorHex: number): THREE.Sprite {
@@ -287,8 +365,15 @@ export class GameView {
     position: new THREE.Vector3(),
     roll: 0,
     pitch: 0,
+    boostLag: 0,
     initialized: false,
   };
+  private homePlanetCloudUniforms: { time: { value: number }; opacity: { value: number } } | null = null;
+  private homePlanetAtmoUniforms: { intensity: { value: number } } | null = null;
+  private skyStarUniforms: { time: { value: number } } | null = null;
+  private skyDomeUniforms: { spaceFactor: { value: number } } | null = null;
+  private lastShipCollisionId = 0;
+  private flightShake = 0;
   private compiling = false;
 
   async compilePipeline() {
@@ -554,17 +639,24 @@ export class GameView {
     }
     g.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
-    const n = 256,
+    const n = 512,
       data = new Uint8Array(n * n * 4);
     for (let z = 0; z < n; z++)
       for (let x = 0; x < n; x++) {
-        const i = (z * n + x) * 4,
-          v =
+        const i = (z * n + x) * 4;
+        const strata = Math.sin(z * 0.14 + Math.sin(x * 0.05) * 2.2) * 14;
+        const v = clamp(
+          Math.round(
             128 +
-            55 * noise(x * 0.035, z * 0.035) +
-            30 * noise(x * 0.14, z * 0.14) +
-            22 * noise(x * 0.45, z * 0.45) +
-            18 * hash(x, z);
+              strata +
+              48 * noise(x * 0.032, z * 0.032) +
+              28 * noise(x * 0.12, z * 0.12) +
+              18 * noise(x * 0.36, z * 0.36) +
+              14 * hash(x, z),
+          ),
+          30,
+          255,
+        );
         data[i] = data[i + 1] = data[i + 2] = v;
         data[i + 3] = 255;
       }
@@ -574,25 +666,25 @@ export class GameView {
     tex.generateMipmaps = true;
     tex.minFilter = THREE.LinearMipmapLinearFilter;
     tex.magFilter = THREE.LinearFilter;
-    tex.anisotropy = 8;
+    tex.anisotropy = 16;
     const mat = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.91,
-      metalness: 0.08,
+      roughness: 0.89,
+      metalness: 0.09,
       map: tex,
       bumpMap: tex,
-      bumpScale: 0.2,
+      bumpScale: 0.28,
     });
     this.terrain = new THREE.Mesh(g, mat);
     this.terrain.receiveShadow = true;
     this.scene.add(this.terrain);
-    const rockGeo = new THREE.IcosahedronGeometry(1, 2),
+    const rockGeo = new THREE.IcosahedronGeometry(1, 3),
       rp = rockGeo.getAttribute("position");
     for (let i = 0; i < rp.count; i++) {
       const x = rp.getX(i),
         y = rp.getY(i),
         z = rp.getZ(i),
-        k = 0.87 + noise(x * 8 + 11, z * 8 + y * 2) * 0.22;
+        k = 0.86 + noise(x * 8 + 11, z * 8 + y * 2) * 0.24;
       rp.setXYZ(i, x * k, y * k, z * k);
     }
     rockGeo.computeVertexNormals();
@@ -600,10 +692,10 @@ export class GameView {
       rockGeo,
       new THREE.MeshStandardMaterial({
         color: 0x586977,
-        roughness: 0.92,
+        roughness: 0.9,
         map: tex,
         bumpMap: tex,
-        bumpScale: 0.22,
+        bumpScale: 0.28,
       }),
       ROCKS.length,
     );
@@ -616,85 +708,332 @@ export class GameView {
     });
     rocks.castShadow = true;
     rocks.receiveShadow = true;
-    // Distant peaks extend the basin beyond its walkable boundary, without streaming.
-    const far = new THREE.Group();
-    const farMat = new THREE.MeshStandardMaterial({
-      color: 0x526b82,
-      roughness: 1,
-    });
-    const angular = 512,
-      rings = 40,
-      positions = new Float32Array((angular + 1) * (rings + 1) * 3),
-      rangeIndices: number[] = [];
-    for (let row = 0; row <= rings; row++)
+
+    // Converge the playable basin seamlessly into a complete high-poly spherical home planet.
+    const homePlanetGroup = new THREE.Group();
+    homePlanetGroup.name = "converged-home-planet";
+    const { center: hpCenter, radius: hpRadius, cloudRadius: hpCloudR, atmosphereRadius: hpAtmoR } = HOME_PLANET_SPHERE;
+
+    // 1. Seamless curved planetary continental shelf bridging the square basin onto the spherical globe (256 x 48 = 24,576 tris)
+    const angular = 256;
+    const rings = 48;
+    const skirtPos = new Float32Array((angular + 1) * (rings + 1) * 3);
+    const skirtCol = new Float32Array((angular + 1) * (rings + 1) * 3);
+    const skirtUv = new Float32Array((angular + 1) * (rings + 1) * 2);
+    const skirtIndices: number[] = [];
+    const skirtTemp = new THREE.Color();
+    for (let row = 0; row <= rings; row++) {
+      const u = row / rings;
+      // Gentle S-curve slope down onto the spherical crust (no abrupt vertical mesa wall)
+      const uSmooth = u * u * (3 - 2 * u);
       for (let col = 0; col <= angular; col++) {
-        const angle = (col / angular) * Math.PI * 2,
-          radius = HALF + 140 + (row / rings) * 2400;
-        const x = Math.sin(angle) * radius,
-          z = Math.cos(angle) * radius;
-        const ridge =
-          1 - Math.abs(noise(x * 0.0023 + 70, z * 0.0023 - 40) * 2 - 1);
-        const smaller = 1 - Math.abs(noise(x * 0.007 + 12, z * 0.007) * 2 - 1);
-        const envelope = Math.pow(Math.sin((row / rings) * Math.PI), 0.65);
-        const y =
-          -35 +
-          envelope *
-            (50 +
-              270 * Math.pow(ridge, 3) +
-              105 * Math.pow(smaller, 5) +
-              22 * noise(x * 0.025, z * 0.025));
-        positions.set([x, y, z], (row * (angular + 1) + col) * 3);
+        const angle = (col / angular) * Math.PI * 2;
+        const dx = Math.sin(angle);
+        const dz = Math.cos(angle);
+        const sqEdge = HALF / Math.max(Math.abs(dx), Math.abs(dz));
+        const edgeX = dx * sqEdge;
+        const edgeZ = dz * sqEdge;
+        const edgeY = groundAt(clamp(edgeX, -HALF + 1, HALF - 1), clamp(edgeZ, -HALF + 1, HALF - 1));
+
+        // Expand gently across a broad 1,450m continental slope to weld flush into the round R=3800 sphere
+        const outerR = Math.min(hpRadius * 0.94, Math.max(sqEdge + 1100, 3250));
+        const r = sqEdge + (outerR - sqEdge) * Math.pow(u, 0.92);
+        const x = dx * r;
+        const z = dz * r;
+
+        // Exact spherical crust height at radial distance r
+        const sphereY = hpCenter.y + Math.sqrt(Math.max(1, hpRadius * hpRadius - r * r));
+        const ridge = 1 - Math.abs(noise(x * 0.0024 + 70, z * 0.0024 - 40) * 2 - 1);
+        const crag = 1 - Math.abs(noise(x * 0.008 + 12, z * 0.008) * 2 - 1);
+        const mountainEnvelope = Math.sin(u * Math.PI) * (1 - u * 0.55);
+        const mountainBump = mountainEnvelope * (75 * Math.pow(ridge, 2.4) + 28 * Math.pow(crag, 3.5));
+        const y = edgeY * (1 - uSmooth) + (sphereY + 1.5) * uSmooth + mountainBump;
+
+        const vIdx = row * (angular + 1) + col;
+        const vi = vIdx * 3;
+        skirtPos[vi] = x;
+        skirtPos[vi + 1] = y;
+        skirtPos[vi + 2] = z;
+        skirtUv[vIdx * 2] = x / 35;
+        skirtUv[vIdx * 2 + 1] = z / 35;
+
+        // Match basin edge biomes near u=0, blending smoothly into the spherical planet's slate/ice crust near u=1
+        skirtTemp.setHex(0x3a5264).lerp(new THREE.Color(0x6e8596), ridge * 0.52);
+        if (z > 400) skirtTemp.lerp(new THREE.Color(0xcde0ea), smooth((z - 400) / 800) * 0.38);
+        if (x < -400 && z < 200) skirtTemp.lerp(new THREE.Color(0x884c3d), smooth((-x - 400) / 800) * 0.34);
+        if (x > 400) skirtTemp.lerp(new THREE.Color(0x8ab3c2), smooth((x - 400) / 800) * 0.28);
+        skirtTemp.lerp(new THREE.Color(0x284054), uSmooth * 0.55);
+        skirtTemp.toArray(skirtCol, vi);
+
         if (row < rings && col < angular) {
-          const a = row * (angular + 1) + col,
-            b = a + 1,
-            c = a + angular + 1;
-          rangeIndices.push(a, c, b, b, c, c + 1);
+          const a = vIdx;
+          const b = a + 1;
+          const c = a + angular + 1;
+          skirtIndices.push(a, c, b, b, c, c + 1);
         }
       }
-    const rangeGeometry = new THREE.BufferGeometry();
-    rangeGeometry.setAttribute(
-      "position",
-      new THREE.BufferAttribute(positions, 3),
+    }
+    const skirtGeo = new THREE.BufferGeometry();
+    skirtGeo.setAttribute("position", new THREE.BufferAttribute(skirtPos, 3));
+    skirtGeo.setAttribute("color", new THREE.BufferAttribute(skirtCol, 3));
+    skirtGeo.setAttribute("uv", new THREE.BufferAttribute(skirtUv, 2));
+    skirtGeo.setIndex(skirtIndices);
+    skirtGeo.computeVertexNormals();
+    // Blend outer ring normals smoothly into the spherical radial normal for a seamless terminator
+    const sNorm = skirtGeo.getAttribute("normal");
+    const tmpN = new THREE.Vector3();
+    const radN = new THREE.Vector3();
+    for (let row = 0; row <= rings; row++) {
+      const blend = Math.pow(row / rings, 1.4);
+      for (let col = 0; col <= angular; col++) {
+        const idx = row * (angular + 1) + col;
+        tmpN.fromBufferAttribute(sNorm, idx);
+        radN.set(
+          skirtPos[idx * 3] - hpCenter.x,
+          skirtPos[idx * 3 + 1] - hpCenter.y,
+          skirtPos[idx * 3 + 2] - hpCenter.z,
+        ).normalize();
+        tmpN.lerp(radN, blend).normalize();
+        sNorm.setXYZ(idx, tmpN.x, tmpN.y, tmpN.z);
+      }
+    }
+    const skirtMesh = new THREE.Mesh(
+      skirtGeo,
+      new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.9,
+        metalness: 0.08,
+        map: tex,
+        bumpMap: tex,
+        bumpScale: 0.24,
+      }),
     );
-    rangeGeometry.setIndex(rangeIndices);
-    rangeGeometry.computeVertexNormals();
-    far.add(new THREE.Mesh(rangeGeometry, farMat));
+    skirtMesh.name = "home-planet-horizon-skirt";
+    homePlanetGroup.add(skirtMesh);
+
+    // 2. Full high-poly spherical home planet globe (144 x 96 = 27,648 tris) with crisp 512x256 multi-biome crust texture
+    const globeW = 512;
+    const globeH = 256;
+    const globeData = new Uint8Array(globeW * globeH * 4);
+    const globeBump = new Uint8Array(globeW * globeH * 4);
+    const cOcean = new THREE.Color(0x162b3d).convertLinearToSRGB();
+    const cSlate = new THREE.Color(0x3a5266).convertLinearToSRGB();
+    const cRed = new THREE.Color(0x7c4536).convertLinearToSRGB();
+    const cIce = new THREE.Color(0xcadfe8).convertLinearToSRGB();
+    const gc = new THREE.Color();
+    for (let row = 0; row < globeH; row++) {
+      const lat = (row / (globeH - 1) - 0.5) * Math.PI;
+      const cosLat = Math.cos(lat);
+      const sinLat = Math.sin(lat);
+      for (let col = 0; col < globeW; col++) {
+        const lon = (col / (globeW - 1)) * Math.PI * 2;
+        const sx = -Math.cos(lon) * cosLat;
+        const sy = sinLat;
+        const sz = Math.sin(lon) * cosLat;
+        const cont =
+          Math.sin(sx * 4.5 + sy * 3.8 + sz * 3.1) * 0.45 +
+          Math.sin(sy * 11.2 - sz * 9.5 + sx * 7.8) * 0.25 +
+          Math.sin(sz * 27.0 + sx * 21.0 - sy * 17.0) * 0.14;
+        const elev = 0.5 + cont * 0.54;
+        if (elev < 0.44) {
+          gc.copy(cOcean).lerp(cSlate, clamp(elev / 0.44, 0, 1) * 0.45);
+        } else if (elev < 0.72) {
+          gc.copy(cSlate).lerp(cRed, clamp((sx + 0.4) * 0.65, 0, 1) * 0.45);
+        } else {
+          gc.copy(cSlate).lerp(cIce, clamp((elev - 0.72) / 0.28, 0, 1));
+        }
+        if (Math.abs(sy) > 0.78) {
+          gc.lerp(cIce, clamp((Math.abs(sy) - 0.78) / 0.18, 0, 1) * 0.85);
+        }
+        const off = (row * globeW + col) * 4;
+        globeData[off] = (gc.r * 255) | 0;
+        globeData[off + 1] = (gc.g * 255) | 0;
+        globeData[off + 2] = (gc.b * 255) | 0;
+        globeData[off + 3] = 255;
+        const bVal = (clamp(elev, 0, 1) * 255) | 0;
+        globeBump[off] = globeBump[off + 1] = globeBump[off + 2] = bVal;
+        globeBump[off + 3] = 255;
+      }
+    }
+    const globeTex = new THREE.DataTexture(globeData, globeW, globeH);
+    globeTex.colorSpace = THREE.SRGBColorSpace;
+    globeTex.wrapS = THREE.RepeatWrapping;
+    globeTex.generateMipmaps = true;
+    globeTex.minFilter = THREE.LinearMipmapLinearFilter;
+    globeTex.anisotropy = 16;
+    globeTex.needsUpdate = true;
+
+    const globeBumpTex = new THREE.DataTexture(globeBump, globeW, globeH);
+    globeBumpTex.wrapS = THREE.RepeatWrapping;
+    globeBumpTex.generateMipmaps = true;
+    globeBumpTex.minFilter = THREE.LinearMipmapLinearFilter;
+    globeBumpTex.needsUpdate = true;
+
+    const planetGlobe = new THREE.Mesh(
+      new THREE.SphereGeometry(hpRadius, 144, 96),
+      new THREE.MeshStandardMaterial({
+        map: globeTex,
+        bumpMap: globeBumpTex,
+        bumpScale: 12,
+        roughness: 0.88,
+        metalness: 0.08,
+        emissive: 0x0b1926,
+        emissiveIntensity: 0.22,
+      }),
+    );
+    planetGlobe.position.set(hpCenter.x, hpCenter.y, hpCenter.z);
+    planetGlobe.name = "home-planet-globe";
+    homePlanetGroup.add(planetGlobe);
+
+    // 3. Animated Orbital Cloud Deck (fades cleanly when down inside the basin, blooms from orbit)
+    this.homePlanetCloudUniforms = { time: { value: 0 }, opacity: { value: 0 } };
+    const cloudShell = new THREE.Mesh(
+      new THREE.SphereGeometry(hpCloudR, 128, 96),
+      new THREE.ShaderMaterial({
+        uniforms: this.homePlanetCloudUniforms,
+        vertexShader: `
+          varying vec3 vUnit;
+          void main() {
+            vUnit = normalize(position);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }`,
+        fragmentShader: `
+          uniform float time;
+          uniform float opacity;
+          varying vec3 vUnit;
+          void main() {
+            // Keep the north polar basin opening subtle at low altitude
+            float polarClear = smoothstep(0.82, 0.52, vUnit.y);
+            float swirl = sin(vUnit.x * 11.0 + time * 0.04 + sin(vUnit.z * 9.0)) * 0.5
+                        + sin(vUnit.y * 19.0 + vUnit.z * 14.0 - time * 0.03) * 0.3
+                        + sin(vUnit.x * 31.0 - vUnit.y * 23.0 + time * 0.06) * 0.2;
+            float cloud = smoothstep(0.08, 0.72, swirl * 0.5 + 0.5);
+            float alpha = cloud * opacity * (0.28 + 0.72 * polarClear);
+            gl_FragColor = vec4(vec3(0.84, 0.92, 0.98), alpha);
+          }`,
+        transparent: true,
+        depthWrite: false,
+      }),
+    );
+    cloudShell.position.set(hpCenter.x, hpCenter.y, hpCenter.z);
+    cloudShell.name = "home-planet-clouds";
+    homePlanetGroup.add(cloudShell);
+
+    // 4. Fresnel Rayleigh Atmosphere Limb Shell wrapping the converged home planet (fades to 0 inside basin so zenith stars stay crystal clear)
+    const homeAtmoMat = buildAtmosphereMaterial(0x52b6f0, 0, false);
+    this.homePlanetAtmoUniforms = homeAtmoMat.uniforms as { intensity: { value: number } };
+    const homeAtmo = new THREE.Mesh(
+      new THREE.SphereGeometry(hpAtmoR, 128, 96),
+      homeAtmoMat,
+    );
+    homeAtmo.position.set(hpCenter.x, hpCenter.y, hpCenter.z);
+    homeAtmo.name = "home-planet-atmosphere";
+    homePlanetGroup.add(homeAtmo);
 
     // Progressive frame-sliced mounting to eliminate single-frame synchronous upload stalls
     requestAnimationFrame(() => {
       this.scene.add(rocks);
       requestAnimationFrame(() => {
-        this.scene.add(far);
+        this.scene.add(homePlanetGroup);
         void this.compilePipeline();
       });
     });
   }
   buildSky() {
     this.skyScene.add(this.sky);
+    // Rich GPU-friendly cosmic sky dome with deep obsidian space, Milky Way band, dust lanes & altitude-aware horizon haze
+    this.skyDomeUniforms = { spaceFactor: { value: 0 } };
     const skyMat = new THREE.ShaderMaterial({
+      uniforms: this.skyDomeUniforms,
       side: THREE.BackSide,
       depthWrite: false,
       vertexShader: vertex,
-      fragmentShader: `varying vec3 vPosition;void main(){vec3 d=normalize(vPosition);float h=max(0.,d.y);vec3 c=mix(vec3(.24,.32,.39),vec3(.009,.020,.041),pow(h,.38));float s=pow(max(0.,dot(d,normalize(vec3(-.65,.19,-.5)))),28.);c+=vec3(.24,.13,.045)*s;gl_FragColor=vec4(c,1.);}`,
+      fragmentShader: `
+        uniform float spaceFactor;
+        varying vec3 vPosition;
+        float gyroid(vec3 p) {
+          return dot(sin(p), cos(p.yzx));
+        }
+        void main() {
+          vec3 d = normalize(vPosition);
+          // Deep obsidian cosmic void everywhere in orbit; delicate atmospheric twilight band near surface horizon only
+          vec3 deepCosmos = vec3(0.004, 0.008, 0.018);
+          float horizonBand = exp(-pow(abs(d.y) * 5.2, 1.6)) * (1.0 - spaceFactor * 0.92);
+          vec3 horizonTint = vec3(0.09, 0.16, 0.24) * horizonBand;
+          vec3 c = deepCosmos + horizonTint;
+
+          // Inclined Milky Way galactic plane with smooth analytic nebula & dark dust rift
+          vec3 galNormal = normalize(vec3(0.36, 0.62, -0.69));
+          float galLat = abs(dot(d, galNormal));
+          float band = exp(-pow(galLat * 4.2, 2.0));
+          float g1 = gyroid(d * 5.2) * 0.35 + 0.5;
+          float g2 = gyroid(d * 12.8 + vec3(1.7, -2.3, 0.9)) * 0.32 + 0.5;
+          float dustRift = smoothstep(0.46, 0.82, gyroid(d * 9.4 - vec3(2.4, 1.1, 3.2)) * 0.35 + 0.5);
+
+          vec3 galCore = mix(vec3(0.03, 0.09, 0.22), vec3(0.22, 0.14, 0.34), g1);
+          vec3 galGold = vec3(0.26, 0.18, 0.11) * smoothstep(0.5, 0.88, g2);
+          vec3 tealNebula = vec3(0.025, 0.16, 0.24) * smoothstep(0.55, 0.92, g1 * g2 * 1.4);
+          float visibility = mix(smoothstep(-0.1, 0.22, d.y) * 0.72 + 0.28, 1.0, spaceFactor);
+          c += (galCore * (0.42 + g1 * 0.88) + galGold * 0.52) * band * (1.0 - dustRift * 0.62) * visibility;
+          c += tealNebula * 0.2 * visibility;
+
+          // Warm solar atmospheric scattering glow
+          float s = pow(max(0.0, dot(d, normalize(vec3(-0.65, 0.19, -0.5)))), 28.0);
+          c += vec3(0.26, 0.15, 0.055) * s;
+          gl_FragColor = vec4(c, 1.0);
+        }`,
     });
     const dome = new THREE.Mesh(
-      new THREE.SphereGeometry(18000, 40, 24),
+      new THREE.SphereGeometry(18000, 64, 48),
       skyMat,
     );
     dome.renderOrder = -10;
     this.sky.add(dome);
-    const stars = new Float32Array(5500 * 3),
-      colors = new Float32Array(5500 * 3);
-    for (let i = 0; i < 5500; i++) {
-      const a = hash(i, 1) * Math.PI * 2,
-        y = 0.03 + hash(i, 2) * 0.97,
-        r = Math.sqrt(1 - y * y),
-        b = 0.14 + hash(i, 8) ** 8 * 0.9;
-      stars.set(
-        [Math.cos(a) * r * 14000, y * 14000, Math.sin(a) * r * 14000],
-        i * 3,
-      );
-      colors.set([b * 0.85, b * 0.93, b], i * 3);
+
+    // 14,000 multi-spectral stars across full sphere with realistic stellar color temperatures
+    const starCount = 14000;
+    const stars = new Float32Array(starCount * 3);
+    const colors = new Float32Array(starCount * 3);
+    const spectralColors: [number, number, number][] = [
+      [0.68, 0.82, 1.0],  // O/B blue-white
+      [0.86, 0.92, 1.0],  // A white-blue
+      [1.0, 0.98, 0.95],  // F crisp white
+      [1.0, 0.92, 0.76],  // G warm solar gold
+      [1.0, 0.76, 0.54],  // K/M amber giant
+    ];
+    const galU = new THREE.Vector3(0.86, -0.18, 0.48).normalize();
+    const galV = new THREE.Vector3(-0.34, 0.75, 0.56).normalize();
+    const galN = new THREE.Vector3().crossVectors(galU, galV).normalize();
+    for (let i = 0; i < starCount; i++) {
+      let sx: number, sy: number, sz: number;
+      if (i < starCount * 0.42) {
+        // Concentrated along the Milky Way band
+        const theta = hash(i, 1) * Math.PI * 2;
+        const spread = (hash(i, 2) + hash(i, 13) - 1.0) * 0.34;
+        const cosS = Math.cos(spread);
+        const sinS = Math.sin(spread);
+        const dir = new THREE.Vector3()
+          .addScaledVector(galU, Math.cos(theta) * cosS)
+          .addScaledVector(galV, Math.sin(theta) * cosS)
+          .addScaledVector(galN, sinS)
+          .normalize();
+        sx = dir.x;
+        sy = dir.y;
+        sz = dir.z;
+      } else {
+        // Uniform full-sphere deep field
+        const a = hash(i, 1) * Math.PI * 2;
+        const y = hash(i, 2) * 2 - 1;
+        const r = Math.sqrt(Math.max(0, 1 - y * y));
+        sx = Math.cos(a) * r;
+        sy = y;
+        sz = Math.sin(a) * r;
+      }
+      const dist = 13800 + hash(i, 5) * 1400;
+      const b = 0.2 + Math.pow(hash(i, 8), 5) * 1.15;
+      const spec = spectralColors[Math.floor(hash(i, 17) * spectralColors.length)];
+      stars.set([sx * dist, sy * dist, sz * dist], i * 3);
+      colors.set([spec[0] * b, spec[1] * b, spec[2] * b], i * 3);
     }
     const sg = new THREE.BufferGeometry();
     sg.setAttribute("position", new THREE.BufferAttribute(stars, 3));
@@ -702,20 +1041,82 @@ export class GameView {
     const starfield = new THREE.Points(
       sg,
       new THREE.PointsMaterial({
-        size: 8,
+        size: 14,
         sizeAttenuation: true,
         vertexColors: true,
         transparent: true,
-        opacity: 0.5,
+        opacity: 0.78,
         depthWrite: false,
+        blending: THREE.AdditiveBlending,
         fog: false,
       }),
     );
     this.sky.add(starfield);
-    // Kepler's authored terrain and cloud model is owned by InterplanetarySystem.
-    // A distant sun with a soft optical halo.
+
+    // 900 bright hero stars with soft radial glow & subtle scintillation
+    const heroCount = 900;
+    const heroPos = new Float32Array(heroCount * 3);
+    const heroCol = new Float32Array(heroCount * 3);
+    const heroSize = new Float32Array(heroCount);
+    const heroPhase = new Float32Array(heroCount);
+    for (let i = 0; i < heroCount; i++) {
+      const a = hash(i + 5000, 1) * Math.PI * 2;
+      const y = hash(i + 5000, 2) * 2 - 1;
+      const r = Math.sqrt(Math.max(0, 1 - y * y));
+      const dist = 13500;
+      heroPos.set([Math.cos(a) * r * dist, y * dist, Math.sin(a) * r * dist], i * 3);
+      const spec = spectralColors[Math.floor(hash(i + 5000, 11) * spectralColors.length)];
+      const lum = 0.7 + hash(i + 5000, 14) * 0.7;
+      heroCol.set([spec[0] * lum, spec[1] * lum, spec[2] * lum], i * 3);
+      heroSize[i] = 2.6 + Math.pow(hash(i + 5000, 19), 2) * 4.2;
+      heroPhase[i] = hash(i + 5000, 23) * Math.PI * 2;
+    }
+    const heroGeo = new THREE.BufferGeometry();
+    heroGeo.setAttribute("position", new THREE.BufferAttribute(heroPos, 3));
+    heroGeo.setAttribute("color", new THREE.BufferAttribute(heroCol, 3));
+    heroGeo.setAttribute("aSize", new THREE.BufferAttribute(heroSize, 1));
+    heroGeo.setAttribute("aPhase", new THREE.BufferAttribute(heroPhase, 1));
+    this.skyStarUniforms = { time: { value: 0 } };
+    const heroStars = new THREE.Points(
+      heroGeo,
+      new THREE.ShaderMaterial({
+        uniforms: this.skyStarUniforms,
+        vertexColors: true,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        fog: false,
+        vertexShader: `
+          attribute float aSize;
+          attribute float aPhase;
+          uniform float time;
+          varying vec3 vColor;
+          varying float vTwinkle;
+          void main() {
+            vColor = color;
+            vTwinkle = 0.78 + 0.22 * sin(time * 2.1 + aPhase);
+            vec4 mv = modelViewMatrix * vec4(position, 1.0);
+            gl_Position = projectionMatrix * mv;
+            gl_PointSize = clamp(aSize * vTwinkle, 1.5, 9.0);
+          }`,
+        fragmentShader: `
+          varying vec3 vColor;
+          varying float vTwinkle;
+          void main() {
+            vec2 p = (gl_PointCoord - 0.5) * 2.0;
+            float d = length(p);
+            if (d > 1.0) discard;
+            float core = exp(-d * d * 7.5);
+            float crossSpike = (exp(-abs(p.x) * 14.0) * exp(-abs(p.y) * 2.8) + exp(-abs(p.y) * 14.0) * exp(-abs(p.x) * 2.8)) * 0.32;
+            gl_FragColor = vec4(vColor * (1.2 + core * 0.8), clamp((core + crossSpike) * vTwinkle, 0.0, 1.0));
+          }`,
+      }),
+    );
+    this.sky.add(heroStars);
+
+    // Distant sun with optical corona
     const sun = new THREE.Mesh(
-      new THREE.SphereGeometry(75, 24, 16),
+      new THREE.SphereGeometry(75, 32, 24),
       new THREE.MeshBasicMaterial({
         color: new THREE.Color(4, 3, 1.8),
         fog: false,
@@ -728,28 +1129,65 @@ export class GameView {
         map: this.radialTexture(),
         color: 0xffd39b,
         transparent: true,
-        opacity: 0.45,
+        opacity: 0.52,
         depthWrite: false,
         fog: false,
         blending: THREE.AdditiveBlending,
       }),
     );
     halo.position.copy(sun.position);
-    halo.scale.set(2100, 2100, 1);
+    halo.scale.set(2400, 2400, 1);
     this.sky.add(halo);
 
-    // The moon is visible from the first frame, independent of mission progress.
+    // High-poly 3D Moon with directional lunar terminator shading & high-res surface texture
     this.moon.name = "moon-sky";
     this.moon.position.set(-3600, 1400, -8500);
-    const moonTex = typeof document !== "undefined"
-      ? new THREE.TextureLoader().load("/assets/moon.jpg")
-      : null;
-    if (moonTex) moonTex.colorSpace = THREE.SRGBColorSpace;
+    const texLoader = typeof document !== "undefined" ? new THREE.TextureLoader() : null;
+    const moonTex = texLoader ? texLoader.load("/assets/moon.jpg") : null;
+    if (moonTex) {
+      moonTex.colorSpace = THREE.SRGBColorSpace;
+      moonTex.anisotropy = 16;
+    }
+    const moonShaderUniforms = {
+      map: { value: moonTex },
+      hasMap: { value: moonTex ? 1.0 : 0.0 },
+      sunDir: { value: new THREE.Vector3(-0.68, 0.35, -0.64).normalize() },
+    };
+    if (texLoader) {
+      texLoader.load("/assets/models/solar_system/textures/Moon_baseColor.png", (hdMoon) => {
+        hdMoon.colorSpace = THREE.SRGBColorSpace;
+        hdMoon.anisotropy = 16;
+        moonShaderUniforms.map.value = hdMoon;
+        moonShaderUniforms.hasMap.value = 1.0;
+      });
+    }
     const moonMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(180, 32, 24),
-      new THREE.MeshBasicMaterial({
-        ...(moonTex ? { map: moonTex } : { color: 0xcccccc }),
+      new THREE.SphereGeometry(180, 96, 64),
+      new THREE.ShaderMaterial({
+        uniforms: moonShaderUniforms,
         fog: false,
+        vertexShader: `
+          varying vec2 vUv;
+          varying vec3 vNormalWorld;
+          void main() {
+            vUv = uv;
+            vNormalWorld = normalize(mat3(modelMatrix) * normal);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }`,
+        fragmentShader: `
+          uniform sampler2D map;
+          uniform float hasMap;
+          uniform vec3 sunDir;
+          varying vec2 vUv;
+          varying vec3 vNormalWorld;
+          void main() {
+            vec3 albedo = hasMap > 0.5 ? texture2D(map, vUv).rgb : vec3(0.76, 0.78, 0.82);
+            float ndl = dot(normalize(vNormalWorld), normalize(sunDir));
+            float phase = smoothstep(-0.18, 0.85, ndl);
+            vec3 earthshine = vec3(0.06, 0.11, 0.18) * (1.0 - phase);
+            vec3 col = albedo * (0.14 + phase * 1.12) + earthshine;
+            gl_FragColor = vec4(col, 1.0);
+          }`,
       }),
     );
     this.moon.add(moonMesh);
@@ -760,13 +1198,13 @@ export class GameView {
           map: moonHaloTex,
           color: 0x93c5fd,
           transparent: true,
-          opacity: 0.35,
+          opacity: 0.32,
           depthWrite: false,
           fog: false,
           blending: THREE.AdditiveBlending,
         }),
       );
-      moonHalo.scale.set(1200, 1200, 1);
+      moonHalo.scale.set(1150, 1150, 1);
       this.moon.add(moonHalo);
     }
     this.sky.add(this.moon);
@@ -1230,11 +1668,13 @@ export class GameView {
         const ship = cameraShip!;
         const shipSpeed = Math.hypot(ship.vx, ship.vy, ship.vz);
         const speedRatio = clamp(shipSpeed / SHIP_MAX_SPEED, 0, 1.0);
-        let fov = 60 + speedRatio * 18; // smooth 60° -> 78°
+        const isBoostNow = pilotFlight ? pilotFlight.boosting : Boolean(ship.boosting);
+        const pulseKick = (ship.boostPulse ?? 0) * 5.2 * this.effects;
+        let fov = 60 + speedRatio * 18 + (isBoostNow ? 3.5 : 0) + pulseKick; // smooth 60 -> 82 deg
         if (this.activeWeapon === "camera") {
           fov = fov / Math.max(1, this.cameraZoom);
         }
-        this.camera.fov = THREE.MathUtils.damp(this.camera.fov, fov, 6, dt);
+        this.camera.fov = THREE.MathUtils.damp(this.camera.fov, fov, 6.5, dt);
         this.camera.updateProjectionMatrix();
       } else {
         let fov = 66 + clamp(speed / 43) * 8 * this.effects;
@@ -1250,29 +1690,39 @@ export class GameView {
       this.camera.quaternion.copy(orientation);
       this.cameraObstructed = false;
       if (me.seat >= 0 && s && this.thirdPerson) {
-        // Flight Spring Arm Lag & Roll/Pitch Linkage
+        // Flight Spring Arm Lag, Boost Kick, Mouse Pitch Trim & Roll/Pitch Linkage
         const ship = cameraShip!;
-        const celestialAlign = computeCelestialAlignment(ship, ship.yaw, ship.bank);
+        const celestialAlign = computeCelestialAlignment(ship, ship.yaw, ship.bank, undefined, ship.pitch ?? 0);
         const localUp = celestialAlign.captureWeight > 0.05 ? celestialAlign.up.clone() : new THREE.Vector3(0, 1, 0);
 
         const hullModel = this.interplanetary.shipMeshes?.get(ship.kind ?? "light_fighter");
         const shipPos = hullModel ? hullModel.position.clone() : v3(ship);
         const shipForward = celestialFlightFrame(ship, ship.yaw).forward;
 
-        const idealFocus = shipPos.clone().addScaledVector(localUp, 1.8).addScaledVector(shipForward, 4.0);
+        // Subtle mouse pitch & hull pitch shift the focus point vertically so looking up/down feels alive
+        const verticalTrim = clamp((me.pitch ?? 0) * 0.45 + (ship.pitch ?? 0) * 1.1, -0.6, 0.6);
+        const idealFocus = shipPos
+          .clone()
+          .addScaledVector(localUp, 1.8 + verticalTrim * 4.5)
+          .addScaledVector(shipForward, 4.5);
 
         const hull = SPAWN_FLEET[ship.kind ?? "light_fighter"];
         const baseDist = Math.max(22, hull.halfLength * 3);
         const baseH = Math.max(6.5, hull.halfWidth * 1.7);
         const shipSpeed = Math.hypot(ship.vx, ship.vy, ship.vz);
-        const lagDist = clamp(shipSpeed * 0.12, 0, 8.0);
+        const isBoostNow = pilotFlight ? pilotFlight.boosting : Boolean(ship.boosting);
+        const isBrakeNow = pilotFlight ? pilotFlight.braking : Boolean(ship.braking);
+        const targetBoostLag = (isBoostNow ? 3.4 : 0) + (ship.boostPulse ?? 0) * 4.8 - (isBrakeNow ? 2.4 : 0);
+        this.flightSpringArm.boostLag = THREE.MathUtils.damp(this.flightSpringArm.boostLag, targetBoostLag, 6.5, dt);
+        const lagDist = clamp(shipSpeed * 0.09, 0, 8.5) + this.flightSpringArm.boostLag;
 
-        const idealCamPos = shipPos.clone()
-          .addScaledVector(localUp, baseH)
+        const idealCamPos = shipPos
+          .clone()
+          .addScaledVector(localUp, baseH - verticalTrim * 3.2)
           .addScaledVector(shipForward, -(baseDist + lagDist));
         const targetRoll = -ship.bank * 0.65;
         const radialVelocity = new THREE.Vector3(ship.vx, ship.vy, ship.vz).dot(localUp);
-        const targetPitch = clamp(radialVelocity / 28, -0.3, 0.3) * 0.18;
+        const targetPitch = clamp(radialVelocity / 28, -0.3, 0.3) * 0.18 + (ship.pitch ?? 0) * 0.18;
 
         if (!this.flightSpringArm.initialized || this.flightSpringArm.position.distanceTo(idealCamPos) > 600) {
           this.flightSpringArm.focus.copy(idealFocus);
@@ -1281,8 +1731,8 @@ export class GameView {
           this.flightSpringArm.pitch = targetPitch;
           this.flightSpringArm.initialized = true;
         } else {
-          this.flightSpringArm.focus.lerp(idealFocus, 1 - Math.exp(-dt * 10));
-          this.flightSpringArm.position.lerp(idealCamPos, 1 - Math.exp(-dt * 8));
+          this.flightSpringArm.focus.lerp(idealFocus, 1 - Math.exp(-dt * 11));
+          this.flightSpringArm.position.lerp(idealCamPos, 1 - Math.exp(-dt * 8.5));
           this.flightSpringArm.roll = THREE.MathUtils.damp(this.flightSpringArm.roll, targetRoll, 7, dt);
           this.flightSpringArm.pitch = THREE.MathUtils.damp(this.flightSpringArm.pitch, targetPitch, 6, dt);
         }
@@ -1337,11 +1787,33 @@ export class GameView {
         this.camera.position.copy(this.cameraOverride.position);
         this.camera.lookAt(this.cameraOverride.lookAt);
       }
-      if (isDriving) this.shake = 0;
-      else this.shake *= Math.exp(-dt * 12);
-      if (!isDriving && playing && this.effects > 0) {
+      if (isDriving && s) {
+        // Walking shake never leaks into cockpit or flight camera
+        this.shake = 0;
+        const ship = s.adventure.ship;
+        const colId = ship.collisionId ?? 0;
+        if (colId > this.lastShipCollisionId) {
+          this.lastShipCollisionId = colId;
+          this.flightShake = Math.max(this.flightShake, 0.45 + (ship.collisionIntensity ?? 0.5) * 0.75);
+        }
+        const isBoostNow = pilotFlight ? pilotFlight.boosting : Boolean(ship.boosting);
+        const isBrakeNow = pilotFlight ? pilotFlight.braking : Boolean(ship.braking);
+        const engineRumble = isBoostNow
+          ? 0.22 + (ship.boostPulse ?? 0) * 0.32
+          : isBrakeNow
+            ? 0.14
+            : 0;
+        this.flightShake = Math.max(engineRumble, this.flightShake * Math.exp(-dt * 10));
+      } else {
+        this.flightShake = 0;
+        this.shake *= Math.exp(-dt * 12);
+      }
+      if (!isDriving && playing && this.effects > 0 && this.shake > 0.001) {
         this.camera.position.addScaledVector(up, Math.sin(t * 48) * this.shake * this.effects * 0.09);
         this.camera.rotateZ(Math.sin(t * 33) * this.shake * this.effects * 0.003);
+      } else if (isDriving && this.thirdPerson && playing && this.effects > 0 && this.flightShake > 0.004) {
+        this.camera.position.addScaledVector(up, Math.sin(t * 44) * this.flightShake * this.effects * 0.15);
+        this.camera.rotateZ(Math.sin(t * 31) * this.flightShake * this.effects * 0.004);
       }
       if (me.crystals > this.lastCollected) {
         this.sound("pickup", 1 + Math.min(me.combo, 8) * 0.09);
@@ -1393,20 +1865,38 @@ export class GameView {
     }
     this.camera.updateMatrixWorld();
     this.interplanetary.step(dt, me || { x: 0, y: 0, z: 0 });
-    if (this.jetGain && this.listener) {
-      const ctx = this.listener.context;
-      this.jetGain.gain.setTargetAtTime(
-        playing &&
-          (me?.jetting || (me && me.seat >= 0 && s?.adventure.ship.repaired))
-          ? me?.seat! >= 0
-            ? 0.1 + Math.min(0.12, (s?.adventure.ship.thrust || 0) * 0.05)
-            : 0.18
-          : 0,
-        ctx.currentTime,
-        0.09,
+    // Update home planet orbital clouds, atmosphere limb fade, sky space-factor & starfield scintillation
+    if (this.homePlanetCloudUniforms) {
+      this.homePlanetCloudUniforms.time.value = t;
+      const camAlt = Math.max(0, this.camera.position.y - 160);
+      this.homePlanetCloudUniforms.opacity.value = clamp(camAlt / 680, 0, 0.65);
+    }
+    if (this.homePlanetAtmoUniforms) {
+      // Strictly 0 while camera is inside or near the home planet atmosphere shell (prevents cyan washout over zenith stars)
+      const c = HOME_PLANET_SPHERE.center;
+      const radialDist = Math.hypot(
+        this.camera.position.x - c.x,
+        this.camera.position.y - c.y,
+        this.camera.position.z - c.z,
       );
+      const orbitFade = smooth((radialDist - (HOME_PLANET_SPHERE.atmosphereRadius + 90)) / 420);
+      this.homePlanetAtmoUniforms.intensity.value = orbitFade * 0.62;
+    }
+    if (this.skyDomeUniforms) {
+      const altSpace = clamp((this.camera.position.y - 120) / 700, 0, 1);
+      this.skyDomeUniforms.spaceFactor.value = altSpace * altSpace * (3 - 2 * altSpace);
+    }
+    if (this.skyStarUniforms) {
+      this.skyStarUniforms.time.value = t;
+    }
+
+    if (this.jetGain && this.listener) {
+      // Strictly reserve jetGain for on-foot EVA jetpack so it never pollutes ship acoustics
+      const ctx = this.listener.context;
+      const onFootJet = Boolean(playing && me && me.seat < 0 && me.jetting);
+      this.jetGain.gain.setTargetAtTime(onFootJet ? 0.18 : 0, ctx.currentTime, 0.09);
       this.jetFilter?.frequency.setTargetAtTime(
-        playing && me?.jetting ? 650 + Math.max(0, me.vy) * 25 : 280,
+        onFootJet ? 650 + Math.max(0, me!.vy) * 25 : 280,
         ctx.currentTime,
         0.12,
       );
@@ -1421,6 +1911,7 @@ export class GameView {
         ? pilotFlight.braking
         : (ship.vy ?? 0) < -15;
       const inDeepSpace = (ship.y ?? 0) > 850;
+      const piloting = Boolean(me && me.seat >= 0);
       cosmicAudio.updateShipAudio({
         speed,
         altitude: ship.y ?? 0,
@@ -1430,6 +1921,8 @@ export class GameView {
         climbing: (ship.vy ?? 0) > 5,
         repaired: ship.repaired,
         inDeepSpace,
+        piloting,
+        throttle: ship.throttle,
       });
 
       let nearestGateDist = Infinity;
@@ -1718,7 +2211,7 @@ export class GameView {
           );
         }
 
-        const inShip = p.seat >= 0 || this.interplanetary.inCorridor;
+        const inShip = p.seat >= 0;
         const activeWep = own ? this.activeWeapon : (p.grapple ? "grapple" : "none");
         const heldRifle = a.getObjectByName("heldRifle");
         const backRifle = a.getObjectByName("backRifle");

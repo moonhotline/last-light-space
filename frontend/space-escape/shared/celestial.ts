@@ -230,8 +230,7 @@ export type FlightFlightMode =
   | "surface" // On spherical surface or walking
   | "ascent" // Breaking through atmosphere
   | "cruise" // Deep space solar system cruise
-  | "reentry" // Approaching planet & landing
-  | "interior"; // Inside spaceship corridor
+  | "reentry"; // Approaching planet & landing
 
 /** Spaceship types */
 export type SpaceshipKind =
@@ -247,7 +246,6 @@ export interface FlightSystemState {
   throttle: number; // 0..1
   velocity: Vec3;
   altitude: number; // Distance above current planet surface
-  inCorridor: boolean; // Inside spaceship interior
 }
 
 /** Mineral specimen classification (Based on Slovenian Natural History Museum) */

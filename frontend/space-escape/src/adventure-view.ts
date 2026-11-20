@@ -13,7 +13,9 @@ import {
 } from "../shared/adventure-data";
 import { alignShipToGround, clean3DEntityText, normalizeModelContainer, updateShipTransform } from "./interplanetary";
 import { ShipPropulsionFX } from "./thruster-fx";
-import { groundAt, hash, HALF, type Vec } from "../shared/map";
+import { cosmicAudio } from "./sound-engine";
+import { GROVE_TREES, OUTPOST_POSTS } from "../shared/colliders";
+import { hash, type Vec } from "../shared/map";
 import type { Player, Snapshot } from "../shared/types";
 const v = (p: Vec) => new THREE.Vector3(p.x, p.y, p.z);
 const glow = (color: number, opacity = 1) =>
@@ -98,11 +100,15 @@ export class AdventureView {
       }
       throw error;
     };
-    const [ship, lab, drone, bullet] = await Promise.all([
+    const [ship, lab, drone, bullet, crateGltf, coreGltf, obeliskGltf, mineralGltf] = await Promise.all([
       load(SPAWN_FLEET.light_fighter.asset),
       load("/assets/dawn-lab.glb"),
       load("/assets/drone.glb"),
       load("/assets/kinetic-bullet.glb"),
+      load("/assets/crate.glb").catch(() => null),
+      load("/assets/core.glb").catch(() => null),
+      load("/assets/obelisk.glb").catch(() => null),
+      load("/assets/models/minerals/scene.gltf").catch(() => null),
     ]);
     this.bulletModel = bullet.scene;
     this.bulletModel.traverse((o) => {
@@ -111,7 +117,8 @@ export class AdventureView {
         o.receiveShadow = false;
       }
     });
-    [lab.scene, drone.scene].forEach((root) => {
+    [lab.scene, drone.scene, crateGltf?.scene, coreGltf?.scene, obeliskGltf?.scene, mineralGltf?.scene].forEach((root) => {
+      if (!root) return;
       root.traverse((o) => {
         if (o instanceof THREE.Mesh) {
           o.castShadow = o.receiveShadow = true;
@@ -120,6 +127,10 @@ export class AdventureView {
       optimizeModel(root);
       weatherMaterials(root);
     });
+    const crateAsset = crateGltf?.scene ? normalizeModelContainer(crateGltf.scene, 2.2) : null;
+    const coreAsset = coreGltf?.scene ? normalizeModelContainer(coreGltf.scene, 2.6) : null;
+    const obeliskAsset = obeliskGltf?.scene ? normalizeModelContainer(obeliskGltf.scene, 3.8) : null;
+    const mineralAsset = mineralGltf?.scene ? normalizeModelContainer(mineralGltf.scene, 2.5) : null;
     clean3DEntityText(ship.scene);
     const fighter = normalizeModelContainer(ship.scene, SPAWN_FLEET.light_fighter.modelSize, Math.PI);
     this.ship.userData.chassisClearance = fighter.userData.chassisClearance;
@@ -145,58 +156,66 @@ export class AdventureView {
     for (const c of LORE) {
       const g = new THREE.Group();
       g.position.copy(v(c));
-      const stone = new THREE.Mesh(
-        new THREE.BoxGeometry(2.1, 3.4, 0.65),
-        new THREE.MeshStandardMaterial({
-          color: 0x344346,
-          roughness: 0.88,
-          metalness: 0.2,
-        }),
-      );
-      stone.position.y = 1.7;
-      stone.castShadow = true;
-      g.add(stone);
+      if (obeliskAsset) {
+        const monolith = obeliskAsset.clone(true);
+        monolith.position.y = 1.9;
+        g.add(monolith);
+      } else {
+        const stone = new THREE.Mesh(
+          new THREE.BoxGeometry(2.1, 3.4, 0.65),
+          new THREE.MeshStandardMaterial({
+            color: 0x344346,
+            roughness: 0.88,
+            metalness: 0.2,
+          }),
+        );
+        stone.position.y = 1.7;
+        stone.castShadow = true;
+        g.add(stone);
+      }
       const canvas = document.createElement("canvas");
-      canvas.width = 256;
-      canvas.height = 512;
+      canvas.width = 512;
+      canvas.height = 1024;
       const ctx = canvas.getContext("2d")!;
-      ctx.fillStyle = "#17252a";
-      ctx.fillRect(0, 0, 256, 512);
-      ctx.strokeStyle = "#cfb080";
-      ctx.lineWidth = 3;
-      ctx.strokeRect(18, 18, 220, 476);
-      ctx.fillStyle = "#debf92";
+      ctx.fillStyle = "#122128";
+      ctx.fillRect(0, 0, 512, 1024);
+      ctx.strokeStyle = "#d4b483";
+      ctx.lineWidth = 5;
+      ctx.strokeRect(28, 28, 456, 968);
+      ctx.fillStyle = "#e8cc9c";
       ctx.textAlign = "center";
-      ctx.font = "20px monospace";
-      ctx.fillText(`ARCHIVE / 0${c.id + 1}`, 128, 63);
+      ctx.font = "bold 36px monospace";
+      ctx.fillText(`ARCHIVE / 0${c.id + 1}`, 256, 118);
       for (let i = 0; i < 9; i++) {
         ctx.beginPath();
-        ctx.moveTo(54, 110 + i * 34);
-        ctx.lineTo(190 - (i % 3) * 19, 110 + i * 34);
+        ctx.moveTo(96, 210 + i * 68);
+        ctx.lineTo(396 - (i % 3) * 38, 210 + i * 68);
         ctx.stroke();
-        ctx.fillRect(61 + (i % 3) * 30, 101 + i * 34, 3, 18);
+        ctx.fillRect(116 + (i % 3) * 60, 194 + i * 68, 6, 34);
       }
-      ctx.font = "14px monospace";
-      ctx.fillText("E / READ", 128, 459);
+      ctx.font = "bold 28px monospace";
+      ctx.fillText("E / READ ARCHIVE", 256, 916);
       const texture = new THREE.CanvasTexture(canvas);
       texture.colorSpace = THREE.SRGBColorSpace;
       const face = new THREE.Mesh(
-        new THREE.PlaneGeometry(1.85, 3.1),
+        new THREE.PlaneGeometry(1.35, 2.55),
         new THREE.MeshStandardMaterial({
           map: texture,
           emissiveMap: texture,
-          emissive: 0xb29158,
-          emissiveIntensity: 0.45,
-          roughness: 0.7,
+          emissive: 0xc29e62,
+          emissiveIntensity: 0.6,
+          roughness: 0.55,
+          transparent: true,
+          opacity: 0.92,
         }),
       );
-      face.position.set(0, 1.75, 0.334);
+      face.position.set(0, 1.85, 0.56);
       g.add(face);
       const light = new THREE.Mesh(
-        new THREE.SphereGeometry(0.1, 12, 8),
+        new THREE.SphereGeometry(0.12, 16, 12),
         glow(0xf3c789),
       );
-      light.position.set(0, 3.6, 0);
+      light.position.set(0, 3.85, 0);
       g.add(light);
       this.scene.add(g);
       this.clues.push(g);
@@ -219,25 +238,26 @@ export class AdventureView {
         metalness: 0.65,
         roughness: 0.42,
         emissive: color,
-        emissiveIntensity: n.item === "scrap" ? 0.02 : 0.35,
+        emissiveIntensity: n.item === "scrap" ? 0.08 : 0.42,
       });
-      if (n.item === "ore")
-        for (let j = 0; j < 7; j++) {
-          const mesh = new THREE.Mesh(
-            new THREE.OctahedronGeometry(0.4 + hash(id, j) * 0.65),
-            mat,
-          );
-          mesh.position.set(
-            (hash(j, 2) - 0.5) * 2,
-            hash(j, 4) * 0.6,
-            (hash(j, 3) - 0.5) * 2,
-          );
-          mesh.scale.y = 1.4;
-          mesh.rotation.set(hash(j, 5), hash(j, 6), 0.3);
-          mesh.castShadow = true;
-          g.add(mesh);
-        }
-      else {
+      if (n.item === "ore" && mineralAsset) {
+        const oreMesh = mineralAsset.clone(true);
+        oreMesh.position.y = 0.65;
+        oreMesh.rotation.y = hash(id, 5) * Math.PI * 2;
+        g.add(oreMesh);
+      } else if (n.item === "core" && coreAsset) {
+        const coreMesh = coreAsset.clone(true);
+        coreMesh.position.y = 1.1;
+        g.add(coreMesh);
+      } else if (crateAsset) {
+        const crateMesh = crateAsset.clone(true);
+        crateMesh.position.y = 0.55;
+        crateMesh.rotation.y = hash(id, 3) * Math.PI * 2;
+        g.add(crateMesh);
+        const indicator = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.09, 0.9), mat);
+        indicator.position.y = 1.25;
+        g.add(indicator);
+      } else {
         const base = new THREE.Mesh(
           new THREE.BoxGeometry(2.2, 1.4, 1.7),
           new THREE.MeshStandardMaterial({
@@ -248,29 +268,6 @@ export class AdventureView {
         );
         base.castShadow = true;
         g.add(base);
-        const strip = new THREE.Mesh(
-          new THREE.BoxGeometry(1.7, 0.11, 1.72),
-          mat,
-        );
-        strip.position.y = 0.38;
-        g.add(strip);
-        if (n.item === "core") {
-          const core = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.5, 0.5, 2, 16),
-            mat,
-          );
-          core.position.y = 1;
-          g.add(core);
-          for (let j = 0; j < 3; j++) {
-            const ring = new THREE.Mesh(
-              new THREE.TorusGeometry(0.65, 0.045, 8, 32),
-              glow(color),
-            );
-            ring.rotation.x = Math.PI / 2;
-            ring.position.y = 0.5 + j * 0.45;
-            g.add(ring);
-          }
-        }
       }
       this.scene.add(g);
       this.nodes.push(g);
@@ -335,23 +332,21 @@ export class AdventureView {
   buildOutpost() {
     const mat = new THREE.MeshStandardMaterial({
       color: 0x3c474a,
-      roughness: 0.75,
-      metalness: 0.6,
+      roughness: 0.68,
+      metalness: 0.65,
     });
-    for (let i = 0; i < 9; i++) {
-      const angle = (i / 9) * Math.PI * 2,
-        x = OUTPOST.x + Math.cos(angle) * 28,
-        z = OUTPOST.z + Math.sin(angle) * 28;
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.65, 5, 0.65), mat);
-      post.position.set(x, groundAt(x, z) + 2.5, z);
+    for (const p of OUTPOST_POSTS) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.46, 5, 12), mat);
+      post.position.set(p.x, p.y + 2.5, p.z);
       post.castShadow = true;
+      post.receiveShadow = true;
       this.scene.add(post);
       const beacon = new THREE.Mesh(
-        new THREE.BoxGeometry(0.7, 0.14, 0.7),
+        new THREE.TorusGeometry(0.38, 0.07, 10, 24),
         glow(0xf4a37e),
       );
-      beacon.position.copy(post.position);
-      beacon.position.y += 2.4;
+      beacon.rotation.x = Math.PI / 2;
+      beacon.position.set(p.x, p.y + 4.9, p.z);
       this.scene.add(beacon);
     }
   }
@@ -367,30 +362,25 @@ export class AdventureView {
       emissiveIntensity: 0.18,
     });
     const trunks = new THREE.InstancedMesh(
-      new THREE.CylinderGeometry(0.3, 0.85, 12, 8),
+      new THREE.CylinderGeometry(0.32, 0.86, 12, 14),
       bark,
-      52,
+      GROVE_TREES.length,
     );
     const crowns = new THREE.InstancedMesh(
-      new THREE.IcosahedronGeometry(1, 1),
+      new THREE.IcosahedronGeometry(1, 2),
       foliage,
-      156,
+      GROVE_TREES.length * 3,
     );
     const buds = new THREE.InstancedMesh(
-      new THREE.SphereGeometry(0.15, 8, 6),
+      new THREE.SphereGeometry(0.15, 10, 8),
       glow(0xc6ddc3),
-      156,
+      GROVE_TREES.length * 3,
     );
     const obj = new THREE.Object3D();
-    for (let i = 0; i < 52; i++) {
-      const angle = hash(i, 70) * Math.PI * 2,
-        r = 30 + hash(i, 71) * 90,
-        x = DESTINATION.x + Math.cos(angle) * r,
-        z = DESTINATION.z + Math.sin(angle) * r,
-        y = groundAt(x, z);
-      const scale = 0.7 + hash(i, 72) * 0.9;
+    GROVE_TREES.forEach((tree, i) => {
+      const { x, y, z, angle, tilt, scale } = tree;
       obj.position.set(x, y + 6 * scale, z);
-      obj.rotation.set(0, angle, (hash(i, 73) - 0.5) * 0.12);
+      obj.rotation.set(0, angle, tilt);
       obj.scale.setScalar(scale);
       obj.updateMatrix();
       trunks.setMatrixAt(i, obj.matrix);
@@ -408,11 +398,11 @@ export class AdventureView {
         obj.updateMatrix();
         buds.setMatrixAt(i * 3 + j, obj.matrix);
       }
-    }
+    });
     trunks.castShadow = crowns.castShadow = true;
     this.scene.add(trunks, crowns, buds);
     const pad = new THREE.Mesh(
-      new THREE.RingGeometry(11, 11.18, 80),
+      new THREE.RingGeometry(11, 11.24, 96),
       glow(0xb8e0c3),
     );
     pad.rotation.x = -Math.PI / 2;
@@ -488,16 +478,15 @@ export class AdventureView {
       }
     }
 
-    if (isFighter && ship.repaired && !ship.grounded && (isBoosting || speed > 25) && hash(Math.floor(t * 60), 5) > 0.3) {
-      for (const side of [-1.0, 1.0]) {
-        const dir = new THREE.Vector3(side, 0.50, 4.4 + (isBoosting ? 2.5 : 0.6)).applyQuaternion(this.ship.quaternion).add(this.ship.position);
-        this.burst(
-          { x: dir.x, y: dir.y, z: dir.z },
-          isBoosting ? 3 : 1,
-          isBoosting ? 0xa5e5ff : 0x00e5ff,
-          isBoosting ? 5 : 2.5,
-        );
-      }
+    if (this.changed("shipCollision", ship.collisionId ?? 0)) {
+      const intensity = ship.collisionIntensity ?? 0.5;
+      this.burst(
+        { x: ship.x, y: ship.y + 2, z: ship.z },
+        Math.round(12 + intensity * 24),
+        0xffc88a,
+        6 + intensity * 12,
+      );
+      cosmicAudio.playShipCollision(intensity);
     }
     if (!ship.repaired && hash(Math.floor(t * 25), 3) > 0.85)
       this.burst({ x: ship.x, y: ship.y + 3, z: ship.z + 3 }, 2, 0xa78967, 1.6);

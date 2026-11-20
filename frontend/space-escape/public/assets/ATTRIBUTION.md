@@ -15,3 +15,4 @@ The astronomical scale and trajectories are fictional and chosen for the experie
 
 - Spawn fighter: “LIGHT FIGHTER SPACESHIP - FREE -” by Kerem Kavalci; Sketchfab Standard license, see `models/fighter/license.txt`.
 - Heavy starship: “Intergalactic Spaceship Only Model” by 3DHaupt; CC-BY-NC-4.0, see `models/intergalactic/license.txt`.
+- `audio/engine-idle-loop.wav`, `audio/engine-cruise-loop.wav`, `audio/engine-afterburner-loop.wav`, `audio/afterburner-ignite.wav`, `audio/retro-brake-ignite.wav`, `audio/retro-brake-loop.wav`, `audio/retro-brake-release.wav`, `audio/ship-impact.wav`: original 44.1kHz stereo PCM propulsion acoustics synthesized by `scripts/generate-ship-audio.mjs`.

@@ -9,8 +9,17 @@ import {
   type SpaceshipKind,
   type FlightFlightMode,
 } from "../shared/celestial";
-import { buildLandmark, buildPlanetaryRings, buildWarpGate, planetTexture } from "./celestial-visuals";
+import {
+  buildAtmosphereMaterial,
+  buildLandmark,
+  buildPlanetaryRings,
+  buildWarpGate,
+  hydratePlanetSurfaceTexture,
+  planetBumpTexture,
+  planetTexture,
+} from "./celestial-visuals";
 import { celestialFlightFrame } from "../shared/celestial-flight";
+import { CAVE_POS, MINERAL_OUTCROPS } from "../shared/colliders";
 import { groundAt, HALF } from "../shared/map";
 import type { AdventureShip } from "../shared/types";
 import {
@@ -171,7 +180,7 @@ export function computeChassisAlignment(
 export function updateShipTransform(model: THREE.Group, ship: RenderShip, dt: number) {
   const spawn = SPAWN_FLEET[ship.kind ?? "light_fighter"];
   const position = new THREE.Vector3(ship.x, ship.y, ship.z);
-  const alignment = computeCelestialAlignment(position, ship.yaw, ship.bank);
+  const alignment = computeCelestialAlignment(position, ship.yaw, ship.bank, undefined, ship.pitch ?? 0);
   const quaternion = alignment.quaternion;
   const overBasin = Math.abs(ship.x) <= HALF - 10 && Math.abs(ship.z) <= HALF - 10 && ship.y <= 650;
   const clearance = model.userData.chassisClearance ?? 0.82;
@@ -261,6 +270,7 @@ export function computeCelestialAlignment(
   shipYaw: number,
   shipBank: number,
   preferredBody?: CelestialBody,
+  shipPitch = 0,
 ): {
   body: CelestialBody | null;
   up: THREE.Vector3;
@@ -270,10 +280,11 @@ export function computeCelestialAlignment(
   isLanded: boolean;
 } {
   const frame = celestialFlightFrame(shipPos, shipYaw, preferredBody ? [preferredBody] : undefined);
-  // Bank is a local roll, independent of the planet's orientation in world space.
-  const quaternion = frame.quaternion.clone().multiply(
-    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -shipBank),
-  );
+  // Local pitch (X) then bank/roll (Z), independent of the planet's orientation in world space.
+  const quaternion = frame.quaternion
+    .clone()
+    .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), shipPitch))
+    .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -shipBank));
   return {
     body: frame.capture?.body ?? null,
     up: frame.up,
@@ -324,10 +335,11 @@ export interface PlanetMeshEntry {
   highDetail?: THREE.Group;
   rings?: THREE.Group;
   portal?: THREE.Mesh<THREE.CircleGeometry, THREE.ShaderMaterial>;
+  portalParticles?: THREE.Points;
 }
 
 /**
- * Interplanetary Navigation, Solar System Cruise & Spaceship Interior Module.
+ * Interplanetary Navigation & Solar System Cruise Module.
  * Modular, decoupled and pluggable into GameView.
  */
 export class InterplanetarySystem {
@@ -337,10 +349,6 @@ export class InterplanetarySystem {
   // Space cruise group containing solar system planets & flight waypoints
   systemGroup = new THREE.Group();
   planets: Map<string, PlanetMeshEntry> = new Map();
-
-  // Spaceship Interior Corridor Group
-  corridorGroup = new THREE.Group();
-  inCorridor = false;
 
   // Flight Cruise State
   flightMode: FlightFlightMode = "surface";
@@ -415,11 +423,9 @@ export class InterplanetarySystem {
     this.scene = scene;
     this.camera = camera;
     this.scene.add(this.systemGroup);
-    this.scene.add(this.corridorGroup);
     this.scene.add(this.mineralNodes);
     this.assetLibrary.visible = false;
     this.scene.add(this.assetLibrary);
-    this.corridorGroup.visible = false;
 
     // Stable flight containers receive authored assets when their files load.
     for (const kind of Object.keys(SPAWN_FLEET) as SpaceshipKind[]) {
@@ -452,7 +458,6 @@ export class InterplanetarySystem {
     this.mineralNodes.add(this.mineralsModel);
 
     this.buildSolarSystem();
-    this.buildSpaceshipCorridor();
     this.buildMineralSpecimens();
   }
 
@@ -471,7 +476,13 @@ export class InterplanetarySystem {
         // Keep the entry shape shared, but never give a portal a spherical shell.
         pGroup.add(...gate.group.children.slice());
         this.systemGroup.add(pGroup);
-        this.planets.set(id, { body, group: pGroup, surfaceMesh: gate.frame, portal: gate.portal });
+        this.planets.set(id, {
+          body,
+          group: pGroup,
+          surfaceMesh: gate.frame,
+          portal: gate.portal,
+          portalParticles: gate.portalParticles,
+        });
         continue;
       }
       let mat: THREE.Material;
@@ -539,9 +550,15 @@ export class InterplanetarySystem {
       if (["venus", "mars", "jupiter", "saturn"].includes(id) && mat instanceof THREE.MeshStandardMaterial) {
         mat.color.set(0xffffff);
         mat.map = planetTexture(body);
-        if (id === "mars") { mat.bumpMap = mat.map; mat.bumpScale = 1.8; }
+        mat.bumpMap = planetBumpTexture(body);
+        mat.bumpScale = id === "mars" ? 2.6 : id === "venus" ? 0.9 : 0.65;
+        hydratePlanetSurfaceTexture(id, mat, () => this.onModelLoaded?.());
+      } else if (["mercury", "earth"].includes(id) && mat instanceof THREE.MeshStandardMaterial) {
+        hydratePlanetSurfaceTexture(id, mat, () => this.onModelLoaded?.());
       }
-      const geo = new THREE.SphereGeometry(body.radius, 64, 48);
+
+      // High-poly 128x96 planetary sphere (~24,576 triangles per body for crisp horizons)
+      const geo = new THREE.SphereGeometry(body.radius, 128, 96);
       const surfaceMesh = new THREE.Mesh(geo, mat);
       // The GLTF includes clouds beyond its terrain: keep the backup under the crust.
       if (id === "kepler") surfaceMesh.scale.setScalar(0.98);
@@ -549,12 +566,12 @@ export class InterplanetarySystem {
       surfaceMesh.receiveShadow = true;
       surfaceMesh.frustumCulled = true;
 
-      // Atmospheric Rayleigh scattering blending shell
-      const rayleighGeo = new THREE.SphereGeometry(body.radius * 1.018, 48, 36);
+      // Atmospheric Rayleigh scattering blending shell (96x64)
+      const rayleighGeo = new THREE.SphereGeometry(body.radius * 1.018, 96, 64);
       const rayleighMat = new THREE.MeshBasicMaterial({
         color: id === "kepler" ? 0x1b3547 : body.atmosphereColor,
         transparent: true,
-        opacity: id === "kepler" ? 0.04 : 0.18,
+        opacity: id === "kepler" ? 0.04 : 0.14,
         fog: id !== "kepler",
         depthWrite: false,
         side: THREE.FrontSide,
@@ -563,18 +580,15 @@ export class InterplanetarySystem {
       rayleighMesh.renderOrder = 2;
       rayleighMesh.frustumCulled = true;
 
-      // Atmosphere glow layer
-      const atmoGeo = new THREE.SphereGeometry(body.atmosphereRadius, 32, 24);
-      const atmoMat = new THREE.MeshBasicMaterial({
-        color: body.atmosphereColor,
-        transparent: true,
-        opacity: 0.18,
-        side: THREE.BackSide,
-        depthWrite: false,
-        fog: id !== "kepler",
-      });
+      // Fresnel atmospheric limb scattering halo (96x64)
+      const atmoGeo = new THREE.SphereGeometry(body.atmosphereRadius, 96, 64);
+      const atmoMat = buildAtmosphereMaterial(
+        body.atmosphereColor,
+        id === "kepler" ? 0.35 : 0.68,
+        id !== "kepler",
+      );
       const atmoMesh = new THREE.Mesh(atmoGeo, atmoMat);
-      if (id === "kepler") atmoMesh.scale.setScalar(body.radius * 1.06 / body.atmosphereRadius);
+      if (id === "kepler") atmoMesh.scale.setScalar((body.radius * 1.06) / body.atmosphereRadius);
       atmoMesh.frustumCulled = true;
 
       const rings = body.hasRings ? buildPlanetaryRings(body) : undefined;
@@ -614,121 +628,21 @@ export class InterplanetarySystem {
   }
 
   /**
-   * Procedural Spaceship Corridor Interior:
-   * Futuristic sci-fi hallway with observation airlock, LED strips and holographic consoles.
-   */
-  private buildSpaceshipCorridor() {
-    const hallway = new THREE.Group();
-
-    // Corridor Floor & Ceiling
-    const floorGeo = new THREE.PlaneGeometry(8, 36);
-    const floorMat = new THREE.MeshStandardMaterial({
-      color: 0x0f172a,
-      roughness: 0.25,
-      metalness: 0.8,
-    });
-    const floor = new THREE.Mesh(floorGeo, floorMat);
-    floor.rotation.x = -Math.PI / 2;
-    hallway.add(floor);
-
-    const ceiling = new THREE.Mesh(
-      floorGeo,
-      new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.7 }),
-    );
-    ceiling.position.y = 4.2;
-    ceiling.rotation.x = Math.PI / 2;
-    hallway.add(ceiling);
-
-    // Ribbed bulkhead frames
-    for (let z = -16; z <= 16; z += 4) {
-      const arch = new THREE.Group();
-      arch.position.z = z;
-
-      // Vertical pillars
-      const pillarGeo = new THREE.BoxGeometry(0.4, 4.2, 0.6);
-      const pillarMat = new THREE.MeshStandardMaterial({
-        color: 0x334155,
-        metalness: 0.6,
-      });
-
-      const leftPillar = new THREE.Mesh(pillarGeo, pillarMat);
-      leftPillar.position.set(-4, 2.1, 0);
-      arch.add(leftPillar);
-
-      const rightPillar = new THREE.Mesh(pillarGeo, pillarMat);
-      rightPillar.position.set(4, 2.1, 0);
-      arch.add(rightPillar);
-
-      // Cyan LED illumination strips
-      const lightGeo = new THREE.BoxGeometry(0.08, 3.8, 0.08);
-      const lightMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
-      const leftLight = new THREE.Mesh(lightGeo, lightMat);
-      leftLight.position.set(-3.75, 2.1, 0);
-      arch.add(leftLight);
-
-      const rightLight = new THREE.Mesh(lightGeo, lightMat);
-      rightLight.position.set(3.75, 2.1, 0);
-      arch.add(rightLight);
-
-      hallway.add(arch);
-    }
-
-    // Front panoramic observation bay viewport
-    const windowGeo = new THREE.BoxGeometry(7.6, 3.8, 0.1);
-    const windowMat = new THREE.MeshPhysicalMaterial({
-      color: 0x0284c7,
-      transparent: true,
-      opacity: 0.35,
-      roughness: 0.1,
-      metalness: 0.9,
-    });
-    const viewport = new THREE.Mesh(windowGeo, windowMat);
-    viewport.position.set(0, 2.1, -18);
-    hallway.add(viewport);
-
-    // Position corridor off-world
-    hallway.position.set(0, 0, 0);
-    this.corridorGroup.add(hallway);
-  }
-
-  /**
    * Mineral Specimen Outcrops:
    * Empty site containers receive clones of the downloaded mineral asset.
    */
   private buildMineralSpecimens() {
-    const sites = [
-      { id: "calcite", pos: { x: -35, y: 19, z: 120 } },
-      { id: "pyrite", pos: { x: 145, y: 38, z: -40 } },
-      { id: "amethyst", pos: { x: -180, y: 75, z: -160 } },
-      { id: "celestite", pos: { x: 80, y: 24, z: 290 } },
-    ];
-
-    for (const site of sites) {
+    for (const site of MINERAL_OUTCROPS) {
+      if (site.id === "spawn_mineral") continue;
       const spec = MINERAL_SAMPLES[site.id];
       if (!spec) continue;
 
       const cluster = new THREE.Group();
-      cluster.position.set(site.pos.x, site.pos.y, site.pos.z);
+      cluster.position.set(site.x, site.y, site.z);
       cluster.userData = { mineralId: spec.id, mineral: spec };
 
       this.mineralNodes.add(cluster);
     }
-  }
-
-
-  /** Toggle Spaceship Corridor Interior View */
-  toggleCorridor(enter?: boolean): boolean {
-    this.inCorridor = enter !== undefined ? enter : !this.inCorridor;
-    if (this.inCorridor) {
-      this.corridorGroup.position.copy(this.camera.position);
-      this.corridorGroup.rotation.copy(this.camera.rotation);
-    } else {
-      this.corridorGroup.position.set(0, 0, 0);
-      this.corridorGroup.rotation.set(0, 0, 0);
-    }
-    this.corridorGroup.visible = this.inCorridor;
-    this.flightMode = this.inCorridor ? "interior" : "surface";
-    return this.inCorridor;
   }
 
   /** Switch between Spaceship models */
@@ -804,6 +718,7 @@ export class InterplanetarySystem {
         if (child.name.startsWith("landmark-")) child.rotation.y += rotationStep;
       }
       if (entry.portal) entry.portal.material.uniforms.time.value += dt;
+      if (entry.portalParticles) entry.portalParticles.rotation.z -= dt * 0.35;
       entry.group.visible = true; // All planets must remain visible through frustum culling
       entry.group.frustumCulled = true;
       entry.surfaceMesh.visible = true;
@@ -816,19 +731,19 @@ export class InterplanetarySystem {
       }
 
       // Atmospheric Rayleigh scattering blending:
-      // At surface, 远景天体 naturally blends into atmospheric sky tone (0x1b3547 / 0x38bdf8).
-      // As ship ascends, Rayleigh mask smoothly fades away according to altitude, revealing deep space body.
       if (entry.rayleighMesh) {
         entry.rayleighMesh.visible = true;
         entry.rayleighMesh.frustumCulled = true;
         const mat = entry.rayleighMesh.material as THREE.MeshBasicMaterial;
-        mat.opacity = (id === "kepler" ? 0.04 : 0.18) * rayleighBlend;
+        mat.opacity = (id === "kepler" ? 0.04 : 0.14) * rayleighBlend;
       }
       if (entry.atmosphereMesh) {
         entry.atmosphereMesh.visible = true;
         entry.atmosphereMesh.frustumCulled = true;
-        const atmoMat = entry.atmosphereMesh.material as THREE.MeshBasicMaterial;
-        atmoMat.opacity = id === "kepler" ? 0.12 : THREE.MathUtils.lerp(0.18, 0.42, rayleighBlend);
+        const atmoMat = entry.atmosphereMesh.material as THREE.ShaderMaterial;
+        if (atmoMat.uniforms?.intensity) {
+          atmoMat.uniforms.intensity.value = id === "kepler" ? 0.38 : THREE.MathUtils.lerp(0.58, 0.85, rayleighBlend);
+        }
       }
     }
     // Leave visibility to gameplay. Three.js culls each mesh with current render matrices.
@@ -899,7 +814,7 @@ export class InterplanetarySystem {
         }
       }
     }
-    if (this.caveModel) this.caveModel.visible = this.inCorridor;
+    if (this.caveModel) this.caveModel.visible = true;
     if (this.skyModel) this.skyModel.visible = this.flightMode === "cruise";
     if (this.solarModel) this.solarModel.visible = this.flightMode === "cruise";
 
@@ -980,7 +895,6 @@ export class InterplanetarySystem {
     }
 
     for (const [key, url, size] of [
-      ["corridor", "/assets/models/corridor/scene.gltf", 38],
       ["cave", "/assets/models/cave/scene.gltf", 40],
       ["sky", "/assets/models/sky/scene.gltf", 40],
       ["solar_system", "/assets/models/solar_system/scene.gltf", 80],
@@ -988,10 +902,6 @@ export class InterplanetarySystem {
       const model = await loadModel(key, url, size);
       if (model) {
         clean3DEntityText(model);
-        if (key === "corridor") {
-          this.corridorGroup.add(model);
-          this.onModelLoaded?.();
-        }
       }
     }
     await loadModel("hoverboard", "/assets/models/hoverboard/scene.gltf", 1.35);
@@ -1094,7 +1004,8 @@ export class InterplanetarySystem {
     this.skyModel = this.downloadedAssets.get("sky") || null;
     this.solarModel = this.downloadedAssets.get("solar_system") || null;
     if (this.caveModel) {
-      this.caveModel.position.set(-310, groundAt(-310, -210) + 20, -210);
+      this.caveModel.position.set(CAVE_POS.x, CAVE_POS.y, CAVE_POS.z);
+      this.caveModel.visible = true;
       this.scene.add(this.caveModel);
     }
     if (this.skyModel) {
