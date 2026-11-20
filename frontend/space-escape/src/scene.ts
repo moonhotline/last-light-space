@@ -35,6 +35,7 @@ import {
 } from "../shared/map";
 import type { Snapshot, Player } from "../shared/types";
 import type { MovementWorld } from "../shared/physics";
+import { PortalView } from "./portal-view";
 import { SOLAR_SYSTEM } from "../shared/celestial";
 import { SPAWN_FLEET, SHIP_MAX_SPEED } from "../shared/adventure-data";
 import { FOOT_OFFSET, playerUp, surfaceOrientation, eyePosition, viewOrientation } from "../shared/surface";
@@ -303,6 +304,7 @@ function createNameplateSprite(name: string, colorHex: number): THREE.Sprite {
 }
 export class GameView {
   scene = new THREE.Scene();
+  private portals: PortalView;
   skyScene = new THREE.Scene();
   skyCamera = new THREE.PerspectiveCamera(66, 1, 100, 30000);
   camera = new THREE.PerspectiveCamera(66, 1, 0.1, 30000);
@@ -492,6 +494,7 @@ export class GameView {
       powerPreference: "high-performance",
       preserveDrawingBuffer: true,
     });
+    this.portals = new PortalView(this.scene, this.skyScene, this.renderer);
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -2122,16 +2125,19 @@ export class GameView {
       }
       a.visible =
         p.seat < 0 && !(own && (!this.thirdPerson || this.cameraRange < 0.4));
+      const portaled = (p.portalTransit ?? 0) !== (a.userData.portalTransit ?? 0);
+      a.userData.portalTransit = p.portalTransit;
       if (p.planet) {
         a.position.copy(v3(p)).addScaledVector(playerUp(p), -FOOT_OFFSET);
-      } else if (own) a.position.set(p.x, p.y - 0.82, p.z);
+      } else if (own || portaled) a.position.set(p.x, p.y - 0.82, p.z);
       else
         a.position.lerp(
           new THREE.Vector3(p.x, p.y - 0.82, p.z),
           1 - Math.exp(-dt * 14),
         );
       const targetYaw = p.yaw + Math.PI;
-      if (!p.planet) {
+      if (portaled) a.rotation.y = targetYaw;
+      else if (!p.planet) {
         a.rotation.y +=
           Math.atan2(
             Math.sin(targetYaw - a.rotation.y),
@@ -2330,6 +2336,7 @@ export class GameView {
       this.particlePoints.geometry.getAttribute(n).needsUpdate = true;
     this.cinematic.uniforms.time.value = t;
     this.renderer.info.reset();
+    this.portals.update(s?.portals, this.camera, this.skyCamera, this.effects ? t : 0);
     this.composer.render(dt);
     this.frames++;
     this.canvas.dataset.frames = String(this.frames);

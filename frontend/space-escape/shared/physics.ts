@@ -1,4 +1,4 @@
-import { LAB, LAB_BOXES, SPAWN_FLEET } from "./adventure-data";
+import { LAB, LAB_BOXES, LAB_PORTAL_OBSTACLES, SPAWN_FLEET } from "./adventure-data";
 import RAPIER from "@dimforge/rapier3d-compat";
 import { Euler, Quaternion, Vector3 } from "three";
 import { FOOT_OFFSET, surfaceOrientation, eyePosition, viewDirection } from "./surface";
@@ -34,6 +34,7 @@ import {
   type BoxColliderSpec,
 } from "./colliders";
 import { DT, type Adventure, type Input, type Player } from "./types";
+import { PORTAL_RADIUS_X, PORTAL_RADIUS_Y, portalFrame, portalRotation, type Portal, type PortalPair } from "./portals";
 
 let ready: Promise<void> | undefined;
 export const initPhysics = (wasmModule?: unknown) =>
@@ -89,6 +90,15 @@ export interface ShipMotionResult extends Vec {
   impactRatio?: number;
 }
 
+const PLAYER_HALF_SEGMENT = 0.48;
+const PLAYER_RADIUS = 0.32;
+const PORTAL_RANGE = 45;
+const UPRIGHT = { x: 0, y: 0, z: 0, w: 1 };
+
+function capsuleDepth(normal: Vec) {
+  return PLAYER_RADIUS + PLAYER_HALF_SEGMENT * Math.abs(normal.y);
+}
+
 export class MovementWorld {
   world = new RAPIER.World({ x: 0, y: -7.5, z: 0 });
   controller = this.world.createCharacterController(0.025);
@@ -106,6 +116,12 @@ export class MovementWorld {
     { body: RAPIER.RigidBody; collider: RAPIER.Collider }
   >();
   private terrainCollider: RAPIER.Collider;
+  private portalSurfaces = new Map<number, { center: Vec; halfSize: Vec }>();
+  private portalObstacles = LAB_PORTAL_OBSTACLES.map(box => ({
+    box,
+    shape: new RAPIER.Cuboid(box.sx / 2, box.sy / 2, box.sz / 2),
+  }));
+  private portalCapsule = new RAPIER.Capsule(PLAYER_HALF_SEGMENT, PLAYER_RADIUS);
 
   constructor() {
     this.world.timestep = DT;
@@ -177,12 +193,16 @@ export class MovementWorld {
       }
 
     // Dawn Laboratory walls & roof
-    for (const b of LAB_BOXES)
-      this.world.createCollider(
-        RAPIER.ColliderDesc.cuboid(b.sx / 2, b.sy / 2, b.sz / 2)
-          .setTranslation(LAB.x + b.x, LAB.y + b.y, LAB.z + b.z)
+    for (const b of LAB_BOXES) {
+      const center = { x: LAB.x + b.x, y: LAB.y + b.y, z: LAB.z + b.z };
+      const halfSize = { x: b.sx / 2, y: b.sy / 2, z: b.sz / 2 };
+      const collider = this.world.createCollider(
+        RAPIER.ColliderDesc.cuboid(halfSize.x, halfSize.y, halfSize.z)
+          .setTranslation(center.x, center.y, center.z)
           .setCollisionGroups(WORLD_MEMBERSHIP),
       );
+      this.portalSurfaces.set(collider.handle, { center, halfSize });
+    }
 
     // Scenic obelisks, lore monoliths, outpost posts, cave walls, and warp gate frames
     for (const box of [
@@ -342,7 +362,7 @@ export class MovementWorld {
       RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x, p.y, p.z),
     );
     const collider = this.world.createCollider(
-      RAPIER.ColliderDesc.capsule(0.48, 0.32).setCollisionGroups(PLAYER_MEMBERSHIP),
+      RAPIER.ColliderDesc.capsule(PLAYER_HALF_SEGMENT, PLAYER_RADIUS).setCollisionGroups(PLAYER_MEMBERSHIP),
       body,
     );
     this.bodies.set(id, { body, collider });
@@ -445,7 +465,109 @@ export class MovementWorld {
     body.body.setNextKinematicTranslation(p);
   }
 
-  move(p: Player, i: Input) {
+  aimPortal(p: Player, other?: Portal): Portal | null {
+    if (p.seat >= 0 || p.planet) return null;
+    const eye = eyePosition(p);
+    const direction = viewDirection(p);
+    const ray = new RAPIER.Ray(eye, direction);
+    const hit = this.world.castRayAndGetNormal(ray, PORTAL_RANGE, true, undefined, ALL_SOLID_FOR_PLAYER);
+    if (!hit || hit.timeOfImpact < 0.15) return null;
+    const face = this.portalSurfaces.get(hit.collider.handle);
+    if (!face || this.portalObstacles.some(({ box, shape }) =>
+      shape.intersectsRay(ray, box, UPRIGHT, hit.timeOfImpact),
+    )) return null;
+
+    const normal = new Vector3().copy(hit.normal).round();
+    if (normal.dot(direction) > -0.15) return null;
+    const center = eye.addScaledVector(direction, hit.timeOfImpact);
+    const vertical = normal.y === 0;
+    if (vertical) center.y -= 0.3;
+    const radii = {
+      x: PORTAL_RADIUS_X,
+      y: vertical ? PORTAL_RADIUS_Y : 0,
+      z: vertical ? PORTAL_RADIUS_X : PORTAL_RADIUS_Y,
+    };
+    for (const axis of ["x", "y", "z"] as const) {
+      if (normal[axis]) continue;
+      const slack = face.halfSize[axis] - radii[axis] - 0.06;
+      if (slack < 0 || Math.abs(center[axis] - face.center[axis]) > slack + 0.8) return null;
+      center[axis] = Math.max(face.center[axis] - slack, Math.min(face.center[axis] + slack, center[axis]));
+    }
+
+    if (other && normal.dot(other.normal) > 0.99) {
+      const separation = center.clone().sub(other.center).applyQuaternion(portalFrame(normal).invert());
+      if (Math.abs(separation.z) < 0.1 &&
+          (separation.x / PORTAL_RADIUS_X) ** 2 + (separation.y / PORTAL_RADIUS_Y) ** 2 < 4.2) return null;
+    }
+
+    // Leave enough space to emerge upright, including under shallow overhangs.
+    const probe = center.clone().addScaledVector(normal, capsuleDepth(normal) + 0.12);
+    if (this.portalExitBlocked(probe)) return null;
+    return { center: { x: center.x, y: center.y, z: center.z }, normal: { x: normal.x, y: normal.y, z: normal.z } };
+  }
+
+  private portalExitBlocked(position: Vec) {
+    return !!this.world.intersectionWithShape(position, UPRIGHT, this.portalCapsule, undefined, ALL_SOLID_FOR_PLAYER) ||
+      this.portalObstacles.some(({ box, shape }) =>
+        shape.intersectsShape(box, UPRIGHT, this.portalCapsule, position, UPRIGHT),
+      );
+  }
+
+  private transitPortal(p: Player, i: Input, start: Vec, moved: Vec, entry: Portal, exit: Portal) {
+    const movement = new Vector3().copy(moved);
+    const velocity = new Vector3(p.vx, p.vy, p.vz);
+    const approach = -velocity.dot(entry.normal);
+    if (approach <= 0.01) return false;
+    const from = new Vector3().copy(start).sub(entry.center);
+    const reached = from.clone().add(movement);
+    const clearance = capsuleDepth(entry.normal) + 0.055;
+    // Use collision-resolved movement to ensure a wall in front of the portal still blocks it.
+    const distance = from.dot(entry.normal);
+    const contact = (distance - clearance) / (approach * DT);
+    if (distance < 0 || reached.dot(entry.normal) > clearance || contact > 1) return false;
+
+    // At speed, the collision controller may slide along the wall after entry.
+    // Test the contact point before the slide, while allowing a step onto a floor portal.
+    const crossing = contact > 0 ? from.addScaledVector(velocity, DT * contact) : reached;
+    const relative = crossing.clone().applyQuaternion(portalFrame(entry.normal).invert());
+    const vertical = entry.normal.y === 0;
+    if ((relative.x / (PORTAL_RADIUS_X - PLAYER_RADIUS)) ** 2 +
+        (relative.y / (PORTAL_RADIUS_Y - (vertical ? 0.72 : PLAYER_RADIUS))) ** 2 > 1) return false;
+
+    const rotation = portalRotation(entry, exit);
+    const exitCenter = new Vector3().copy(exit.center).addScaledVector(exit.normal, capsuleDepth(exit.normal) + 0.12);
+    const position = crossing.addScaledVector(entry.normal, -crossing.dot(entry.normal))
+      .applyQuaternion(rotation).add(exitCenter);
+    if (this.portalExitBlocked(position)) {
+      if (this.portalExitBlocked(exitCenter)) return false;
+      // An upright capsule can hit the floor when a floor portal maps to a wall.
+      // Nudge that exit toward the nearest clear point inside the aperture.
+      const blocked = position.clone();
+      position.copy(exitCenter);
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const probe = position.clone().lerp(blocked, 0.5);
+        if (this.portalExitBlocked(probe)) blocked.copy(probe);
+        else position.copy(probe);
+      }
+    }
+
+    const facing = viewDirection({ ...p, yaw: i.yaw, pitch: i.pitch }).applyQuaternion(rotation);
+    velocity.applyQuaternion(rotation);
+    Object.assign(p, {
+      x: position.x, y: position.y, z: position.z,
+      vx: velocity.x, vy: velocity.y, vz: velocity.z,
+      yaw: Math.atan2(-facing.x, -facing.z),
+      pitch: Math.max(-1.35, Math.min(1.35, Math.asin(Math.max(-1, Math.min(1, facing.y))))),
+      grounded: false,
+      grapple: null,
+      travel: p.travel + Math.hypot(moved.x, moved.z),
+      portalTransit: (p.portalTransit ?? 0) + 1,
+    });
+    this.reset(p.id, p);
+    return true;
+  }
+
+  move(p: Player, i: Input, portals?: PortalPair) {
     const body = this.bodies.get(p.id);
     if (!body) return;
     const nearPlanet = Object.values(SOLAR_SYSTEM).find(
@@ -550,6 +672,9 @@ export class MovementWorld {
     );
     const d = this.controller.computedMovement(),
       pos = body.body.translation();
+    if (portals?.blue && portals.orange &&
+        (this.transitPortal(p, i, pos, d, portals.blue, portals.orange) ||
+         this.transitPortal(p, i, pos, d, portals.orange, portals.blue))) return;
     p.x = Math.max(-HALF + 8, Math.min(HALF - 8, pos.x + d.x));
     p.y = pos.y + d.y;
     p.z = Math.max(-HALF + 8, Math.min(HALF - 8, pos.z + d.z));

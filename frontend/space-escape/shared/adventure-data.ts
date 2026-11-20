@@ -174,3 +174,13 @@ export const LAB_BOXES = [
   { x: -5, y: 7.3, z: 0, sx: 10, sy: 0.3, sz: 26 },
   { x: 7, y: 7.3, z: -5, sx: 6, sy: 0.3, sz: 16 },
 ];
+
+// Clearance for the authored lab props that otherwise have no movement colliders.
+// Dimensions follow generate_echo_assets.py. Archives already have world colliders.
+export const LAB_PORTAL_OBSTACLES = [
+  { x: LAB.x, y: LAB.y + 1.15, z: LAB.z - 4, sx: 4.3, sy: 1.5, sz: 1.7 },
+  { x: LAB.x, y: LAB.y + 2.05, z: LAB.z - 4.3, sx: 2.1, sy: 0.85, sz: 0.13 },
+  ...[-8, -3.5, 1, 5.5].map(z => ({
+    x: LAB.x - 7.4, y: LAB.y + 1.95, z: LAB.z + z, sx: 2.4, sy: 3.3, sz: 2.4,
+  })),
+];

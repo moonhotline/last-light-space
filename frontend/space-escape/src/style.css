@@ -775,6 +775,20 @@ body[data-phase] .landing-caption {
   justify-content: center;
   margin-bottom: 10px;
 }
+#portalControls:not([hidden]) {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+#portalControls button {
+  pointer-events: auto;
+}
+#portalOrange.active {
+  border-color: #ff9b43;
+  color: #ffc385;
+  background: rgba(121, 64, 19, 0.45);
+}
 .starflight-hud {
   margin-top: -4px;
   margin-bottom: 8px;

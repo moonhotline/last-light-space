@@ -60,6 +60,7 @@ import {
 import { DT, type Input, type Player, type Snapshot } from "../shared/types";
 import type { Simulation } from "../shared/simulation";
 import type { MovementWorld } from "../shared/physics";
+import type { PortalColor } from "../shared/portals";
 import {
   GameView,
   exportHoverboardGlb,
@@ -130,6 +131,7 @@ let panel:
   lastLore = -1,
   inventorySignature = "";
 let correction = { x: 0, y: 0, z: 0 };
+let portalPlacement: PortalColor | undefined;
 let SimulationCtor: typeof import("../shared/simulation").Simulation | null =
     null,
   MovementWorldCtor: typeof import("../shared/physics").MovementWorld | null =
@@ -253,6 +255,7 @@ function releaseSession() {
   prediction?.dispose();
   prediction = null;
   state = me = predicted = null;
+  portalPlacement = undefined;
   pending = [];
   reconnecting = false;
   sequence = 0;
@@ -283,10 +286,18 @@ function receive(next: Snapshot) {
   const previous = state?.phase;
   const previousCompleted = state?.completedAt ?? -1;
   const previousWarp = state?.adventure.ship.warpUntil ?? 0;
+  const previousTransit = me?.portalTransit ?? 0;
   state = next;
   me = state.players.find((p) => p.id === (room?.sessionId || "local")) || null;
   if (me && me.seat >= 0 && (next.adventure.ship.warpUntil ?? 0) > previousWarp) {
     yaw = me.yaw;
+    pending = [];
+    correction = { x: 0, y: 0, z: 0 };
+  }
+  const portaled = !!me && (me.portalTransit ?? 0) > previousTransit;
+  if (me && portaled) {
+    yaw = me.yaw;
+    pitch = me.pitch;
     pending = [];
     correction = { x: 0, y: 0, z: 0 };
   }
@@ -305,7 +316,7 @@ function receive(next: Snapshot) {
         if (predicted.seat < 0) prediction.move(predicted, i);
         prediction.step();
       }
-      if (before && previous !== "lobby" && distance(before, predicted) < 3)
+      if (!portaled && before && previous !== "lobby" && distance(before, predicted) < 3)
         correction = {
           x: before.x - predicted.x,
           y: Math.abs(before.y - predicted.y) < 1 ? before.y - predicted.y : 0,
@@ -546,6 +557,8 @@ function makeInput(): Input {
   const active = !panel && !reconnecting;
   const input: Input = {
     seq: ++sequence,
+    placePortal: active ? portalPlacement : undefined,
+    portalTransit: me?.portalTransit ?? 0,
     warpUntil: state?.adventure.ship.warpUntil ?? 0,
     forward: active
       ? Number(keys.has("KeyW") || keys.has("ArrowUp")) -
@@ -573,6 +586,7 @@ function makeInput(): Input {
     skate: active && isSkating,
   };
   pulses.clear();
+  portalPlacement = undefined;
   return input;
 }
 function step() {
@@ -871,6 +885,9 @@ function hud() {
     $("combo").classList.toggle("visible", me.combo >= 2);
   }
   text("dashStatus", p.grapple ? "牵引中 · Q 松开" : "瞄准岩壁");
+  $("portalControls").hidden = p.seat >= 0 || !!p.planet || !state.portals;
+  $("portalBlue").classList.toggle("active", !!state.portals?.blue);
+  $("portalOrange").classList.toggle("active", !!state.portals?.orange);
   text("weaponAmmo", playerReloadTime > 0 ? "换弹中... (R)" : `${playerAmmo} / 24`);
   const anchor = p.seat < 0 ? (sim?.physics || prediction)?.aim(p, 85) : null;
   const reticleEl = document.querySelector(".reticle");
@@ -1198,6 +1215,8 @@ addEventListener("keydown", (e) => {
   if (e.code === "Digit1") selectWeapon(view.activeWeapon === "rifle" ? "none" : "rifle");
   if (e.code === "Digit2") selectWeapon(view.activeWeapon === "grapple" ? "none" : "grapple");
   if (e.code === "Digit3") selectWeapon(view.activeWeapon === "camera" ? "none" : "camera");
+  if (e.code === "Digit4") placePortal("blue");
+  if (e.code === "Digit5") placePortal("orange");
   if (e.code === "Digit0" || e.code === "Backquote") selectWeapon("none");
   if (e.code === "KeyQ") selectWeapon(view.activeWeapon === "grapple" ? "none" : "grapple");
   if (e.code === "KeyT") command("mark");
@@ -1321,6 +1340,13 @@ $("snapshot") && ($("snapshot").onclick = () => takeSnapshot(view));
 $("snapPhoto") && ($("snapPhoto").onclick = () => takeSnapshot(view));
 $("toggleSkate") && ($("toggleSkate").onclick = toggleHoverboard);
 $("btnSwitchShip") && ($("btnSwitchShip").onclick = switchSpacecraft);
+function placePortal(color: PortalColor) {
+  if (panel || !state?.portals || !me || me.seat >= 0 || me.planet) return;
+  portalPlacement = color;
+  view.thirdPerson = false;
+}
+$("portalBlue").onclick = () => placePortal("blue");
+$("portalOrange").onclick = () => placePortal("orange");
 $("wepRifle") && ($("wepRifle").onclick = () => selectWeapon(view.activeWeapon === "rifle" ? "none" : "rifle"));
 $("wepGrapple") && ($("wepGrapple").onclick = () => selectWeapon(view.activeWeapon === "grapple" ? "none" : "grapple"));
 $("wepCamera") && ($("wepCamera").onclick = () => selectWeapon(view.activeWeapon === "camera" ? "none" : "camera"));
