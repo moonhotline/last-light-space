@@ -1,6 +1,7 @@
 import type { Vec } from "./map";
 import type { Inventory, ItemId } from "./adventure-data";
 import type { SpaceshipKind } from "./celestial";
+import type { PortalColor, PortalPair } from "./portals";
 export const DT = 1 / 30;
 export type Phase = "lobby" | "active" | "won";
 export interface Input {
@@ -19,6 +20,8 @@ export interface Input {
   brake: boolean;
   skate?: boolean;
   warpUntil?: number;
+  placePortal?: PortalColor;
+  portalTransit?: number;
 }
 export interface Player extends Vec {
   planet: string | null;
@@ -29,6 +32,7 @@ export interface Player extends Vec {
   yaw: number;
   pitch: number;
   ack: number;
+  portalTransit?: number;
   vx: number;
   vz: number;
   vy: number;
@@ -142,6 +146,7 @@ export interface Snapshot {
   event: string;
   eventId: number;
   adventure: Adventure;
+  portals?: PortalPair;
 }
 export const idleInput = (seq = 0): Input => ({
   seq,
@@ -171,6 +176,9 @@ export function parseInput(raw: unknown): Input | null {
   if (!Number.isSafeInteger(v.seq) || (v.seq as number) < 0) return null;
   return {
     seq: v.seq as number,
+    placePortal: v.placePortal === "blue" || v.placePortal === "orange" ? v.placePortal : undefined,
+    portalTransit: typeof v.portalTransit === "number" && Number.isSafeInteger(v.portalTransit) && v.portalTransit >= 0
+      ? v.portalTransit : undefined,
     warpUntil: typeof v.warpUntil === "number" && Number.isFinite(v.warpUntil) && v.warpUntil >= 0 ? v.warpUntil : 0,
     forward: Math.max(-1, Math.min(1, v.forward as number)),
     side: Math.max(-1, Math.min(1, v.side as number)),

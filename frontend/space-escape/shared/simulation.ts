@@ -48,6 +48,7 @@ export class Simulation {
       })),
       crystals: CRYSTALS.map((c) => ({ ...c, readyAt: 0 })),
       markers: [],
+      portals: {},
       earthAt: -1,
       completedAt: -1,
       event: "星球着陆准备就绪",
@@ -140,6 +141,7 @@ export class Simulation {
     if (this.s.players.length === 0) {
       this.s.phase = "lobby";
       this.s.host = "";
+      this.s.portals = {};
     }
   }
   player(id: string) {
@@ -248,7 +250,26 @@ export class Simulation {
     this.physics.syncDynamicEntities(s.adventure, s.time);
     for (const p of s.players) {
       const i = inputs.get(p.id)!;
-      if (p.seat < 0) this.physics.move(p, i);
+      if (i.portalTransit !== undefined && i.portalTransit < (p.portalTransit ?? 0)) {
+        i.yaw = p.yaw;
+        i.pitch = p.pitch;
+      }
+      if (p.seat < 0) {
+        const portals = (s.portals ??= {});
+        if (i.placePortal) {
+          const other = i.placePortal === "blue" ? portals.orange : portals.blue;
+          const placement = this.physics.aimPortal({ ...p, yaw: i.yaw, pitch: i.pitch }, other);
+          if (placement) {
+            portals[i.placePortal] = placement;
+            this.emit(portals.blue && portals.orange ? "双向传送门已连通" : "传送门已放置 · 放置另一扇即可连通");
+          } else {
+            this.emit("无法放置 · 对准曙光实验室有足够空间的平面");
+          }
+        }
+        // Older loaded clients do not show portals or understand portal heading updates.
+        const supportsPortals = this.latest.get(p.id)?.portalTransit !== undefined;
+        this.physics.move(p, i, supportsPortals ? portals : undefined);
+      }
       interactAdventure(this, p, i);
       if (i.fire) tool(this, p);
       if (i.interact && p.seat < 0) interactions.add(p.id);
