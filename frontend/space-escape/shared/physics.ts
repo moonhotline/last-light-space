@@ -1,11 +1,10 @@
-import { LAB, LAB_BOXES } from "./adventure-data";
+import { LAB, LAB_BOXES, SPAWN_FLEET } from "./adventure-data";
 import RAPIER from "@dimforge/rapier3d-compat";
-import { Quaternion, Vector3 } from "three";
+import { Euler, Quaternion, Vector3 } from "three";
 import { FOOT_OFFSET, surfaceOrientation, eyePosition, viewDirection } from "./surface";
 import {
   terrainMesh,
   groundAt,
-  ROCKS,
   HALF,
   BEACON_SITES,
   THERMALS,
@@ -16,12 +15,80 @@ import {
   projectToSphere,
   sphericalGravity,
   SOLAR_SYSTEM,
+  type SpaceshipKind,
 } from "./celestial";
-import { DT, type Input, type Player } from "./types";
+import {
+  CAVE_COLLIDERS,
+  COLLISION_GROUP,
+  GROVE_TREE_COLLIDERS,
+  LORE_COLLIDERS,
+  makeCollisionGroups,
+  MINERAL_COLLIDERS,
+  OUTPOST_COLLIDERS,
+  RESOURCE_COLLIDER_SPECS,
+  ROCK_COLLIDERS,
+  SCENIC_COLLIDERS,
+  SHIP_COLLIDER_SPECS,
+  SPAWN_NPC_COLLIDERS,
+  WARPGATE_FRAME_COLLIDERS,
+  type BoxColliderSpec,
+} from "./colliders";
+import { DT, type Adventure, type Input, type Player } from "./types";
+
 let ready: Promise<void> | undefined;
 export const initPhysics = (wasmModule?: unknown) =>
   (ready ??= wasmModule ? (RAPIER as any).init(wasmModule) : RAPIER.init());
 export const fuelCapacity = (level: number) => (level >= 1 ? 150 : 100);
+
+const ALL_SOLID_FOR_PLAYER = makeCollisionGroups(
+  COLLISION_GROUP.PLAYER,
+  COLLISION_GROUP.WORLD | COLLISION_GROUP.INTERACTABLE | COLLISION_GROUP.SHIP | COLLISION_GROUP.NPC,
+);
+const WORLD_ONLY_QUERY = makeCollisionGroups(
+  COLLISION_GROUP.PLAYER,
+  COLLISION_GROUP.WORLD,
+);
+const SHIP_SWEEP_GROUPS = makeCollisionGroups(
+  COLLISION_GROUP.SHIP,
+  COLLISION_GROUP.WORLD | COLLISION_GROUP.INTERACTABLE | COLLISION_GROUP.SHIP,
+);
+const WORLD_MEMBERSHIP = makeCollisionGroups(COLLISION_GROUP.WORLD, 0xffff);
+const INTERACTABLE_MEMBERSHIP = makeCollisionGroups(
+  COLLISION_GROUP.INTERACTABLE,
+  COLLISION_GROUP.PLAYER | COLLISION_GROUP.SHIP,
+);
+const SHIP_MEMBERSHIP = makeCollisionGroups(
+  COLLISION_GROUP.SHIP,
+  COLLISION_GROUP.PLAYER | COLLISION_GROUP.SHIP,
+);
+const NPC_MEMBERSHIP = makeCollisionGroups(COLLISION_GROUP.NPC, COLLISION_GROUP.PLAYER);
+const PLAYER_MEMBERSHIP = makeCollisionGroups(
+  COLLISION_GROUP.PLAYER,
+  COLLISION_GROUP.WORLD | COLLISION_GROUP.INTERACTABLE | COLLISION_GROUP.SHIP | COLLISION_GROUP.NPC,
+);
+
+function membershipFor(group: number): number {
+  if (group === COLLISION_GROUP.INTERACTABLE) return INTERACTABLE_MEMBERSHIP;
+  if (group === COLLISION_GROUP.SHIP) return SHIP_MEMBERSHIP;
+  if (group === COLLISION_GROUP.NPC) return NPC_MEMBERSHIP;
+  return WORLD_MEMBERSHIP;
+}
+
+export interface ShipMotionContext {
+  kind?: SpaceshipKind;
+  yaw?: number;
+  pitch?: number;
+  bank?: number;
+  flightRotation?: { x: number; y: number; z: number; w: number };
+}
+
+export interface ShipMotionResult extends Vec {
+  frontalCollision: boolean;
+  collided: boolean;
+  normal?: Vec;
+  impactRatio?: number;
+}
+
 export class MovementWorld {
   world = new RAPIER.World({ x: 0, y: -7.5, z: 0 });
   controller = this.world.createCharacterController(0.025);
@@ -29,58 +96,65 @@ export class MovementWorld {
     string,
     { body: RAPIER.RigidBody; collider: RAPIER.Collider }
   >();
+  shipBodies = new Map<
+    SpaceshipKind,
+    { body: RAPIER.RigidBody; collider: RAPIER.Collider }
+  >();
+  resourceColliders = new Map<number, RAPIER.Collider>();
+  droneBodies = new Map<
+    number,
+    { body: RAPIER.RigidBody; collider: RAPIER.Collider }
+  >();
   private terrainCollider: RAPIER.Collider;
+
   constructor() {
     this.world.timestep = DT;
     this.controller.enableAutostep(0.8, 0.25, false);
     this.controller.enableSnapToGround(0.35);
     this.controller.setMaxSlopeClimbAngle(Math.PI * 0.29);
     this.controller.setMinSlopeSlideAngle(Math.PI * 0.34);
+
     const m = terrainMesh();
     this.terrainCollider = this.world.createCollider(
-      RAPIER.ColliderDesc.trimesh(m.vertices, m.indices),
+      RAPIER.ColliderDesc.trimesh(m.vertices, m.indices).setCollisionGroups(WORLD_MEMBERSHIP),
     );
-    for (const r of ROCKS)
-      if (r.size > 3)
-        this.world.createCollider(
-          RAPIER.ColliderDesc.ball(r.size * 0.66).setTranslation(
-            r.x,
-            r.y + r.size * 0.48,
-            r.z,
-          ),
-        );
+
+    // Rocks (lowered threshold to > 1.2m from shared single source of truth)
+    for (const r of ROCK_COLLIDERS) {
+      this.world.createCollider(
+        RAPIER.ColliderDesc.ball(r.radius)
+          .setTranslation(r.x, r.y, r.z)
+          .setCollisionGroups(membershipFor(r.group)),
+      );
+    }
+
+    // Beacons
     for (const b of BEACON_SITES) {
       this.world.createCollider(
-        RAPIER.ColliderDesc.cylinder(0.18, 6).setTranslation(
-          b.x,
-          b.y + 0.18,
-          b.z,
-        ),
+        RAPIER.ColliderDesc.cylinder(0.18, 6)
+          .setTranslation(b.x, b.y + 0.18, b.z)
+          .setCollisionGroups(WORLD_MEMBERSHIP),
       );
       this.world.createCollider(
-        RAPIER.ColliderDesc.cylinder(0.6, 0.65).setTranslation(
-          b.x,
-          b.y + 1,
-          b.z + 3,
-        ),
+        RAPIER.ColliderDesc.cylinder(0.6, 0.65)
+          .setTranslation(b.x, b.y + 1, b.z + 3)
+          .setCollisionGroups(WORLD_MEMBERSHIP),
       );
       for (const side of [-1, 1]) {
         this.world.createCollider(
-          RAPIER.ColliderDesc.cuboid(0.63, 2.15, 0.75).setTranslation(
-            b.x + side * 2,
-            b.y + 2.45,
-            b.z,
-          ),
+          RAPIER.ColliderDesc.cuboid(0.63, 2.15, 0.75)
+            .setTranslation(b.x + side * 2, b.y + 2.45, b.z)
+            .setCollisionGroups(WORLD_MEMBERSHIP),
         );
         this.world.createCollider(
-          RAPIER.ColliderDesc.cuboid(0.55, 1.6, 0.6).setTranslation(
-            b.x + side * 1.68,
-            b.y + 6.4,
-            b.z,
-          ),
+          RAPIER.ColliderDesc.cuboid(0.55, 1.6, 0.6)
+            .setTranslation(b.x + side * 1.68, b.y + 6.4, b.z)
+            .setCollisionGroups(WORLD_MEMBERSHIP),
         );
       }
     }
+
+    // Ring Observatory arch
     const observatory = BEACON_SITES[1];
     for (let i = 0; i < 18; i++)
       if (![4, 5, 14].includes(i)) {
@@ -97,45 +171,200 @@ export class MovementWorld {
               y: 0,
               z: Math.sin(angle / 2),
               w: Math.cos(angle / 2),
-            }),
+            })
+            .setCollisionGroups(WORLD_MEMBERSHIP),
         );
       }
+
+    // Dawn Laboratory walls & roof
     for (const b of LAB_BOXES)
       this.world.createCollider(
-        RAPIER.ColliderDesc.cuboid(b.sx / 2, b.sy / 2, b.sz / 2).setTranslation(
-          LAB.x + b.x,
-          LAB.y + b.y,
-          LAB.z + b.z,
-        ),
+        RAPIER.ColliderDesc.cuboid(b.sx / 2, b.sy / 2, b.sz / 2)
+          .setTranslation(LAB.x + b.x, LAB.y + b.y, LAB.z + b.z)
+          .setCollisionGroups(WORLD_MEMBERSHIP),
       );
+
+    // Scenic obelisks, lore monoliths, outpost posts, cave walls, and warp gate frames
+    for (const box of [
+      ...SCENIC_COLLIDERS,
+      ...LORE_COLLIDERS,
+      ...OUTPOST_COLLIDERS,
+      ...CAVE_COLLIDERS,
+      ...WARPGATE_FRAME_COLLIDERS,
+    ]) {
+      this.addStaticBox(box);
+    }
+
+    // Echo Grove tree trunks & spawn alien/NPC static volumes
+    for (const cyl of [...GROVE_TREE_COLLIDERS, ...SPAWN_NPC_COLLIDERS]) {
+      this.world.createCollider(
+        RAPIER.ColliderDesc.cylinder(cyl.halfHeight, cyl.radius)
+          .setTranslation(cyl.x, cyl.y, cyl.z)
+          .setCollisionGroups(membershipFor(cyl.group)),
+      );
+    }
+
+    // Mineral specimen outcrops
+    for (const sphere of MINERAL_COLLIDERS) {
+      this.world.createCollider(
+        RAPIER.ColliderDesc.ball(sphere.radius)
+          .setTranslation(sphere.x, sphere.y, sphere.z)
+          .setCollisionGroups(membershipFor(sphere.group)),
+      );
+    }
+
+    // Dynamic resource node colliders (toggled when harvested / respawned)
+    for (const spec of RESOURCE_COLLIDER_SPECS) {
+      const col = this.world.createCollider(
+        RAPIER.ColliderDesc.cuboid(spec.hx, spec.hy, spec.hz)
+          .setTranslation(spec.x, spec.y, spec.z)
+          .setCollisionGroups(membershipFor(spec.group)),
+      );
+      this.resourceColliders.set(spec.id, col);
+    }
+
+    // Dynamic kinematic ship hull colliders for both fleet vessels
+    for (const kind of Object.keys(SPAWN_FLEET) as SpaceshipKind[]) {
+      const spawn = SPAWN_FLEET[kind];
+      const spec = SHIP_COLLIDER_SPECS[kind];
+      const q = new Quaternion().setFromEuler(new Euler(0, spawn.yaw, 0));
+      const body = this.world.createRigidBody(
+        RAPIER.RigidBodyDesc.kinematicPositionBased()
+          .setTranslation(spawn.position.x, spawn.position.y + spec.yOffset, spawn.position.z)
+          .setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }),
+      );
+      const collider = this.world.createCollider(
+        RAPIER.ColliderDesc.cuboid(spec.halfWidth, spec.halfHeight, spec.halfLength)
+          .setCollisionGroups(SHIP_MEMBERSHIP),
+        body,
+      );
+      this.shipBodies.set(kind, { body, collider });
+    }
+
+    // Dynamic kinematic drone colliders
+    for (let id = 0; id < 3; id++) {
+      const body = this.world.createRigidBody(
+        RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0, -1000, 0),
+      );
+      const collider = this.world.createCollider(
+        RAPIER.ColliderDesc.ball(1.5).setCollisionGroups(NPC_MEMBERSHIP),
+        body,
+      );
+      this.droneBodies.set(id, { body, collider });
+    }
+
     this.world.step();
   }
+
+  private addStaticBox(box: BoxColliderSpec) {
+    const desc = RAPIER.ColliderDesc.cuboid(box.hx, box.hy, box.hz)
+      .setTranslation(box.x, box.y, box.z)
+      .setCollisionGroups(membershipFor(box.group));
+    if (box.qw !== undefined) {
+      desc.setRotation({ x: box.qx ?? 0, y: box.qy ?? 0, z: box.qz ?? 0, w: box.qw });
+    } else if (box.rotY || box.rotZ) {
+      const q = new Quaternion().setFromEuler(new Euler(0, box.rotY ?? 0, box.rotZ ?? 0));
+      desc.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w });
+    }
+    this.world.createCollider(desc);
+  }
+
+  /** Synchronize dynamic ship hulls, resource nodes, and patrol drones into Rapier. */
+  syncDynamicEntities(adventure: Adventure, time: number) {
+    const activeShip = adventure.ship;
+    const activeKind: SpaceshipKind = activeShip.kind ?? "light_fighter";
+
+    for (const kind of Object.keys(SPAWN_FLEET) as SpaceshipKind[]) {
+      const entry = this.shipBodies.get(kind);
+      if (!entry) continue;
+      const spec = SHIP_COLLIDER_SPECS[kind];
+      if (kind === activeKind) {
+        const q = this.shipQuaternion(activeShip);
+        const up = new Vector3(0, 1, 0).applyQuaternion(q);
+        const tx = activeShip.x + up.x * spec.yOffset;
+        const ty = activeShip.y + up.y * spec.yOffset;
+        const tz = activeShip.z + up.z * spec.yOffset;
+        entry.body.setTranslation({ x: tx, y: ty, z: tz }, true);
+        entry.body.setNextKinematicTranslation({ x: tx, y: ty, z: tz });
+        entry.body.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
+        entry.body.setNextKinematicRotation({ x: q.x, y: q.y, z: q.z, w: q.w });
+      } else {
+        const spawn = SPAWN_FLEET[kind];
+        const q = new Quaternion().setFromEuler(new Euler(0, spawn.yaw, 0));
+        entry.body.setTranslation(
+          { x: spawn.position.x, y: spawn.position.y + spec.yOffset, z: spawn.position.z },
+          true,
+        );
+        entry.body.setNextKinematicTranslation({
+          x: spawn.position.x,
+          y: spawn.position.y + spec.yOffset,
+          z: spawn.position.z,
+        });
+        entry.body.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
+        entry.body.setNextKinematicRotation({ x: q.x, y: q.y, z: q.z, w: q.w });
+      }
+    }
+
+    for (const node of adventure.nodes) {
+      const col = this.resourceColliders.get(node.id);
+      if (col) col.setEnabled(node.readyAt <= time);
+    }
+
+    for (const d of adventure.drones) {
+      const entry = this.droneBodies.get(d.id);
+      if (!entry) continue;
+      const alive = d.hp > 0;
+      entry.collider.setEnabled(alive);
+      if (alive) {
+        entry.body.setTranslation({ x: d.x, y: d.y, z: d.z }, true);
+        entry.body.setNextKinematicTranslation({ x: d.x, y: d.y, z: d.z });
+      }
+    }
+
+    this.world.propagateModifiedBodyPositionsToColliders();
+    if (typeof (this.world as unknown as { updateSceneQueries?: () => void }).updateSceneQueries === "function") {
+      (this.world as unknown as { updateSceneQueries: () => void }).updateSceneQueries();
+    }
+  }
+
+  private shipQuaternion(ctx?: ShipMotionContext): Quaternion {
+    const base = ctx?.flightRotation
+      ? new Quaternion(ctx.flightRotation.x, ctx.flightRotation.y, ctx.flightRotation.z, ctx.flightRotation.w).normalize()
+      : new Quaternion();
+    const local = new Quaternion().setFromEuler(
+      new Euler(ctx?.pitch ?? 0, ctx?.yaw ?? 0, -(ctx?.bank ?? 0), "YXZ"),
+    );
+    return base.multiply(local);
+  }
+
   add(id: string, p: Vec) {
     const body = this.world.createRigidBody(
-      RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(
-        p.x,
-        p.y,
-        p.z,
-      ),
+      RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x, p.y, p.z),
     );
     const collider = this.world.createCollider(
-      RAPIER.ColliderDesc.capsule(0.48, 0.32),
+      RAPIER.ColliderDesc.capsule(0.48, 0.32).setCollisionGroups(PLAYER_MEMBERSHIP),
       body,
     );
     this.bodies.set(id, { body, collider });
     this.world.step();
   }
+
   remove(id: string) {
     const p = this.bodies.get(id);
     if (p) this.world.removeRigidBody(p.body);
     this.bodies.delete(id);
   }
+
   reset(id: string, p: Vec) {
     const b = this.bodies.get(id)?.body;
     b?.setTranslation(p, true);
     b?.setNextKinematicTranslation(p);
     this.world.propagateModifiedBodyPositionsToColliders();
+    if (typeof (this.world as unknown as { updateSceneQueries?: () => void }).updateSceneQueries === "function") {
+      (this.world as unknown as { updateSceneQueries: () => void }).updateSceneQueries();
+    }
   }
+
   private moveOnSphere(p: Player, i: Input) {
     const planet = SOLAR_SYSTEM[p.planet!];
     const body = this.bodies.get(p.id)!;
@@ -162,7 +391,10 @@ export class MovementWorld {
       Math.cos(i.yaw) * i.side - Math.sin(i.yaw) * i.forward,
       0,
       -Math.sin(i.yaw) * i.side - Math.cos(i.yaw) * i.forward,
-    ).divideScalar(Math.max(1, Math.hypot(i.forward, i.side))).applyQuaternion(frame).multiplyScalar(speed);
+    )
+      .divideScalar(Math.max(1, Math.hypot(i.forward, i.side)))
+      .applyQuaternion(frame)
+      .multiplyScalar(speed);
     tangent.lerp(target, 1 - Math.exp(-(wasGrounded ? 10 : 2) * DT));
     p.jumpHeld = i.jump;
     p.jetting = i.jet && p.fuel > 0;
@@ -181,7 +413,12 @@ export class MovementWorld {
     body.body.setRotation(frame, true);
     this.world.propagateModifiedBodyPositionsToColliders();
     const movement = tangent.clone().addScaledVector(up, radial).multiplyScalar(DT);
-    this.controller.computeColliderMovement(body.collider, movement, RAPIER.QueryFilterFlags.EXCLUDE_KINEMATIC);
+    this.controller.computeColliderMovement(
+      body.collider,
+      movement,
+      undefined,
+      ALL_SOLID_FOR_PLAYER,
+    );
     const next = position.clone().add(this.controller.computedMovement());
     const landed = radial <= 0 && next.distanceTo(center) <= planet.radius + FOOT_OFFSET + 0.08;
     const resolved = landed ? new Vector3().copy(projectToSphere(next, planet, FOOT_OFFSET)) : next;
@@ -207,14 +444,23 @@ export class MovementWorld {
     body.body.setNextKinematicRotation(q);
     body.body.setNextKinematicTranslation(p);
   }
+
   move(p: Player, i: Input) {
     const body = this.bodies.get(p.id);
     if (!body) return;
-    const nearPlanet = Object.values(SOLAR_SYSTEM).find(planet => planet.landable !== false &&
-      Math.hypot(p.x - planet.position.x, p.y - planet.position.y, p.z - planet.position.z) < planet.radius + 60);
+    const nearPlanet = Object.values(SOLAR_SYSTEM).find(
+      (planet) =>
+        planet.landable !== false &&
+        Math.hypot(p.x - planet.position.x, p.y - planet.position.y, p.z - planet.position.z) <
+          planet.radius + 60,
+    );
     if (!p.planet && p.y > groundAt(p.x, p.z) + 80 && (p.jetting || nearPlanet)) {
-      const nearby = Object.values(SOLAR_SYSTEM).find(planet => planet.landable !== false &&
-        Math.hypot(p.x - planet.position.x, p.y - planet.position.y, p.z - planet.position.z) < planet.radius + 260);
+      const nearby = Object.values(SOLAR_SYSTEM).find(
+        (planet) =>
+          planet.landable !== false &&
+          Math.hypot(p.x - planet.position.x, p.y - planet.position.y, p.z - planet.position.z) <
+            planet.radius + 260,
+      );
       if (nearby) {
         p.planet = nearby.id;
         const q = surfaceOrientation(p);
@@ -253,8 +499,7 @@ export class MovementWorld {
     p.skate = !!i.skate;
     const speed = p.dashTime > 0 ? 43 : p.skate ? (i.sprint ? 32 : 23) : i.sprint ? 23 : 15;
     const factor = 1 - Math.exp(-(p.grounded && !p.grapple ? (p.skate ? 3.5 : 10) : 0.75) * DT);
-    const dashForward =
-      p.dashTime > 0 && len === 1 && i.forward === 0 && i.side === 0;
+    const dashForward = p.dashTime > 0 && len === 1 && i.forward === 0 && i.side === 0;
     p.vx += ((dashForward ? -Math.sin(i.yaw) : dx) * speed - p.vx) * factor;
     p.vz += ((dashForward ? -Math.cos(i.yaw) : dz) * speed - p.vz) * factor;
     if (i.jump && !p.jumpHeld && p.grounded) {
@@ -264,23 +509,15 @@ export class MovementWorld {
     p.jumpHeld = i.jump;
     p.jetting = i.jet && p.fuel > 0;
     if (p.jetting) {
-      p.vy = Math.min(
-        p.level >= 1 ? 24 : 19,
-        p.vy + (p.level >= 1 ? 25 : 21) * DT,
-      );
+      p.vy = Math.min(p.level >= 1 ? 24 : 19, p.vy + (p.level >= 1 ? 25 : 21) * DT);
       p.fuel = Math.max(0, p.fuel - DT * 20);
     } else {
       p.vy = Math.max(-40, p.vy - 7.5 * DT);
-      if (p.grounded)
-        p.fuel = Math.min(fuelCapacity(p.level), p.fuel + DT * 24);
+      if (p.grounded) p.fuel = Math.min(fuelCapacity(p.level), p.fuel + DT * 24);
     }
     if (p.level >= 2)
       for (const t of THERMALS)
-        if (
-          distance(p, t) < t.radius &&
-          p.y < t.y + t.height &&
-          p.y > t.y - 2
-        ) {
+        if (distance(p, t) < t.radius && p.y < t.y + t.height && p.y > t.y - 2) {
           p.vy = Math.min(32, p.vy + 42 * DT);
           p.fuel = Math.min(fuelCapacity(p.level), p.fuel + DT * 15);
         }
@@ -308,7 +545,8 @@ export class MovementWorld {
     this.controller.computeColliderMovement(
       body.collider,
       { x: p.vx * DT, y: p.vy * DT, z: p.vz * DT },
-      RAPIER.QueryFilterFlags.EXCLUDE_KINEMATIC,
+      undefined,
+      ALL_SOLID_FOR_PLAYER,
     );
     const d = this.controller.computedMovement(),
       pos = body.body.translation();
@@ -328,9 +566,11 @@ export class MovementWorld {
     p.pitch = i.pitch;
     body.body.setNextKinematicTranslation(p);
   }
+
   step() {
     this.world.step();
   }
+
   aim(p: Player, range: number): Vec | null {
     const origin = eyePosition(p);
     const direction = viewDirection(p);
@@ -339,6 +579,7 @@ export class MovementWorld {
       range,
       true,
       RAPIER.QueryFilterFlags.EXCLUDE_KINEMATIC,
+      WORLD_ONLY_QUERY,
     );
     return hit && hit.timeOfImpact > 2
       ? {
@@ -348,41 +589,159 @@ export class MovementWorld {
         }
       : null;
   }
-  shipMotion(a: Vec, delta: Vec) {
-    // The basin floor owns downward terrain contact. Raised hull probes only
-    // stop facing obstacles, so a slope beneath a wing cannot brake the ship.
-    let fraction = 1;
-    let frontalCollision = false;
+
+  /**
+   * Oriented Rapier ShapeCast for solid obstacles (walls, obelisks, rocks, trees,
+   * warp gate frames, other ships) paired with slope-aware steep terrain sweep
+   * and tangential slide resolution.
+   */
+  shipMotion(a: Vec, delta: Vec, ctx?: ShipMotionContext): ShipMotionResult {
     const length = Math.hypot(delta.x, delta.y, delta.z);
     const horizontal = Math.hypot(delta.x, delta.z);
-    if (length < 0.0001) return { ...a, frontalCollision };
-    const direction = { x: delta.x / length, y: delta.y / length, z: delta.z / length };
-    for (const x of [-4, 0, 4])
-      for (const z of [-5, 0, 5]) {
-        const origin = { x: a.x + x, y: a.y + 3.5, z: a.z + z };
+    if (length < 0.0001) return { ...a, frontalCollision: false, collided: false };
+
+    const kind: SpaceshipKind = ctx?.kind ?? "light_fighter";
+    const spec = SHIP_COLLIDER_SPECS[kind];
+    const selfHandle = this.shipBodies.get(kind)?.collider.handle;
+    const q = this.shipQuaternion(ctx);
+    const rot = { x: q.x, y: q.y, z: q.z, w: q.w };
+    const shape = new RAPIER.Cuboid(spec.halfWidth * 0.86, spec.halfHeight * 0.85, spec.halfLength * 0.86);
+    const dir = { x: delta.x / length, y: delta.y / length, z: delta.z / length };
+
+    let bestFraction = 1;
+    let frontalCollision = false;
+    let hitNormal: Vec | undefined;
+    let collided = false;
+    let hitIsTerrain = false;
+
+    // Stage A: Oriented ShapeCast against all non-terrain solid colliders (buildings, rocks, obelisks, trees, warpgate frames, parked ships)
+    const hullUp = new Vector3(0, 1, 0).applyQuaternion(q);
+    const shapeOrigin = {
+      x: a.x + hullUp.x * spec.yOffset,
+      y: a.y + hullUp.y * spec.yOffset,
+      z: a.z + hullUp.z * spec.yOffset,
+    };
+    const solidHit = this.world.castShape(
+      shapeOrigin,
+      rot,
+      dir,
+      shape,
+      0.08,
+      length + 0.35,
+      true,
+      undefined,
+      SHIP_SWEEP_GROUPS,
+      undefined,
+      undefined,
+      (col) => col.handle !== this.terrainCollider.handle && col.handle !== selfHandle,
+    );
+
+    if (solidHit && solidHit.time_of_impact < length + 0.35) {
+      const n = solidHit.normal1;
+      const dot = n.x * dir.x + n.y * dir.y + n.z * dir.z;
+      const facing =
+        dot < -0.15 ||
+        (horizontal > 0.0001 && (n.x * delta.x + n.z * delta.z) / horizontal < -0.2);
+      if (dot < -0.05 || solidHit.time_of_impact > 0.001) {
+        const allowed = Math.max(0, solidHit.time_of_impact - 0.32) / length;
+        if (allowed < bestFraction) {
+          bestFraction = allowed;
+          frontalCollision ||= facing;
+          hitNormal = { x: n.x, y: n.y, z: n.z };
+          collided = true;
+          hitIsTerrain = false;
+        }
+      }
+    }
+
+    // Stage B: Oriented terrain-only cliff/mountain check (leaves gentle walkable slopes to floor contact)
+    const xOffsets = [-Math.max(4, spec.halfWidth), 0, Math.max(4, spec.halfWidth)];
+    const zOffsets = [-Math.max(5, spec.halfLength), 0, Math.max(5, spec.halfLength)];
+    const probeVec = new Vector3();
+    for (const ox of xOffsets) {
+      for (const oz of zOffsets) {
+        probeVec.set(ox, 3.5, oz).applyQuaternion(q);
+        const origin = { x: a.x + probeVec.x, y: a.y + probeVec.y, z: a.z + probeVec.z };
         this.world.intersectionsWithRay(
-          new RAPIER.Ray(origin, direction), length + 0.4, true,
+          new RAPIER.Ray(origin, dir),
+          length + 0.4,
+          true,
           (hit) => {
-            const facing = horizontal > 0.0001 &&
+            if (hit.collider.handle !== this.terrainCollider.handle) return true;
+            const facing =
+              horizontal > 0.0001 &&
               (hit.normal.x * delta.x + hit.normal.z * delta.z) / horizontal < -0.25;
-            if (hit.collider.handle === this.terrainCollider.handle &&
-              (!facing || hit.normal.y < 0 || hit.normal.y >= 0.55)) return true;
+            if (!facing || hit.normal.y < 0 || hit.normal.y >= 0.55) return true;
             const allowed = Math.max(0, hit.timeOfImpact - 0.4) / length;
-            if (allowed < 1) {
-              fraction = Math.min(fraction, allowed);
-              frontalCollision ||= facing;
+            if (allowed < bestFraction) {
+              bestFraction = allowed;
+              frontalCollision = true;
+              hitNormal = { x: hit.normal.x, y: hit.normal.y, z: hit.normal.z };
+              collided = true;
+              hitIsTerrain = true;
             }
-            // Continue: an ignored slope must not mask a building on the ray.
             return true;
           },
           RAPIER.QueryFilterFlags.EXCLUDE_KINEMATIC,
+          WORLD_ONLY_QUERY,
         );
       }
+    }
+
+    let nextX = a.x + delta.x * bestFraction;
+    let nextY = a.y + delta.y * bestFraction;
+    let nextZ = a.z + delta.z * bestFraction;
+
+    // Tangential slide resolution on glancing non-terrain obstacle hits so the ship glides past structures smoothly
+    if (collided && !hitIsTerrain && hitNormal && bestFraction < 0.99) {
+      const rem = 1 - bestFraction;
+      const remX = delta.x * rem;
+      const remY = delta.y * rem;
+      const remZ = delta.z * rem;
+      const into = remX * hitNormal.x + remY * hitNormal.y + remZ * hitNormal.z;
+      if (into < 0) {
+        const slideX = remX - hitNormal.x * into;
+        const slideY = remY - hitNormal.y * into;
+        const slideZ = remZ - hitNormal.z * into;
+        const slideLen = Math.hypot(slideX, slideY, slideZ);
+        if (slideLen > 0.02) {
+          const slideDir = { x: slideX / slideLen, y: slideY / slideLen, z: slideZ / slideLen };
+          const slideHit = this.world.castShape(
+            {
+              x: nextX + hullUp.x * spec.yOffset,
+              y: nextY + hullUp.y * spec.yOffset,
+              z: nextZ + hullUp.z * spec.yOffset,
+            },
+            rot,
+            slideDir,
+            shape,
+            0.05,
+            slideLen + 0.2,
+            false,
+            undefined,
+            SHIP_SWEEP_GROUPS,
+            undefined,
+            undefined,
+            (col) => col.handle !== this.terrainCollider.handle && col.handle !== selfHandle,
+          );
+          const slideFrac = slideHit
+            ? Math.max(0, slideHit.time_of_impact - 0.2) / slideLen
+            : 1;
+          nextX += slideX * Math.min(1, slideFrac);
+          nextY += slideY * Math.min(1, slideFrac);
+          nextZ += slideZ * Math.min(1, slideFrac);
+        }
+      }
+    }
+
     return {
-      x: a.x + delta.x * fraction,
-      y: a.y + delta.y * fraction,
-      z: a.z + delta.z * fraction,
+      x: nextX,
+      y: nextY,
+      z: nextZ,
       frontalCollision,
+      collided,
+      normal: hitNormal,
+      impactRatio: collided ? Math.min(1, 1 - bestFraction) : 0,
     };
   }
 
@@ -396,9 +755,11 @@ export class MovementWorld {
         l,
         true,
         RAPIER.QueryFilterFlags.EXCLUDE_KINEMATIC,
+        WORLD_ONLY_QUERY,
       )
     );
   }
+
   cameraDistance(a: Vec, b: Vec) {
     const d = { x: b.x - a.x, y: b.y - a.y, z: b.z - a.z },
       l = Math.hypot(d.x, d.y, d.z);
@@ -408,9 +769,11 @@ export class MovementWorld {
       l,
       true,
       RAPIER.QueryFilterFlags.EXCLUDE_KINEMATIC,
+      WORLD_ONLY_QUERY,
     );
     return hit ? Math.max(0.4, hit.timeOfImpact - 0.35) : l;
   }
+
   dispose() {
     this.world.free();
   }

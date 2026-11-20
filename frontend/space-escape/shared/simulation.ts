@@ -245,6 +245,7 @@ export class Simulation {
       } else inputs.set(p.id, { ...idleInput(), yaw: p.yaw, pitch: p.pitch });
     }
     tickShip(this, inputs);
+    this.physics.syncDynamicEntities(s.adventure, s.time);
     for (const p of s.players) {
       const i = inputs.get(p.id)!;
       if (p.seat < 0) this.physics.move(p, i);
@@ -254,6 +255,7 @@ export class Simulation {
     }
     this.physics.step();
     tickDrones(this);
+    this.physics.syncDynamicEntities(s.adventure, s.time);
     for (const p of s.players) {
       if (p.seat >= 0) continue;
       if (!p.planet && (p.y < groundAt(p.x, p.z) - 8 || p.y < -100)) this.respawn(p);

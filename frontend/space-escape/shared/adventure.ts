@@ -20,6 +20,7 @@ import {
   type ItemId,
 } from "./adventure-data";
 import { groundAt, distance3, distance, HALF, clamp, type Vec } from "./map";
+import { HOME_PLANET_SPHERE, SHIP_COLLIDER_SPECS } from "./colliders";
 import { eyePosition, viewDirection, FOOT_OFFSET, surfaceOrientation } from "./surface";
 import { SOLAR_SYSTEM, celestialCapture, geodesicArcDistance, projectToSphere, type SpaceshipKind } from "./celestial";
 import { celestialFlightFrame } from "./celestial-flight";
@@ -49,6 +50,7 @@ export function createAdventure(): Adventure {
       kind: "light_fighter",
       yaw: 0,
       yawVelocity: 0,
+      pitch: 0,
       vx: 0,
       vy: 0,
       vz: 0,
@@ -59,10 +61,14 @@ export function createAdventure(): Adventure {
       seats: ["", "", "", ""],
       grounded: true,
       thrust: 0,
+      throttle: 0.08,
+      boostPulse: 0,
       flightTime: 0,
       arrived: false,
       boosting: false,
       braking: false,
+      collisionId: 0,
+      collisionIntensity: 0,
     },
   };
 }
@@ -224,7 +230,8 @@ export function interactAdventure(sim: Simulation, p: Player, i: Input) {
         const body = frame.capture.body;
         ship.seats[p.seat] = "";
         p.seat = -1;
-        const exitRaw = new Vector3(ship.x, ship.y, ship.z).addScaledVector(frame.right, 6);
+        const exitOffset = Math.max(6, SHIP_COLLIDER_SPECS[ship.kind ?? "light_fighter"].halfWidth + 2.2);
+        const exitRaw = new Vector3(ship.x, ship.y, ship.z).addScaledVector(frame.right, exitOffset);
         const exit = projectToSphere(exitRaw, body, FOOT_OFFSET);
         Object.assign(p, {
           x: exit.x,
@@ -244,11 +251,12 @@ export function interactAdventure(sim: Simulation, p: Player, i: Input) {
       }
       ship.seats[p.seat] = "";
       p.seat = -1;
-      // Choose a clear side exit, validating height and line of sight.
+      // Choose a clear side exit outside the hull collider, validating height and line of sight.
+      const exitDist = Math.max(9, SPAWN_FLEET[ship.kind ?? "light_fighter"].halfWidth + 2.6);
       const exit = [-1, 1]
         .map((side) => ({
-          x: ship.x + Math.cos(ship.yaw) * side * 9,
-          z: ship.z - Math.sin(ship.yaw) * side * 9,
+          x: ship.x + Math.cos(ship.yaw) * side * exitDist,
+          z: ship.z - Math.sin(ship.yaw) * side * exitDist,
         }))
         .find(
           (v) =>
@@ -359,6 +367,9 @@ interface FlightTuning {
   turnResponse: number;
   maxBank: number;
   rollResponse: number;
+  maxPitch: number;
+  pitchResponse: number;
+  lateralAssist: number;
   acceleration: number;
   drag: number;
   surfaceSpeed: number;
@@ -371,13 +382,15 @@ interface FlightTuning {
 const FLIGHT_TUNING: Record<SpaceshipKind, FlightTuning> = {
   light_fighter: {
     turnRate: 1.8, turnResponse: 12, maxBank: 0.52, rollResponse: 12,
-    acceleration: 46, drag: 0.28, surfaceSpeed: 96, surfaceBoost: SHIP_MAX_SPEED,
-    cruiseSpeed: 280, cruiseBoost: SHIP_MAX_SPEED, climbForce: 150,
+    maxPitch: 0.36, pitchResponse: 8.5, lateralAssist: 1.65,
+    acceleration: 48, drag: 0.28, surfaceSpeed: 98, surfaceBoost: SHIP_MAX_SPEED,
+    cruiseSpeed: 285, cruiseBoost: SHIP_MAX_SPEED, climbForce: 150,
   },
   intergalactic: {
     turnRate: 0.8, turnResponse: 4, maxBank: 0.4, rollResponse: 5,
-    acceleration: 24, drag: 0.11, surfaceSpeed: 64, surfaceBoost: SHIP_MAX_SPEED,
-    cruiseSpeed: 260, cruiseBoost: SHIP_MAX_SPEED, climbForce: 112.5,
+    maxPitch: 0.22, pitchResponse: 4.5, lateralAssist: 0.85,
+    acceleration: 25, drag: 0.11, surfaceSpeed: 66, surfaceBoost: SHIP_MAX_SPEED,
+    cruiseSpeed: 265, cruiseBoost: SHIP_MAX_SPEED, climbForce: 112.5,
   },
 };
 
@@ -436,6 +449,7 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
     const kind = s.kind ?? "light_fighter";
     const tuning = FLIGHT_TUNING[kind];
     const inDeepSpace = s.y > 650 || Math.abs(s.x) > HALF - 10 || Math.abs(s.z) > HALF - 10;
+    const wasBoosting = Boolean(s.boosting);
     const boosting = !!pilot && i.sprint && !i.brake;
     const turn = pilot
       ? Math.atan2(Math.sin(i.yaw - s.yaw), Math.cos(i.yaw - s.yaw))
@@ -460,14 +474,62 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
     const radialSpeed = velocity.dot(frame.up);
     const tangent = velocity.clone().addScaledVector(frame.up, -radialSpeed);
     const previousSpeed = tangent.length();
+    const isClimbing = (i.jump || i.jet) && !!pilot;
+
+    // Three-axis pitch attitude coupled to climb, dive/brake, boost lift, and subtle mouse pitch trim
+    const mousePitchTrim = pilot && !s.grounded ? clamp(i.pitch, -0.65, 0.65) * 0.24 : 0;
+    const targetPitch = s.grounded
+      ? 0
+      : clamp(
+          (isClimbing ? tuning.maxPitch * 0.62 : 0) -
+            (i.brake ? tuning.maxPitch * 0.48 : 0) +
+            (boosting ? 0.055 : 0) +
+            clamp(radialSpeed / 130, -0.25, 0.25) * 0.42 +
+            mousePitchTrim,
+          -tuning.maxPitch,
+          tuning.maxPitch,
+        );
+    s.pitch = (s.pitch ?? 0) + (targetPitch - (s.pitch ?? 0)) * (1 - Math.exp(-tuning.pitchResponse * DT));
+
+    // Afterburner ignition transient pulse & smooth throttle staging
+    if (boosting && !wasBoosting && !s.grounded) {
+      s.boostPulse = 1.0;
+    } else {
+      s.boostPulse = (s.boostPulse ?? 0) * Math.exp(-5.2 * DT);
+      if (s.boostPulse < 0.005) s.boostPulse = 0;
+    }
+    const targetThrottle = s.grounded
+      ? (isClimbing ? 0.65 : 0.08)
+      : i.brake
+        ? 0.16
+        : boosting
+          ? 1.4
+          : Math.max(0.28, Math.min(1.0, Math.abs(i.forward) * 0.85 + Math.abs(i.side) * 0.35 + (isClimbing ? 0.45 : 0)));
+    s.throttle = (s.throttle ?? 0.08) + (targetThrottle - (s.throttle ?? 0.08)) * (1 - Math.exp(-7.5 * DT));
+
     // Shift ignites forward afterburners even without W. Braking takes priority.
     const boostMultiplier = kind === "intergalactic" ? 4 : 2.5;
     const forward = boosting ? Math.max(0, i.forward) + boostMultiplier - 1 : i.forward;
-    const acceleration = tuning.acceleration * (boosting ? 1.5 : 1);
-    tangent.multiplyScalar(drag)
+    const pulseFactor = 1 + (s.boostPulse ?? 0) * 0.22;
+    const acceleration = tuning.acceleration * (boosting ? 1.5 * pulseFactor : 1);
+
+    // Flight Assist: energy-conserving turn-carving redirects lateral drift into heading during powered turns,
+    // while pure coasting preserves full inertial momentum.
+    tangent.multiplyScalar(drag);
+    if (pilot && Math.abs(forward) > 0.05 && Math.abs(i.side) < 0.05 && !i.brake) {
+      const lateralSpeed = tangent.dot(frame.right);
+      if (Math.abs(lateralSpeed) > 0.01) {
+        const preLen = tangent.length();
+        const carve = 1 - Math.exp(-tuning.lateralAssist * DT);
+        tangent.addScaledVector(frame.right, -lateralSpeed * carve);
+        const postLen = tangent.length();
+        if (postLen > 0.001) tangent.multiplyScalar(preLen / postLen);
+      }
+    }
+    tangent
       .addScaledVector(frame.right, i.side * acceleration * DT)
       .addScaledVector(frame.forward, forward * acceleration * DT);
-    const isClimbing = (i.jump || i.jet) && !!pilot;
+
     const climbForce = isClimbing ? tuning.climbForce : 0;
     const vyDamping = i.brake ? 1.5 : (isClimbing ? 0.9 : 1.8);
     // X brakes lateral travel while actively descending; the floor resolves contact.
@@ -476,6 +538,15 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
       ? frame.capture.body.gravity * frame.capture.weight : 3;
     let radial = radialSpeed * Math.exp(-vyDamping * DT) +
       (climbForce - descentForce - (frame.capture ? 0 : gravity)) * DT;
+
+    // Gentle low-altitude ground-effect cushion when settling without forced brake dive
+    if (!inDeepSpace && !frame.capture && !isClimbing && !i.brake && radial < -5) {
+      const groundAlt = s.y - groundAt(s.x, s.z);
+      if (groundAlt > 0.2 && groundAlt < 16) {
+        radial *= Math.exp(-2.8 * (1 - groundAlt / 16) * DT);
+      }
+    }
+
     const speed = tangent.length();
     const speedLimit = inDeepSpace
       ? (boosting ? tuning.cruiseBoost : tuning.cruiseSpeed)
@@ -488,15 +559,33 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
     velocity.copy(tangent).addScaledVector(frame.up, radial);
     if (frame.capture) velocity.addScaledVector(new Vector3().copy(frame.capture.normal), -gravity * DT);
     // Cap the complete velocity after climb and gravity, including diagonal boost.
-    velocity.clampLength(0, SHIP_MAX_SPEED);
+    if (velocity.lengthSq() > SHIP_MAX_SPEED * SHIP_MAX_SPEED) {
+      velocity.setLength(SHIP_MAX_SPEED);
+    }
     s.vx = velocity.x;
     s.vy = velocity.y;
     s.vz = velocity.z;
-    const proposed = sim.physics.shipMotion(s, {
-      x: s.vx * DT,
-      y: s.vy * DT,
-      z: s.vz * DT,
-    });
+    const proposed = sim.physics.shipMotion(
+      s,
+      { x: s.vx * DT, y: s.vy * DT, z: s.vz * DT },
+      { kind, yaw: s.yaw, pitch: s.pitch ?? 0, bank: s.bank, flightRotation: s.flightRotation },
+    );
+    if (proposed.collided && proposed.normal) {
+      const n = proposed.normal;
+      const vn = s.vx * n.x + s.vy * n.y + s.vz * n.z;
+      if (vn < 0) {
+        const impactSpeed = -vn;
+        const landingSurface = n.y > 0.65;
+        const restitution = landingSurface ? 0 : (proposed.frontalCollision ? 0.18 : 0.08);
+        s.vx -= (1 + restitution) * vn * n.x;
+        s.vy -= (1 + restitution) * vn * n.y;
+        s.vz -= (1 + restitution) * vn * n.z;
+        if (impactSpeed > 6 && !landingSurface) {
+          s.collisionId = (s.collisionId ?? 0) + 1;
+          s.collisionIntensity = clamp(impactSpeed / 85, 0.15, 1);
+        }
+      }
+    }
     if (proposed.frontalCollision) {
       const collisionDrag = Math.exp(-12 * DT);
       s.vx *= collisionDrag;
@@ -526,11 +615,30 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
         s.grounded = false;
       }
     } else if (proposed.y > 650 || Math.abs(proposed.x) > HALF - 10 || Math.abs(proposed.z) > HALF - 10) {
-      // Deep space / interplanetary navigation
-      s.x = proposed.x;
-      s.y = proposed.y;
-      s.z = proposed.z;
-      s.grounded = false;
+      // Deep space / interplanetary navigation + solid spherical crust of the converged home planet
+      const hx = proposed.x - HOME_PLANET_SPHERE.center.x;
+      const hy = proposed.y - HOME_PLANET_SPHERE.center.y;
+      const hz = proposed.z - HOME_PLANET_SPHERE.center.z;
+      const hDist = Math.hypot(hx, hy, hz) || 1;
+      const homeFloor = HOME_PLANET_SPHERE.radius + 2.0;
+      if (hDist < homeFloor) {
+        const nx = hx / hDist, ny = hy / hDist, nz = hz / hDist;
+        s.x = HOME_PLANET_SPHERE.center.x + nx * homeFloor;
+        s.y = HOME_PLANET_SPHERE.center.y + ny * homeFloor;
+        s.z = HOME_PLANET_SPHERE.center.z + nz * homeFloor;
+        const vn = s.vx * nx + s.vy * ny + s.vz * nz;
+        if (vn < 0) {
+          s.vx -= nx * vn;
+          s.vy -= ny * vn;
+          s.vz -= nz * vn;
+        }
+        s.grounded = true;
+      } else {
+        s.x = proposed.x;
+        s.y = proposed.y;
+        s.z = proposed.z;
+        s.grounded = false;
+      }
     } else {
       // Kepler local basin
       s.x = clamp(proposed.x, -HALF + 20, HALF - 20);
@@ -541,8 +649,9 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
         ),
       );
       s.y = clamp(proposed.y, floor, 650);
-      s.grounded = s.y <= floor + 0.15;
-      if (s.grounded && s.vy < 0) s.vy = 0;
+      const landedOnStructure = Boolean(proposed.collided && proposed.normal && proposed.normal.y > 0.65 && s.vy <= 0.5);
+      s.grounded = s.y <= floor + 0.15 || landedOnStructure;
+      if (s.grounded && (s.vy < 0 || landedOnStructure)) s.vy = 0;
     }
     s.thrust =
       Math.abs(forward) + Math.abs(i.side) + (isClimbing ? 1.5 : 0);

@@ -98,6 +98,7 @@ export interface AdventureShip extends Vec {
   flightRotation?: { x: number; y: number; z: number; w: number };
   yaw: number;
   yawVelocity?: number;
+  pitch?: number;
   vx: number;
   vy: number;
   vz: number;
@@ -108,11 +109,15 @@ export interface AdventureShip extends Vec {
   seats: string[];
   grounded: boolean;
   thrust: number;
+  throttle?: number;
+  boostPulse?: number;
   flightTime: number;
   arrived: boolean;
   boosting?: boolean;
   braking?: boolean;
   warpUntil?: number;
+  collisionId?: number;
+  collisionIntensity?: number;
 }
 export type Ship = AdventureShip;
 export interface Adventure {

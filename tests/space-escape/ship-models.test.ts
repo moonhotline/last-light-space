@@ -100,10 +100,10 @@ test("registering AdventureView's fighter removes the duplicate fleet container"
   assert.deepEqual(externalFighter.position.toArray(), [25, 900, -80], "AdventureView owns fighter animation");
 });
 
-test("asset hydration retains every existing corridor, ship, alien and mineral node", async () => {
+test("asset hydration retains every existing ship, alien and mineral node without corridor interior", async () => {
   const system = createSystem();
   const containers = [
-    ...system.shipMeshes.values(), system.corridorGroup,
+    ...system.shipMeshes.values(),
     system.alien1Model!, system.alien2Model!, system.mineralsModel!,
   ];
   const existing: { node: THREE.Object3D; parent: THREE.Object3D | null }[] = [];
@@ -113,7 +113,7 @@ test("asset hydration retains every existing corridor, ship, alien and mineral n
   }
   const { loader } = fixtureLoader([
     ...shipAssets.map(([, , url]) => url),
-    ...["corridor", "alien1", "alien2", "minerals"].map((key) => `/assets/models/${key}/scene.gltf`),
+    ...["alien1", "alien2", "minerals"].map((key) => `/assets/models/${key}/scene.gltf`),
   ]);
   for (let pass = 0; pass < 2; pass++) {
     await system.loadAssets(loader);
@@ -124,6 +124,7 @@ test("asset hydration retains every existing corridor, ship, alien and mineral n
       model.traverse((node) => existing.push({ node, parent: node.parent }));
     }
   }
+  assert.equal(system.downloadedAssets.has("corridor"), false, "corridor interior must stay permanently removed");
 });
 
 test("failed ship downloads preserve rendered models and never synthesize fallback hulls", async () => {

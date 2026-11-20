@@ -130,7 +130,6 @@ let panel:
   lastLore = -1,
   inventorySignature = "";
 let correction = { x: 0, y: 0, z: 0 };
-let nearCorridorHeld = false;
 let SimulationCtor: typeof import("../shared/simulation").Simulation | null =
     null,
   MovementWorldCtor: typeof import("../shared/physics").MovementWorld | null =
@@ -263,7 +262,6 @@ function releaseSession() {
   correction = { x: 0, y: 0, z: 0 };
   lastEvent = 0;
   lastLore = -1;
-  nearCorridorHeld = false;
   view.lastMe = "";
   delete document.body.dataset.phase;
   $("journal").hidden = true;
@@ -300,6 +298,7 @@ function receive(next: Snapshot) {
     if (prediction) {
       const before = predicted;
       predicted = structuredClone(me);
+      prediction.syncDynamicEntities(next.adventure, next.time);
       prediction.reset(me.id, me);
       pending = pending.filter((i) => i.seq > me!.ack);
       for (const i of pending) {
@@ -612,22 +611,6 @@ function step() {
     const guideFollowing = view.interplanetary.guideDialogue(me, input.interact);
     if (guideFollowing !== null)
       notice(guideFollowing ? "Blerk 已加入队伍" : "Blerk 暂时停留在原地");
-    if (input.interact && state) {
-      const ship = state.adventure.ship;
-      if (me.seat < 0 && shipBoardingTarget(me, ship) && (ship.grounded || view.interplanetary.inCorridor)) {
-        if (!nearCorridorHeld) {
-          nearCorridorHeld = true;
-          if (view.interplanetary.inCorridor) {
-            view.interplanetary.toggleCorridor(false);
-            recordTrick("返回母星地表", 120);
-          }
-        }
-      } else {
-        nearCorridorHeld = false;
-      }
-    } else {
-      nearCorridorHeld = false;
-    }
     sim.input(me.id, input);
     sim.tick();
     receive(sim.snapshot());
@@ -636,22 +619,6 @@ function step() {
     const guideFollowing = view.interplanetary.guideDialogue(me, i.interact);
     if (guideFollowing !== null)
       notice(guideFollowing ? "Blerk 已加入队伍" : "Blerk 暂时停留在原地");
-    if (i.interact && state) {
-      const ship = state.adventure.ship;
-      if (me.seat < 0 && shipBoardingTarget(me, ship) && (ship.grounded || view.interplanetary.inCorridor)) {
-        if (!nearCorridorHeld) {
-          nearCorridorHeld = true;
-          if (view.interplanetary.inCorridor) {
-            view.interplanetary.toggleCorridor(false);
-            recordTrick("返回母星地表", 120);
-          }
-        }
-      } else {
-        nearCorridorHeld = false;
-      }
-    } else {
-      nearCorridorHeld = false;
-    }
     room.send("input", i);
     pending.push(i);
     if (pending.length > 120) {
@@ -675,9 +642,6 @@ function prompt() {
     return { label: ship.grounded ? "E · 已着陆，可以离舱" : "", progress: 0 };
   const boarding = shipBoardingTarget(me, ship);
   if (boarding) {
-    if (view.interplanetary.inCorridor) {
-      return { label: "E · 离开飞船走廊返回地表", progress: 0 };
-    }
     return {
       label: `E · 登上${boarding.name}`,
       progress: ship.progress,
@@ -1347,11 +1311,6 @@ $("closeLore").onclick = resumeGame;
 $("heal").onclick = () => {
   sim ? sim.action(me!.id, "heal") : room?.send("action", "heal");
 };
-function toggleCorridorView() {
-  const inside = view.interplanetary.toggleCorridor();
-  const el = $("btnCorridor");
-  if (el) el.classList.toggle("active", inside);
-}
 function switchSpacecraft() {
   notice(me && me.seat >= 0
     ? "请先降落离舱，再靠近另一艘飞船按 E 登船"
@@ -1361,7 +1320,6 @@ function switchSpacecraft() {
 $("snapshot") && ($("snapshot").onclick = () => takeSnapshot(view));
 $("snapPhoto") && ($("snapPhoto").onclick = () => takeSnapshot(view));
 $("toggleSkate") && ($("toggleSkate").onclick = toggleHoverboard);
-$("btnCorridor") && ($("btnCorridor").onclick = toggleCorridorView);
 $("btnSwitchShip") && ($("btnSwitchShip").onclick = switchSpacecraft);
 $("wepRifle") && ($("wepRifle").onclick = () => selectWeapon(view.activeWeapon === "rifle" ? "none" : "rifle"));
 $("wepGrapple") && ($("wepGrapple").onclick = () => selectWeapon(view.activeWeapon === "grapple" ? "none" : "grapple"));
@@ -1568,13 +1526,8 @@ function handleChatCommand(cmdText: string) {
     }
     return;
   }
-  if (cmd === "/corridor") {
-    view.interplanetary.toggleCorridor(!view.interplanetary.inCorridor);
-    notice(view.interplanetary.inCorridor ? "已进入飞船内部走廊" : "已返回外部空间");
-    return;
-  }
   if (cmd === "/help") {
-    notice("可用指令: /boost (加速), /mercury (跃迁水星), /repair (修复飞船), /corridor (走廊)");
+    notice("可用指令: /boost (加速), /mercury (跃迁水星), /repair (修复飞船)");
     return;
   }
   notice(`未知指令: ${cmd} · 输入 /help 查看`);
