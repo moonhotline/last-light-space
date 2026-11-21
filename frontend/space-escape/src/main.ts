@@ -17,6 +17,7 @@ import {
   connectPartyRoom,
   roomCode,
   type MultiplayerRoom,
+  type RoomEndpoint,
 } from "./party-room";
 import {
   createIcons,
@@ -122,7 +123,7 @@ let panel:
     | "archive"
     | "feedback"
     | null = "landing",
-  endpoint = "",
+  endpoint: RoomEndpoint | null = null,
   muted = false,
   loading = true,
   reconnecting = false,
@@ -1651,8 +1652,9 @@ void Promise.all([
     .catch(() => ({ url: "" })),
 ])
   .then(([,, config]: [unknown, unknown, any]) => {
+    const overrideUrl = import.meta.env.VITE_ROOM_URL;
     const url =
-      import.meta.env.VITE_ROOM_URL ||
+      overrideUrl ||
       config.url ||
       (config.sameOrigin
         ? `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}`
@@ -1666,8 +1668,12 @@ void Promise.all([
         ["http:", "https:", "ws:", "wss:"].includes(p.protocol) &&
         !p.username &&
         !p.password
-      )
-        endpoint = url;
+      ) {
+        endpoint = { url };
+        if (!overrideUrl && config.url && config.transport === "partyserver") {
+          endpoint.transport = config.transport;
+        }
+      }
     } catch {
       /* Solo stays available offline after assets load. */
     }
@@ -1714,7 +1720,7 @@ Object.assign(window, {
         : null,
     position: () => (predicted ? { ...predicted } : me ? { ...me } : null),
     room: () => room?.roomId,
-    endpoint: () => endpoint,
+    endpoint: () => endpoint?.url ?? "",
     view: () => view,
     solarSystem: SOLAR_SYSTEM,
     rendering: () => ({

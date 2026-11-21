@@ -20,7 +20,10 @@ const output = new URL('.vercel/output/', gameRoot);
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 await cp(dist, new URL('static/', output), { recursive: true });
-await writeFile(new URL('static/connection.json', output), JSON.stringify({ url: endpoint.href }) + '\n');
+await writeFile(new URL('static/connection.json', output), JSON.stringify({
+  url: endpoint.href,
+  transport: 'partyserver',
+}) + '\n');
 await writeFile(new URL('config.json', output), JSON.stringify({
   version: 3,
   routes: [
