@@ -3,24 +3,14 @@ import { Client } from "@colyseus/sdk";
 class PartySocket {
   readonly id: string;
   private ws: WebSocket;
-  constructor(options: {
-    host: string;
-    room: string;
-    query?: Record<string, string | undefined>;
-    maxRetries?: number;
-    connectionTimeout?: number;
-  }) {
+  constructor(endpoint: string, roomId: string, name: string) {
     this.id = "p_" + Math.random().toString(36).slice(2, 10);
-    const host = options.host;
-    const proto = typeof location !== "undefined" && location.protocol === "https:" ? "wss:" : "ws:";
-    const params = new URLSearchParams();
-    if (options.query) {
-      for (const [k, v] of Object.entries(options.query)) {
-        if (v !== undefined) params.set(k, v);
-      }
-    }
-    const qs = params.toString() ? `?${params.toString()}` : "";
-    const url = `${proto}//${host}/parties/main/${options.room}${qs}`;
+    const url = new URL(endpoint);
+    url.protocol =
+      url.protocol === "https:" || url.protocol === "wss:" ? "wss:" : "ws:";
+    url.pathname = `/parties/main/${roomId}`;
+    url.search = new URLSearchParams({ name, _pk: this.id }).toString();
+    url.hash = "";
     this.ws = new WebSocket(url);
   }
   addEventListener(type: string, listener: (event: any) => void) {
@@ -39,6 +29,11 @@ class PartySocket {
 
 type Handler<T = unknown> = (value: T) => void;
 
+export interface RoomEndpoint {
+  url: string;
+  transport?: "partyserver";
+}
+
 export interface MultiplayerRoom {
   roomId: string;
   sessionId: string;
@@ -49,20 +44,9 @@ export interface MultiplayerRoom {
   leave(): Promise<void>;
 }
 
-function endpointHost(endpoint: string) {
-  const url = new URL(endpoint);
-  return url.host;
-}
-
 function openRoom(endpoint: string, roomId: string, name: string) {
   return new Promise<MultiplayerRoom>((resolve, reject) => {
-    const socket = new PartySocket({
-      host: endpointHost(endpoint),
-      room: roomId,
-      query: { name },
-      maxRetries: 8,
-      connectionTimeout: 12_000,
-    });
+    const socket = new PartySocket(endpoint, roomId, name);
     const handlers = new Map<string, Set<Handler>>();
     const errors = new Set<Handler<Error>>();
     const leaves = new Set<Handler<{ code: number; reason: string }>>();
@@ -156,13 +140,17 @@ export const roomCode = () =>
     .toUpperCase();
 
 export const connectPartyRoom = (
-  endpoint: string,
+  { url, transport }: RoomEndpoint,
   roomId: string,
   name: string,
   create = false,
 ) => {
-  if (endpoint.includes("partykit") || endpoint.includes("/parties/")) {
-    return openRoom(endpoint, roomId, name);
+  if (
+    transport === "partyserver" ||
+    url.includes("partykit") ||
+    url.includes("/parties/")
+  ) {
+    return openRoom(url, roomId, name);
   }
-  return openColyseusRoom(endpoint, roomId, name, create);
+  return openColyseusRoom(url, roomId, name, create);
 };
