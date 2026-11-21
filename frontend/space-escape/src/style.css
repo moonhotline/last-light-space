@@ -775,16 +775,16 @@ body[data-phase] .landing-caption {
   justify-content: center;
   margin-bottom: 10px;
 }
-#portalControls:not([hidden]) {
+.portal-controls:not([hidden]) {
   display: flex;
   justify-content: center;
   gap: 8px;
   margin-bottom: 6px;
 }
-#portalControls button {
+.portal-controls button {
   pointer-events: auto;
 }
-#portalOrange.active {
+.wep-slot[data-portal="orange"].active {
   border-color: #ff9b43;
   color: #ffc385;
   background: rgba(121, 64, 19, 0.45);
@@ -985,7 +985,8 @@ body[data-paused="true"] .reticle {
 }
 .hide-hud .topline,
 .hide-hud #hud,
-.hide-hud #toast {
+.hide-hud #toast,
+.hide-hud #touchControls .portal-controls {
   visibility: hidden;
 }
 .hide-hud[data-paused="true"] .topline {
@@ -1244,6 +1245,18 @@ body[data-paused="true"] .reticle {
     position: fixed;
     inset: 0;
   }
+  #touchControls .portal-controls {
+    position: absolute;
+    right: 20px;
+    bottom: 364px;
+    margin: 0;
+  }
+  #touchControls .portal-controls button {
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    touch-action: manipulation;
+  }
   .dpad {
     position: fixed;
     bottom: 165px;
@@ -1305,6 +1318,13 @@ body[data-paused="true"] .reticle {
   }
   body[data-paused="true"] #touchControls {
     display: none;
+  }
+}
+@media (max-width: 760px) and (max-height: 470px) {
+  #touchControls .portal-controls {
+    top: 58px;
+    right: 150px;
+    bottom: auto;
   }
 }
 @media (max-height: 600px) {

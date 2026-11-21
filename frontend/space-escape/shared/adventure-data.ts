@@ -183,4 +183,7 @@ export const LAB_PORTAL_OBSTACLES = [
   ...[-8, -3.5, 1, 5.5].map(z => ({
     x: LAB.x - 7.4, y: LAB.y + 1.95, z: LAB.z + z, sx: 2.4, sy: 3.3, sz: 2.4,
   })),
+  ...[-9.6, 9.6].flatMap(x => [-11, -5, 1, 7, 12].map(z => ({
+    x: LAB.x + x, y: LAB.y + 3.7, z: LAB.z + z, sx: 0.3, sy: 7, sz: 0.3,
+  }))),
 ];

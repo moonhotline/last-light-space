@@ -60,7 +60,7 @@ import {
 import { DT, type Input, type Player, type Snapshot } from "../shared/types";
 import type { Simulation } from "../shared/simulation";
 import type { MovementWorld } from "../shared/physics";
-import type { PortalColor } from "../shared/portals";
+import { PORTAL_COLORS, type PortalColor } from "../shared/portals";
 import {
   GameView,
   exportHoverboardGlb,
@@ -132,6 +132,11 @@ let panel:
   inventorySignature = "";
 let correction = { x: 0, y: 0, z: 0 };
 let portalPlacement: PortalColor | undefined;
+const portalControlRows = document.querySelectorAll<HTMLElement>(".portal-controls");
+const portalButtons = PORTAL_COLORS.map(color => ({
+  color,
+  buttons: document.querySelectorAll<HTMLButtonElement>(`[data-portal="${color}"]`),
+}));
 let SimulationCtor: typeof import("../shared/simulation").Simulation | null =
     null,
   MovementWorldCtor: typeof import("../shared/physics").MovementWorld | null =
@@ -885,9 +890,12 @@ function hud() {
     $("combo").classList.toggle("visible", me.combo >= 2);
   }
   text("dashStatus", p.grapple ? "牵引中 · Q 松开" : "瞄准岩壁");
-  $("portalControls").hidden = p.seat >= 0 || !!p.planet || !state.portals;
-  $("portalBlue").classList.toggle("active", !!state.portals?.blue);
-  $("portalOrange").classList.toggle("active", !!state.portals?.orange);
+  const portals = state.portals;
+  const hidePortals = p.seat >= 0 || !!p.planet || !portals;
+  portalControlRows.forEach(row => { row.hidden = hidePortals; });
+  for (const { color, buttons } of portalButtons) {
+    buttons.forEach(button => button.classList.toggle("active", !!portals?.[color]));
+  }
   text("weaponAmmo", playerReloadTime > 0 ? "换弹中... (R)" : `${playerAmmo} / 24`);
   const anchor = p.seat < 0 ? (sim?.physics || prediction)?.aim(p, 85) : null;
   const reticleEl = document.querySelector(".reticle");
@@ -1345,8 +1353,9 @@ function placePortal(color: PortalColor) {
   portalPlacement = color;
   view.thirdPerson = false;
 }
-$("portalBlue").onclick = () => placePortal("blue");
-$("portalOrange").onclick = () => placePortal("orange");
+for (const { color, buttons } of portalButtons) {
+  buttons.forEach(button => { button.onclick = () => placePortal(color); });
+}
 $("wepRifle") && ($("wepRifle").onclick = () => selectWeapon(view.activeWeapon === "rifle" ? "none" : "rifle"));
 $("wepGrapple") && ($("wepGrapple").onclick = () => selectWeapon(view.activeWeapon === "grapple" ? "none" : "grapple"));
 $("wepCamera") && ($("wepCamera").onclick = () => selectWeapon(view.activeWeapon === "camera" ? "none" : "camera"));

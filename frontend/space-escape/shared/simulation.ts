@@ -253,6 +253,7 @@ export class Simulation {
       if (i.portalTransit !== undefined && i.portalTransit < (p.portalTransit ?? 0)) {
         i.yaw = p.yaw;
         i.pitch = p.pitch;
+        i.placePortal = undefined;
       }
       if (p.seat < 0) {
         const portals = (s.portals ??= {});
