@@ -45,7 +45,7 @@ export function mergeMachinedParts(name: string, parts: BufferGeometry[], materi
   return mesh;
 }
 
-export function finish(color: number, metalness: number, roughness: number, emissive?: number) {
+export function finish(color: number, metalness: number, roughness: number, emissive = 0) {
   return new MeshStandardMaterial({ color, roughness, metalness, emissive, emissiveIntensity: emissive ? 1.25 : 0 });
 }
 
