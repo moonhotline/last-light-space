@@ -431,9 +431,9 @@
             <button id="wepCamera" class="wep-slot" type="button"><kbd>3</kbd> 拍立得复古相机</button>
             <span id="weaponAmmo" class="weapon-ammo">24 / 24</span>
           </div>
-          <div id="portalControls" hidden>
-            <button id="portalBlue" class="wep-slot" type="button" title="对准曙光实验室墙面、地板或顶板"><kbd>4</kbd> 蓝色传送门</button>
-            <button id="portalOrange" class="wep-slot" type="button" title="对准曙光实验室墙面、地板或顶板"><kbd>5</kbd> 橙色传送门</button>
+          <div class="portal-controls" hidden>
+            <button id="portalBlue" class="wep-slot" data-portal="blue" type="button" title="对准曙光实验室墙面、地板或顶板"><kbd>4</kbd> 蓝色传送门</button>
+            <button id="portalOrange" class="wep-slot" data-portal="orange" type="button" title="对准曙光实验室墙面、地板或顶板"><kbd>5</kbd> 橙色传送门</button>
           </div>
           <div class="control-row">
             <span><kbd>Q</kbd> 钩锁 <b id="dashStatus">就绪</b></span
@@ -452,6 +452,10 @@
         </div>
       </div>
       <div id="touchControls">
+        <div class="portal-controls" hidden>
+          <button class="wep-slot" data-portal="blue" type="button" aria-label="放置蓝色传送门">蓝门</button>
+          <button class="wep-slot" data-portal="orange" type="button" aria-label="放置橙色传送门">橙门</button>
+        </div>
         <button id="touchFire" class="touch-action" aria-label="切割与射击">
           射击
         </button>

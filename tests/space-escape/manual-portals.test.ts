@@ -87,6 +87,27 @@ test("a floor and ceiling pair supports repeated falling in the same direction",
   assert.deepEqual(sim.snapshot().portals, sim.s.portals);
 });
 
+test("a portal placement queued before transit cannot move a portal from the exit", t => {
+  const { sim, player } = expedition(t);
+  const y = LAB.y + 1.125;
+  put(sim, player, LAB.x + 4, y, LAB.z);
+  tick(sim, player, { placePortal: "blue" });
+  const blue = sim.s.portals?.blue;
+  assert.ok(blue);
+  put(sim, player, LAB.x + 4, y, LAB.z + 3.5);
+  tick(sim, player, { placePortal: "orange", yaw: -Math.PI / 2 });
+  assert.ok(sim.s.portals?.orange);
+  put(sim, player, blue.center.x, y, blue.center.z + 0.42);
+  player.vz = -15;
+  const input = { ...idleInput(player.ack + 1), portalTransit: 0, forward: 1 };
+  sim.input(player.id, input);
+  sim.input(player.id, { ...input, seq: input.seq + 1, placePortal: "blue" });
+  sim.tick();
+  assert.equal(player.portalTransit, 1);
+  sim.tick();
+  assert.deepEqual(sim.s.portals?.blue, blue);
+});
+
 test("an invalid target and seated player cannot move an existing portal", t => {
   const { sim, player } = expedition(t);
   put(sim, player, LAB.x + 4, LAB.y + 1.125, LAB.z);
@@ -160,5 +181,15 @@ test("the lab archive stone occludes a placement ray", t => {
   assert.equal(sim.s.portals?.blue, undefined);
   put(sim, player, LAB.x + 4, LAB.y + 1.125, LAB.z);
   tick(sim, player, { placePortal: "blue" });
+  assert.ok(sim.s.portals?.blue);
+});
+
+test("a structural rib occludes a portal ray aimed at the side wall", t => {
+  const { sim, player } = expedition(t);
+  put(sim, player, LAB.x + 4, LAB.y + 1.125, LAB.z + 1);
+  tick(sim, player, { placePortal: "blue", yaw: -Math.PI / 2 });
+  assert.equal(sim.s.portals?.blue, undefined);
+  put(sim, player, LAB.x + 4, LAB.y + 1.125, LAB.z - 2);
+  tick(sim, player, { placePortal: "blue", yaw: -Math.PI / 2 });
   assert.ok(sim.s.portals?.blue);
 });

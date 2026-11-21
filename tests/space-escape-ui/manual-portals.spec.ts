@@ -1,13 +1,7 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { LAB } from "../../frontend/space-escape/shared/adventure-data";
 
-test("place both portals with real controls, see through and walk through in both directions", async ({ page }, info) => {
-  test.setTimeout(90000);
-  const errors: string[] = [];
-  page.on("pageerror", error => errors.push(error.message));
-  page.on("console", message => {
-    if (message.type() === "error" && /shader|WebGL/i.test(message.text())) errors.push(message.text());
-  });
+async function startInLab(page: Page) {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.locator("#world")).toHaveAttribute("data-ready", "true", { timeout: 30000 });
   await page.locator("#launch").click();
@@ -21,7 +15,16 @@ test("place both portals with real controls, see through and walk through in bot
     sim.physics.reset(player.id, player);
     api.setViewRotation(0, 0);
   }, LAB);
+}
 
+test("place both portals with real controls, see through and walk through in both directions", async ({ page }, info) => {
+  test.setTimeout(90000);
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  page.on("console", message => {
+    if (message.type() === "error" && /shader|WebGL/i.test(message.text())) errors.push(message.text());
+  });
+  await startInLab(page);
   await page.keyboard.press("4");
   await expect(page.locator("#portalBlue")).toHaveClass(/active/);
   await expect(page.locator("#portalOrange")).not.toHaveClass(/active/);
@@ -103,4 +106,20 @@ test("place both portals with real controls, see through and walk through in bot
     await page.keyboard.up("w");
   }
   expect(errors).toEqual([]);
+});
+
+test.describe("touch controls", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+  test("tap both portal colors on a narrow screen", async ({ page }) => {
+    await startInLab(page);
+    const blue = page.getByRole("button", { name: "放置蓝色传送门" });
+    const orange = page.getByRole("button", { name: "放置橙色传送门" });
+    await blue.tap({ position: { x: 22, y: 22 } });
+    await expect(blue).toHaveClass(/active/);
+    await page.setViewportSize({ width: 568, height: 320 });
+    await page.evaluate(() => (window as any).__lastLight.setViewRotation(-Math.PI / 2, 0));
+    await orange.tap({ position: { x: 22, y: 22 } });
+    await expect(orange).toHaveClass(/active/);
+  });
 });
