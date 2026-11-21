@@ -49,3 +49,4 @@
 | 2026-11-20 16:20 | PR #40 (d1eb966) | moonhotline | 天体物理与大气, 运动物理系统, 权威多人仿真, 渲染管线与 LOD | feat: upgrade flight feel, propulsion VFX/audio, planetary visuals, and world co |
 | 2026-11-20 18:29 | PR #41 (b8dbcc0) | moonhotline | 运动物理系统, 权威多人仿真, 渲染管线与 LOD | feat: 添加可手动放置的双向传送门 |
 | 2026-11-21 13:55 | PR #41 (58b0e32) | moonhotline | 运动物理系统, 权威多人仿真, 渲染管线与 LOD | feat: 添加可手动放置的双向传送门 |
+| 2026-11-21 14:47 | PR #42 (b0d7eb8) | moonhotline | 运动物理系统, 权威多人仿真, 渲染管线与 LOD | feat: 全局传送枪与游枭号召回 |
