@@ -1,3 +1,4 @@
+import { tickFighterRecall } from "./fighter-recall";
 import {
   DT,
   idleInput,
@@ -287,6 +288,7 @@ export function interactAdventure(sim: Simulation, p: Player, i: Input) {
   }
   const boarding = shipBoardingTarget(p, ship);
   if (boarding && i.interact) {
+    if (ship.recall) return;
     const canContribute = (Object.keys(REPAIR) as ItemId[]).some(
       (k) => (p.inventory[k] || 0) > 0 && ship.cargo[k] < REPAIR[k]!,
     );
@@ -438,6 +440,7 @@ function tickWarpGates(sim: Simulation, previous: Vec, inputs: Map<string, Input
 }
 
 export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
+  if (tickFighterRecall(sim)) return;
   const s = sim.s.adventure.ship;
   const previous = { x: s.x, y: s.y, z: s.z };
   const pilot = sim.player(s.seats[0]);

@@ -1,7 +1,8 @@
+import type { FighterRecall } from "./fighter-recall";
 import type { Vec } from "./map";
 import type { Inventory, ItemId } from "./adventure-data";
 import type { SpaceshipKind } from "./celestial";
-import type { PortalColor, PortalPair } from "./portals";
+import type { PortalAction, PortalColor, PortalPair } from "./portals";
 export const DT = 1 / 30;
 export type Phase = "lobby" | "active" | "won";
 export interface Input {
@@ -21,6 +22,7 @@ export interface Input {
   skate?: boolean;
   warpUntil?: number;
   placePortal?: PortalColor;
+  portalAction?: PortalAction;
   portalTransit?: number;
 }
 export interface Player extends Vec {
@@ -122,6 +124,7 @@ export interface AdventureShip extends Vec {
   warpUntil?: number;
   collisionId?: number;
   collisionIntensity?: number;
+  recall?: FighterRecall;
 }
 export type Ship = AdventureShip;
 export interface Adventure {
@@ -147,6 +150,7 @@ export interface Snapshot {
   eventId: number;
   adventure: Adventure;
   portals?: PortalPair;
+  lastPortalColor?: PortalColor;
 }
 export const idleInput = (seq = 0): Input => ({
   seq,
@@ -176,6 +180,7 @@ export function parseInput(raw: unknown): Input | null {
   if (!Number.isSafeInteger(v.seq) || (v.seq as number) < 0) return null;
   return {
     seq: v.seq as number,
+    portalAction: v.portalAction === "fire" || v.portalAction === "undo" ? v.portalAction : undefined,
     placePortal: v.placePortal === "blue" || v.placePortal === "orange" ? v.placePortal : undefined,
     portalTransit: typeof v.portalTransit === "number" && Number.isSafeInteger(v.portalTransit) && v.portalTransit >= 0
       ? v.portalTransit : undefined,

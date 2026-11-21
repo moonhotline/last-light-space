@@ -11,6 +11,8 @@ A 1.6 km browser planet built around low-gravity movement, shipwreck recovery, e
 
 WASD moves; Shift runs; tap Space to jump and hold it to fly. Q toggles grapple, C dashes, left mouse/T cuts resources and shoots, Tab opens inventory and records, G heals, E reads/repairs/boards or resonates with a nearby beacon, V switches cameras, R places a shared route marker, B recalls to a checkpoint, H hides the HUD, Escape opens the menu. Arrow keys or J/L turn; I/K look up/down. Touch controls provide movement, jetpack, dash, interaction, marking, and camera switching.
 
+Press F to equip the portal gun. Left click places blue, then red, on suitable surfaces in the basin and on landable worlds. Right click undoes the latest placement. Press Y on foot in the Kepler basin to summon the unoccupied light fighter. It rises first, then lands at a nearby clear spot.
+
 ## Expedition
 
 Crystals refill 34 fuel and extend a seven-second collection combo. Each crystal returns after 32 seconds. The jetpack uses 20 fuel/second and refills while grounded. A dash costs 16 fuel with a 1.5-second cooldown.

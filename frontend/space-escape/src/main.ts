@@ -60,9 +60,10 @@ import {
 import { DT, type Input, type Player, type Snapshot } from "../shared/types";
 import type { Simulation } from "../shared/simulation";
 import type { MovementWorld } from "../shared/physics";
-import { PORTAL_COLORS, type PortalColor } from "../shared/portals";
+import { nextPortalColor, type PortalAction } from "../shared/portals";
 import {
   GameView,
+  type Equipment,
   exportHoverboardGlb,
   exportTechRifleGlb,
   exportSurveyCameraGlb,
@@ -131,12 +132,7 @@ let panel:
   lastLore = -1,
   inventorySignature = "";
 let correction = { x: 0, y: 0, z: 0 };
-let portalPlacement: PortalColor | undefined;
-const portalControlRows = document.querySelectorAll<HTMLElement>(".portal-controls");
-const portalButtons = PORTAL_COLORS.map(color => ({
-  color,
-  buttons: document.querySelectorAll<HTMLButtonElement>(`[data-portal="${color}"]`),
-}));
+const portalActions: PortalAction[] = [];
 let SimulationCtor: typeof import("../shared/simulation").Simulation | null =
     null,
   MovementWorldCtor: typeof import("../shared/physics").MovementWorld | null =
@@ -260,7 +256,7 @@ function releaseSession() {
   prediction?.dispose();
   prediction = null;
   state = me = predicted = null;
-  portalPlacement = undefined;
+  portalActions.length = 0;
   pending = [];
   reconnecting = false;
   sequence = 0;
@@ -301,6 +297,7 @@ function receive(next: Snapshot) {
   }
   const portaled = !!me && (me.portalTransit ?? 0) > previousTransit;
   if (me && portaled) {
+    portalActions.length = 0;
     yaw = me.yaw;
     pitch = me.pitch;
     pending = [];
@@ -562,7 +559,7 @@ function makeInput(): Input {
   const active = !panel && !reconnecting;
   const input: Input = {
     seq: ++sequence,
-    placePortal: active ? portalPlacement : undefined,
+    portalAction: active ? portalActions.shift() : undefined,
     portalTransit: me?.portalTransit ?? 0,
     warpUntil: state?.adventure.ship.warpUntil ?? 0,
     forward: active
@@ -585,13 +582,13 @@ function makeInput(): Input {
       (keys.has("KeyQ") ||
         pulses.has("KeyQ") ||
         (view.activeWeapon === "grapple" && keys.has("Mouse0"))),
-    fire: active && (keys.has("Mouse0") || keys.has("KeyT")),
+    fire: active && view.activeWeapon !== "portal" && (keys.has("Mouse0") || keys.has("KeyT")),
     brake: active && keys.has("KeyX"),
     interact: active && (keys.has("KeyE") || pulses.has("KeyE")),
     skate: active && isSkating,
   };
   pulses.clear();
-  portalPlacement = undefined;
+  if (!active) portalActions.length = 0;
   return input;
 }
 function step() {
@@ -890,11 +887,20 @@ function hud() {
     $("combo").classList.toggle("visible", me.combo >= 2);
   }
   text("dashStatus", p.grapple ? "牵引中 · Q 松开" : "瞄准岩壁");
-  const portals = state.portals;
-  const hidePortals = p.seat >= 0 || !!p.planet || !portals;
-  portalControlRows.forEach(row => { row.hidden = hidePortals; });
-  for (const { color, buttons } of portalButtons) {
-    buttons.forEach(button => button.classList.toggle("active", !!portals?.[color]));
+  const canEquipPortal = p.seat < 0 && !!state.portals;
+  const portalHeld = canEquipPortal && view.activeWeapon === "portal";
+  $("wepPortal").hidden = !canEquipPortal;
+  $("touchPortal").hidden = !canEquipPortal;
+  $("touchPortalFire").hidden = !portalHeld;
+  $("touchPortalUndo").hidden = !portalHeld;
+  $("touchFire").hidden = portalHeld;
+  $("touchRecallFighter").hidden = p.seat >= 0;
+  $("portalHint").hidden = !portalHeld;
+  $("toolHint").hidden = portalHeld;
+  if (portalHeld) {
+    const color = nextPortalColor(state.portals!, state.lastPortalColor);
+    view.setPortalColor(color);
+    text("portalNext", color === "blue" ? "放蓝门" : "放红门");
   }
   text("weaponAmmo", playerReloadTime > 0 ? "换弹中... (R)" : `${playerAmmo} / 24`);
   const anchor = p.seat < 0 ? (sim?.physics || prediction)?.aim(p, 85) : null;
@@ -1159,18 +1165,22 @@ function keyDown(key: string) {
   }
   keys.add(key);
 }
-function selectWeapon(w: "none" | "rifle" | "grapple" | "camera") {
+function selectWeapon(w: Equipment) {
+  if (w === "portal" && (!state?.portals || !me || me.seat >= 0)) return;
+  keys.delete("Mouse0");
   view.setWeapon(w);
-  const slots: Record<"rifle" | "grapple" | "camera", string> = {
+  const slots: Record<Exclude<Equipment, "none">, string> = {
     rifle: "wepRifle",
     grapple: "wepGrapple",
     camera: "wepCamera",
+    portal: "wepPortal",
   };
   for (const [key, id] of Object.entries(slots)) {
     const el = document.getElementById(id);
     if (el) el.classList.toggle("active", key === w);
   }
-  if (w === "camera") {
+  $("touchPortal").classList.toggle("active", w === "portal");
+  if (w === "camera" || w === "portal") {
     view.thirdPerson = false;
   }
   updateViewfinderVisibility();
@@ -1223,8 +1233,8 @@ addEventListener("keydown", (e) => {
   if (e.code === "Digit1") selectWeapon(view.activeWeapon === "rifle" ? "none" : "rifle");
   if (e.code === "Digit2") selectWeapon(view.activeWeapon === "grapple" ? "none" : "grapple");
   if (e.code === "Digit3") selectWeapon(view.activeWeapon === "camera" ? "none" : "camera");
-  if (e.code === "Digit4") placePortal("blue");
-  if (e.code === "Digit5") placePortal("orange");
+  if (e.code === "KeyF") togglePortalGun();
+  if (e.code === "KeyY") command("recall-fighter");
   if (e.code === "Digit0" || e.code === "Backquote") selectWeapon("none");
   if (e.code === "KeyQ") selectWeapon(view.activeWeapon === "grapple" ? "none" : "grapple");
   if (e.code === "KeyT") command("mark");
@@ -1261,11 +1271,12 @@ addEventListener(
       view.cameraZoom = Math.max(1.0, Math.min(4.5, view.cameraZoom + delta));
       return;
     }
-    const weapons: ("none" | "rifle" | "grapple" | "camera")[] = [
+    const weapons: Equipment[] = [
       "none",
       "rifle",
       "grapple",
       "camera",
+      ...(state?.portals && me && me.seat < 0 ? ["portal" as const] : []),
     ];
     const idx = weapons.indexOf(view.activeWeapon);
     const nextIdx =
@@ -1284,8 +1295,18 @@ document.addEventListener("mousemove", (e) => {
   yaw -= e.movementX * s;
   pitch = Math.max(-1.35, Math.min(1.35, pitch - e.movementY * s));
 });
+canvas.addEventListener("contextmenu", e => {
+  if (!panel && view.activeWeapon === "portal") e.preventDefault();
+});
 canvas.addEventListener("mousedown", (e) => {
-  if (e.button === 0 && !panel) {
+  if (panel) return;
+  if (view.activeWeapon === "portal" && (e.button === 0 || e.button === 2)) {
+    e.preventDefault();
+    usePortalGun(e.button === 0 ? "fire" : "undo");
+    if (e.button === 0 && !mobile() && document.pointerLockElement !== canvas) lock();
+    return;
+  }
+  if (e.button === 0) {
     if (view.activeWeapon === "none" && !view.thirdPerson) {
       selectWeapon("rifle");
     }
@@ -1348,14 +1369,18 @@ $("snapshot") && ($("snapshot").onclick = () => takeSnapshot(view));
 $("snapPhoto") && ($("snapPhoto").onclick = () => takeSnapshot(view));
 $("toggleSkate") && ($("toggleSkate").onclick = toggleHoverboard);
 $("btnSwitchShip") && ($("btnSwitchShip").onclick = switchSpacecraft);
-function placePortal(color: PortalColor) {
-  if (panel || !state?.portals || !me || me.seat >= 0 || me.planet) return;
-  portalPlacement = color;
-  view.thirdPerson = false;
+function togglePortalGun() {
+  selectWeapon(view.activeWeapon === "portal" ? "none" : "portal");
 }
-for (const { color, buttons } of portalButtons) {
-  buttons.forEach(button => { button.onclick = () => placePortal(color); });
+function usePortalGun(action: PortalAction) {
+  if (panel || reconnecting || !state?.portals || !me || me.seat >= 0 || view.activeWeapon !== "portal") return;
+  if (portalActions.length < 8) portalActions.push(action);
 }
+$("wepPortal").onclick = togglePortalGun;
+$("touchPortal").onclick = togglePortalGun;
+$("touchPortalFire").onclick = () => usePortalGun("fire");
+$("touchPortalUndo").onclick = () => usePortalGun("undo");
+$("touchRecallFighter").onclick = () => command("recall-fighter");
 $("wepRifle") && ($("wepRifle").onclick = () => selectWeapon(view.activeWeapon === "rifle" ? "none" : "rifle"));
 $("wepGrapple") && ($("wepGrapple").onclick = () => selectWeapon(view.activeWeapon === "grapple" ? "none" : "grapple"));
 $("wepCamera") && ($("wepCamera").onclick = () => selectWeapon(view.activeWeapon === "camera" ? "none" : "camera"));

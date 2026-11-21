@@ -39,7 +39,10 @@ import { PortalView } from "./portal-view";
 import { SOLAR_SYSTEM } from "../shared/celestial";
 import { SPAWN_FLEET, SHIP_MAX_SPEED } from "../shared/adventure-data";
 import { FOOT_OFFSET, playerUp, surfaceOrientation, eyePosition, viewOrientation } from "../shared/surface";
-import { createHandRig, equipmentModel, attachHeldModel } from "./hand-rig";
+import { equipmentModel } from "./equipment-model";
+import type { PortalColor } from "../shared/portals";
+
+export type Equipment = "none" | "rifle" | "grapple" | "camera" | "portal";
 const COLORS = [0x9eeafa, 0xffc98b, 0xff9f81, 0xa6baff];
 const v3 = (v: Vec) => new THREE.Vector3(v.x, v.y, v.z);
 const vertex = `varying vec2 vUv; varying vec3 vNormal; varying vec3 vPosition; void main(){vUv=uv;vNormal=normal;vPosition=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`;
@@ -348,15 +351,18 @@ export class GameView {
   grappleAsset: THREE.Group | null = null;
   cameraAsset: THREE.Group | null = null;
   obeliskAsset: THREE.Group | null = null;
-  activeWeapon: "none" | "rifle" | "grapple" | "camera" = "none";
+  activeWeapon: Equipment = "none";
   weaponSwitchTime = 0;
   cameraZoom = 1.0;
   fpRifle: THREE.Group | null = null;
   fpGrapple: THREE.Group | null = null;
   fpCamera: THREE.Group | null = null;
-  fpHandRig: THREE.Object3D | null = null;
-  fpRightHand: THREE.Object3D | null = null;
-  fpLeftHand: THREE.Object3D | null = null;
+  fpPortal: THREE.Group | null = null;
+  private readonly portalLights = new Set<THREE.MeshStandardMaterial>();
+  private portalColor: PortalColor = "blue";
+  private toolPass: RenderPass;
+  private readonly toolScene = new THREE.Scene();
+  private readonly toolCamera = new THREE.PerspectiveCamera(66, 1, 0.04, 8);
   toolModel = new THREE.Group();
   private rifleEnvironment: THREE.WebGLRenderTarget | null = null;
   private rifleFill = new THREE.PointLight(0xfff5e8, 0.45, 2, 2);
@@ -386,11 +392,7 @@ export class GameView {
         this.renderer.compileAsync(this.scene, this.camera),
         this.renderer.compileAsync(this.skyScene, this.skyCamera),
       ];
-      if (this.toolModel) {
-        compilePromises.push(
-          this.renderer.compileAsync(this.toolModel, this.camera, this.scene),
-        );
-      }
+      compilePromises.push(this.renderer.compileAsync(this.toolScene, this.toolCamera));
       await Promise.all(compilePromises);
     } catch {
       /* Fallback if compileAsync is not supported */
@@ -399,7 +401,7 @@ export class GameView {
     }
   }
 
-  setWeapon(w: "none" | "rifle" | "grapple" | "camera") {
+  setWeapon(w: Equipment) {
     if (this.activeWeapon === w) return;
     this.activeWeapon = w;
     this.weaponSwitchTime = 0.25;
@@ -433,15 +435,21 @@ export class GameView {
       }
     });
   }
-  private setupFirstPersonHands() {
-    const right = createHandRig(this.astronaut, "Right", new THREE.Vector3(0.34, -0.23, -0.5));
-    const left = createHandRig(this.astronaut, "Left", new THREE.Vector3(0.12, -0.25, -0.85));
-    this.fpHandRig = new THREE.Group();
-    if (right) { this.fpHandRig.add(right.root); this.fpRightHand = right.joint; }
-    if (left) { this.fpHandRig.add(left.root); this.fpLeftHand = left.joint; }
-    this.toolModel.add(this.fpHandRig);
+  setPortalColor(color: PortalColor) {
+    if (this.portalColor === color) return;
+    this.portalColor = color;
+    this.updatePortalLights();
   }
-  private mountFirstPerson(source: THREE.Group, kind: "rifle" | "grapple" | "camera", hand = this.fpRightHand) {
+
+  private updatePortalLights() {
+    const color = this.portalColor;
+    for (const material of this.portalLights) {
+      material.color.setHex(color === "blue" ? 0x0b516f : 0x741722);
+      material.emissive.setHex(color === "blue" ? 0x139ae9 : 0xff3045);
+    }
+  }
+
+  private mountFirstPerson(source: THREE.Group, kind: "rifle" | "grapple" | "camera") {
     const size = kind === "rifle" ? 1.12 : kind === "grapple" ? 0.62 : 0.4;
     const model = equipmentModel(source, size);
     model.name = `first_person_${kind}`;
@@ -449,7 +457,8 @@ export class GameView {
     const pos = kind === "camera"
       ? new THREE.Vector3(0.3, -0.17, -0.52)
       : new THREE.Vector3(0.34, -0.22, kind === "rifle" ? -0.85 : -0.68);
-    attachHeldModel(this.toolModel, hand, model, pos);
+    model.position.copy(pos);
+    this.toolModel.add(model);
     if (kind === "grapple") {
       const light = new THREE.PointLight(0x65e6ff, 1.5, 2.4, 2);
       light.name = "grapple_point_light";
@@ -520,6 +529,11 @@ export class GameView {
     this.rifleFill.name = "rifle_point_light";
     this.rifleFill.position.set(-0.3, 0.15, 0.05);
     this.toolModel.add(this.rifleFill);
+    this.toolCamera.add(this.toolModel);
+    this.toolScene.add(this.toolCamera, new THREE.HemisphereLight(0xd8ebff, 0x41444c, 1.5));
+    const toolKey = new THREE.DirectionalLight(0xe6f1ff, 1.6);
+    toolKey.position.set(-1, 2, 1);
+    this.toolScene.add(toolKey);
     this.stardustStream = new StardustParallaxStream();
     this.scene.add(this.stardustStream.group);
     this.buildSky();
@@ -581,6 +595,11 @@ export class GameView {
     worldPass.clear = false;
     worldPass.clearDepth = true;
     this.composer.addPass(worldPass);
+    // First-person props have their own depth buffer and never intersect world geometry.
+    this.toolPass = new RenderPass(this.toolScene, this.toolCamera);
+    this.toolPass.clear = false;
+    this.toolPass.clearDepth = true;
+    this.composer.addPass(this.toolPass);
     this.bloom = new UnrealBloomPass(
       new THREE.Vector2(800, 600),
       0.34,
@@ -1341,7 +1360,6 @@ export class GameView {
     this.brightenRifle(this.rifleAsset);
     this.grappleAsset = equipmentModel(grappleGltf.scene, 0.55, 0);
     this.cameraAsset = equipmentModel(cameraGltf.scene, 0.35, 0);
-    this.setupFirstPersonHands();
     this.obeliskAsset = obeliskGltf.scene;
 
     for (const m of [
@@ -1383,6 +1401,22 @@ export class GameView {
       console.warn("Background planetary hydration:", err);
     });
 
+    void loader.loadAsync("/assets/portal-gun.glb").then(({ scene }) => {
+      const model = equipmentModel(scene, 0.59, Math.PI);
+      model.name = "first_person_portal";
+      model.position.set(.35, -.24, -.69);
+      model.rotation.set(-.095, .20, -.06);
+      model.traverse(part => {
+        if (part instanceof THREE.Mesh && part.material instanceof THREE.MeshStandardMaterial && part.material.name === "lit")
+          this.portalLights.add(part.material);
+      });
+      this.brightenRifle(model);
+      this.updatePortalLights();
+      this.fpPortal = model;
+      model.visible = this.activeWeapon === "portal";
+      this.toolModel.add(model);
+    }).catch(error => console.warn("Portal gun model:", error));
+
     // Background upgrade to weapons sequentially
     void (async () => {
       try {
@@ -1409,7 +1443,7 @@ export class GameView {
           weatherMaterials(dx5Gltf.scene);
           this.grappleAsset = equipmentModel(dx5Gltf.scene, 0.55, 0);
           this.fpGrapple?.removeFromParent();
-          this.fpGrapple = this.mountFirstPerson(this.grappleAsset, "grapple", this.fpLeftHand);
+          this.fpGrapple = this.mountFirstPerson(this.grappleAsset, "grapple");
           for (const avatar of this.avatars.values()) avatar.userData.equipmentDirty = true;
         }
       } catch (err) {
@@ -1420,12 +1454,11 @@ export class GameView {
       this.fpRifle = this.mountFirstPerson(this.rifleAsset, "rifle");
     }
     if (this.grappleAsset) {
-      this.fpGrapple = this.mountFirstPerson(this.grappleAsset, "grapple", this.fpLeftHand);
+      this.fpGrapple = this.mountFirstPerson(this.grappleAsset, "grapple");
     }
     if (this.cameraAsset) {
       this.fpCamera = this.mountFirstPerson(this.cameraAsset, "camera");
     }
-    this.camera.add(this.toolModel);
     this.toolModel.visible = false;
     this.astronaut.traverse((o) => {
       if (o instanceof THREE.Mesh) {
@@ -1584,6 +1617,8 @@ export class GameView {
     const w = innerWidth,
       h = innerHeight;
     this.camera.aspect = w / h;
+    this.toolCamera.aspect = w / h;
+    this.toolCamera.updateProjectionMatrix();
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
     this.composer.setSize(w, h);
@@ -1635,13 +1670,10 @@ export class GameView {
     }
     this.toolModel.visible = !!me && !this.thirdPerson && me.seat < 0 && this.activeWeapon !== "none";
     this.rifleFill.visible = this.toolModel.visible && this.activeWeapon === "rifle";
-    if (this.fpHandRig) this.fpHandRig.visible = this.toolModel.visible;
-    const leftViewArm = this.fpHandRig?.getObjectByName("left_view_arm");
-    if (leftViewArm) leftViewArm.visible = this.toolModel.visible && this.activeWeapon !== "rifle" && this.activeWeapon !== "none";
     if (me) {
       if (this.weaponSwitchTime > 0) this.weaponSwitchTime -= dt;
       const switchDrop = Math.sin(Math.max(0, this.weaponSwitchTime) / 0.25 * Math.PI) * 0.14;
-      const recoilKick = Math.max(0, me.toolCooldown - 0.12) * 0.22;
+      const recoilKick = this.activeWeapon === "rifle" ? Math.max(0, me.toolCooldown - 0.12) * 0.22 : 0;
       this.toolModel.position.y =
         0 -
         switchDrop +
@@ -1651,6 +1683,7 @@ export class GameView {
       if (this.fpRifle) this.fpRifle.visible = this.activeWeapon === "rifle";
       if (this.fpGrapple) this.fpGrapple.visible = this.activeWeapon === "grapple";
       if (this.fpCamera) this.fpCamera.visible = this.activeWeapon === "camera";
+      if (this.fpPortal) this.fpPortal.visible = this.activeWeapon === "portal";
     }
     const worldTime = s ? s.time : t * 0.4 + 80,
       level = s?.beacons.filter((b) => b.active).length || 0;
@@ -2337,6 +2370,7 @@ export class GameView {
     this.cinematic.uniforms.time.value = t;
     this.renderer.info.reset();
     this.portals.update(s?.portals, this.camera, this.skyCamera, this.effects ? t : 0);
+    this.toolPass.enabled = this.toolModel.visible;
     this.composer.render(dt);
     this.frames++;
     this.canvas.dataset.frames = String(this.frames);

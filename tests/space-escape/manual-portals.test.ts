@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import { Vector3 } from "three";
+import { groundAt } from "../../frontend/space-escape/shared/map";
+import { SOLAR_SYSTEM } from "../../frontend/space-escape/shared/celestial";
 import { LAB } from "../../frontend/space-escape/shared/adventure-data";
 import { initPhysics } from "../../frontend/space-escape/shared/physics";
 import { Simulation } from "../../frontend/space-escape/shared/simulation";
@@ -192,4 +195,73 @@ test("a structural rib occludes a portal ray aimed at the side wall", t => {
   put(sim, player, LAB.x + 4, LAB.y + 1.125, LAB.z - 2);
   tick(sim, player, { placePortal: "blue", yaw: -Math.PI / 2 });
   assert.ok(sim.s.portals?.blue);
+});
+
+test("the field gun alternates colors outdoors and undoes successful placements in order", t => {
+  const { sim, player } = expedition(t);
+  const outdoor = (x: number, z: number) => put(sim, player, x, groundAt(x, z) + 0.87, z);
+  outdoor(14, 312);
+  tick(sim, player, { portalAction: "fire", pitch: -1.35 });
+  const blue = sim.s.portals?.blue;
+  assert.ok(blue && blue.normal.y > 0.95);
+  tick(sim, player, { portalAction: "fire", pitch: -1.35 });
+  assert.equal(sim.s.portals?.orange, undefined, "a miss does not advance the color");
+  outdoor(1, 250);
+  tick(sim, player, { portalAction: "fire", pitch: -1.35 });
+  const red = sim.s.portals?.orange;
+  assert.ok(red && red.center.z < 251);
+  outdoor(-40, 195);
+  tick(sim, player, { portalAction: "fire", pitch: -1.35 });
+  assert.notDeepEqual(sim.s.portals?.blue, blue);
+  tick(sim, player, { portalAction: "undo" });
+  assert.deepEqual(sim.s.portals, { blue, orange: red });
+  tick(sim, player, { portalAction: "undo" });
+  assert.deepEqual(sim.s.portals, { blue });
+  assert.equal(sim.snapshot().lastPortalColor, "blue");
+});
+
+test("a player can place a gate on a spherical world and travel through it to the basin", t => {
+  const { sim, player } = expedition(t);
+  put(sim, player, LAB.x + 4, LAB.y + 1.125, LAB.z);
+  tick(sim, player, { portalAction: "fire", yaw: 0, pitch: 0 });
+  const exit = sim.s.portals?.blue;
+  assert.ok(exit);
+  const planet = SOLAR_SYSTEM.mercury;
+  player.planet = planet.id;
+  put(sim, player, planet.position.x, planet.position.y + planet.radius + 4, planet.position.z);
+  tick(sim, player, { portalAction: "fire", yaw: 0, pitch: -1.35 });
+  const entry = sim.s.portals?.orange;
+  assert.ok(entry && entry.planet === planet.id);
+  const above = new Vector3().copy(entry.center).addScaledVector(entry.normal, 3);
+  put(sim, player, above.x, above.y, above.z, -13);
+  for (let i = 0; i < 10 && !player.portalTransit; i++) tick(sim, player);
+  assert.equal(player.portalTransit, 1);
+  assert.equal(player.planet, null);
+  assert.ok(Math.abs(player.z - exit.center.z) < 2);
+});
+
+test("fighter recall lifts before moving and parks within reach of the caller", t => {
+  const { sim, player } = expedition(t);
+  put(sim, player, LAB.x + 4, LAB.y + 1.125, LAB.z);
+  const ship = sim.s.adventure.ship;
+  const from = { x: ship.x, y: ship.y, z: ship.z };
+  sim.action(player.id, "recall-fighter");
+  assert.equal(ship.recall?.phase, "lift");
+  for (let i = 0; i < 30; i++) sim.tick();
+  assert.equal(ship.x, from.x);
+  assert.equal(ship.z, from.z);
+  assert.ok(ship.y > from.y + 5);
+  for (let i = 0; i < 600 && ship.recall; i++) sim.tick();
+  assert.equal(ship.recall, undefined);
+  assert.equal(ship.grounded, true);
+  assert.ok(Math.hypot(ship.x - player.x, ship.z - player.z) <= 39);
+  assert.ok(Math.hypot(ship.x - player.x, ship.z - player.z) >= 10);
+  assert.equal(ship.flightTime, 0);
+  ship.seats[0] = player.id;
+  player.seat = 0;
+  const parked = { x: ship.x, y: ship.y, z: ship.z };
+  const guest = sim.add("guest");
+  sim.action(guest.id, "recall-fighter");
+  assert.equal(ship.recall, undefined);
+  assert.deepEqual({ x: ship.x, y: ship.y, z: ship.z }, parked);
 });
