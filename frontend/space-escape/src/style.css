@@ -784,10 +784,9 @@ body[data-phase] .landing-caption {
 .portal-controls button {
   pointer-events: auto;
 }
-.wep-slot[data-portal="orange"].active {
-  border-color: #ff9b43;
-  color: #ffc385;
-  background: rgba(121, 64, 19, 0.45);
+.wep-slot[hidden],
+#touchFire[hidden] {
+  display: none;
 }
 .starflight-hud {
   margin-top: -4px;

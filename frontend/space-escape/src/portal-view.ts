@@ -46,7 +46,7 @@ function makePortal(scene: Scene, color: PortalColor) {
     vertexShader,
     fragmentShader,
     uniforms: {
-      tint: { value: new Color(color === "blue" ? 0x38bdf8 : 0xff9b43) },
+      tint: { value: new Color(color === "blue" ? 0x38bdf8 : 0xff3045) },
       time: { value: 0 },
       linked: { value: false },
       preview: { value: false },

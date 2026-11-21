@@ -1,3 +1,5 @@
+import { recallFighter } from "./fighter-recall";
+import { nextPortalColor, type Portal, type PortalColor } from "./portals";
 import {
   createAdventure,
   adventurePlayer,
@@ -30,6 +32,7 @@ export class Simulation {
   physics = new MovementWorld();
   queues = new Map<string, Input[]>();
   latest = new Map<string, Input>();
+  private portalHistory: { color: PortalColor; previous?: Portal; previousColor?: PortalColor }[] = [];
   s: Snapshot;
   constructor(seed = Math.floor(Math.random() * 100000)) {
     this.s = {
@@ -142,6 +145,8 @@ export class Simulation {
       this.s.phase = "lobby";
       this.s.host = "";
       this.s.portals = {};
+      delete this.s.lastPortalColor;
+      this.portalHistory.length = 0;
     }
   }
   player(id: string) {
@@ -193,6 +198,7 @@ export class Simulation {
   action(id: string, command: unknown) {
     const p = this.player(id);
     if (!p || this.s.phase === "lobby") return;
+    if (command === "recall-fighter") recallFighter(this, p);
     if (command === "respawn") this.respawn(p);
     if (command === "heal" && p.inventory.medgel > 0 && p.health < 100) {
       p.inventory.medgel--;
@@ -254,17 +260,31 @@ export class Simulation {
         i.yaw = p.yaw;
         i.pitch = p.pitch;
         i.placePortal = undefined;
+        i.portalAction = undefined;
       }
       if (p.seat < 0) {
         const portals = (s.portals ??= {});
-        if (i.placePortal) {
-          const other = i.placePortal === "blue" ? portals.orange : portals.blue;
+        const color = i.placePortal ?? (i.portalAction === "fire"
+          ? nextPortalColor(portals, s.lastPortalColor) : undefined);
+        if (i.portalAction === "undo") {
+          const last = this.portalHistory.pop();
+          if (last) {
+            if (last.previous) portals[last.color] = last.previous;
+            else delete portals[last.color];
+            s.lastPortalColor = last.previousColor;
+            this.emit("已撤回最近一次传送门放置");
+          }
+        } else if (color) {
+          const other = color === "blue" ? portals.orange : portals.blue;
           const placement = this.physics.aimPortal({ ...p, yaw: i.yaw, pitch: i.pitch }, other);
           if (placement) {
-            portals[i.placePortal] = placement;
+            this.portalHistory.push({ color, previous: portals[color], previousColor: s.lastPortalColor });
+            if (this.portalHistory.length > 16) this.portalHistory.shift();
+            portals[color] = placement;
+            s.lastPortalColor = color;
             this.emit(portals.blue && portals.orange ? "双向传送门已连通" : "传送门已放置 · 放置另一扇即可连通");
           } else {
-            this.emit("无法放置 · 对准曙光实验室有足够空间的平面");
+            this.emit("无法放置 · 对准足够平整、宽敞的表面");
           }
         }
         // Older loaded clients do not show portals or understand portal heading updates.

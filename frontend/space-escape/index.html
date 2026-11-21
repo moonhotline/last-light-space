@@ -429,16 +429,15 @@
             <button id="wepRifle" class="wep-slot" type="button"><kbd>1</kbd> HMG-379电磁枪</button>
             <button id="wepGrapple" class="wep-slot" type="button"><kbd>2</kbd> DX5机动钩索</button>
             <button id="wepCamera" class="wep-slot" type="button"><kbd>3</kbd> 拍立得复古相机</button>
+            <button id="wepPortal" class="wep-slot" type="button" hidden><kbd>F</kbd> 传送枪</button>
             <span id="weaponAmmo" class="weapon-ammo">24 / 24</span>
-          </div>
-          <div class="portal-controls" hidden>
-            <button id="portalBlue" class="wep-slot" data-portal="blue" type="button" title="对准曙光实验室墙面、地板或顶板"><kbd>4</kbd> 蓝色传送门</button>
-            <button id="portalOrange" class="wep-slot" data-portal="orange" type="button" title="对准曙光实验室墙面、地板或顶板"><kbd>5</kbd> 橙色传送门</button>
           </div>
           <div class="control-row">
             <span><kbd>Q</kbd> 钩锁 <b id="dashStatus">就绪</b></span
             ><span><kbd>V</kbd> <b id="viewMode">第三人称</b></span
-            ><span><kbd>左键</kbd> 工具</span>
+            ><span id="toolHint"><kbd>左键</kbd> 工具</span>
+            <span id="portalHint" hidden><kbd>左键</kbd> <b id="portalNext">放蓝门</b> <kbd>右键</kbd> 撤回</span>
+            <span><kbd>Y</kbd> 召回游枭号</span>
           </div>
         </div>
         <div class="radar">
@@ -452,9 +451,11 @@
         </div>
       </div>
       <div id="touchControls">
-        <div class="portal-controls" hidden>
-          <button class="wep-slot" data-portal="blue" type="button" aria-label="放置蓝色传送门">蓝门</button>
-          <button class="wep-slot" data-portal="orange" type="button" aria-label="放置橙色传送门">橙门</button>
+        <div class="portal-controls">
+          <button id="touchPortal" class="wep-slot" type="button" hidden>传送枪</button>
+          <button id="touchPortalFire" class="wep-slot" type="button" hidden>放门</button>
+          <button id="touchPortalUndo" class="wep-slot" type="button" hidden>撤回</button>
+          <button id="touchRecallFighter" class="wep-slot" type="button" hidden>召回游枭号</button>
         </div>
         <button id="touchFire" class="touch-action" aria-label="切割与射击">
           射击

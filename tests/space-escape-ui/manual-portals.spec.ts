@@ -26,12 +26,28 @@ test("place both portals with real controls, see through and walk through in bot
   });
   await startInLab(page);
   await page.keyboard.press("4");
-  await expect(page.locator("#portalBlue")).toHaveClass(/active/);
-  await expect(page.locator("#portalOrange")).not.toHaveClass(/active/);
+  await page.keyboard.press("5");
+  expect(await page.evaluate(() => (window as any).__lastLight.snapshot().portals)).toEqual({});
+  await page.keyboard.press("f");
+  await expect(page.locator("#wepPortal")).toHaveClass(/active/);
+  await expect.poll(() => page.evaluate(() => {
+    const view = (window as any).__lastLight.view();
+    return view.fpPortal?.visible && view.fpPortal.parent === view.toolModel &&
+      view.fpRifle.parent === view.toolModel && view.fpGrapple.parent === view.toolModel &&
+      view.fpCamera.parent === view.toolModel &&
+      view.toolModel.getObjectsByProperty("type", "SkinnedMesh").length === 0;
+  })).toBe(true);
+  await expect(page.locator("#portalNext")).toHaveText("放蓝门");
+  await page.mouse.click(720, 450);
+  await expect(page.locator("#portalNext")).toHaveText("放红门");
   await page.evaluate(() => (window as any).__lastLight.setViewRotation(-Math.PI / 2, 0));
-  await page.evaluate(() => document.exitPointerLock());
-  await page.locator("#portalOrange").click();
-  await expect(page.locator("#portalOrange")).toHaveClass(/active/);
+  await page.mouse.click(720, 450);
+  await expect.poll(() => page.evaluate(() => !!(window as any).__lastLight.snapshot().portals.orange)).toBe(true);
+  await page.mouse.click(720, 450, { button: "right" });
+  await expect.poll(() => page.evaluate(() => !!(window as any).__lastLight.snapshot().portals.orange)).toBe(false);
+  await expect(page.locator("#portalNext")).toHaveText("放红门");
+  await page.mouse.click(720, 450);
+  await expect.poll(() => page.evaluate(() => !!(window as any).__lastLight.snapshot().portals.orange)).toBe(true);
 
   await page.evaluate(() => (window as any).__lastLight.setViewRotation(0, 0));
   await expect.poll(() => page.evaluate(() => {
@@ -111,15 +127,31 @@ test("place both portals with real controls, see through and walk through in bot
 test.describe("touch controls", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
-  test("tap both portal colors on a narrow screen", async ({ page }) => {
+  test("equip, fire, and undo on a narrow screen", async ({ page }) => {
     await startInLab(page);
-    const blue = page.getByRole("button", { name: "放置蓝色传送门" });
-    const orange = page.getByRole("button", { name: "放置橙色传送门" });
-    await blue.tap({ position: { x: 22, y: 22 } });
-    await expect(blue).toHaveClass(/active/);
+    await page.locator("#touchPortal").tap({ position: { x: 22, y: 22 } });
+    const fire = page.locator("#touchPortalFire");
+    await fire.tap({ position: { x: 22, y: 22 } });
+    await expect.poll(() => page.evaluate(() => !!(window as any).__lastLight.snapshot().portals.blue)).toBe(true);
     await page.setViewportSize({ width: 568, height: 320 });
     await page.evaluate(() => (window as any).__lastLight.setViewRotation(-Math.PI / 2, 0));
-    await orange.tap({ position: { x: 22, y: 22 } });
-    await expect(orange).toHaveClass(/active/);
+    await fire.tap({ position: { x: 22, y: 22 } });
+    await expect.poll(() => page.evaluate(() => !!(window as any).__lastLight.snapshot().portals.orange)).toBe(true);
+    await page.locator("#touchPortalUndo").tap({ position: { x: 22, y: 22 } });
+    await expect.poll(() => page.evaluate(() => !!(window as any).__lastLight.snapshot().portals.orange)).toBe(false);
   });
+});
+
+test("Y summons the fighter with a vertical lift before the approach", async ({ page }) => {
+  await startInLab(page);
+  await page.keyboard.press("y");
+  await expect.poll(() => page.evaluate(() => (window as any).__lastLight.snapshot().adventure.ship.recall?.phase)).toBe("lift");
+  await expect.poll(() => page.evaluate(() => {
+    const ship = (window as any).__lastLight.snapshot().adventure.ship;
+    return ship.vy > 0 && Math.hypot(ship.vx, ship.vz) < 0.1;
+  })).toBe(true);
+  await expect.poll(() => page.evaluate(() => {
+    const ship = (window as any).__lastLight.snapshot().adventure.ship;
+    return ship.recall?.phase === "approach" && Math.hypot(ship.vx, ship.vz) > 1;
+  }), { timeout: 20000 }).toBe(true);
 });

@@ -1,7 +1,7 @@
 import { LAB, LAB_BOXES, LAB_PORTAL_OBSTACLES, SPAWN_FLEET } from "./adventure-data";
 import RAPIER from "@dimforge/rapier3d-compat";
-import { Euler, Quaternion, Vector3 } from "three";
-import { FOOT_OFFSET, surfaceOrientation, eyePosition, viewDirection } from "./surface";
+import { Euler, Quaternion, Ray, Sphere, Vector3 } from "three";
+import { FOOT_OFFSET, surfaceOrientation, eyePosition, playerUp, viewDirection } from "./surface";
 import {
   terrainMesh,
   groundAt,
@@ -16,6 +16,7 @@ import {
   sphericalGravity,
   SOLAR_SYSTEM,
   type SpaceshipKind,
+  type CelestialBody,
 } from "./celestial";
 import {
   CAVE_COLLIDERS,
@@ -95,8 +96,8 @@ const PLAYER_RADIUS = 0.32;
 const PORTAL_RANGE = 45;
 const UPRIGHT = { x: 0, y: 0, z: 0, w: 1 };
 
-function capsuleDepth(normal: Vec) {
-  return PLAYER_RADIUS + PLAYER_HALF_SEGMENT * Math.abs(normal.y);
+function capsuleDepth(normal: Vec, up: Vector3) {
+  return PLAYER_RADIUS + PLAYER_HALF_SEGMENT * Math.abs(up.dot(normal));
 }
 
 export class MovementWorld {
@@ -385,7 +386,7 @@ export class MovementWorld {
     }
   }
 
-  private moveOnSphere(p: Player, i: Input) {
+  private moveOnSphere(p: Player, i: Input, portals?: PortalPair) {
     const planet = SOLAR_SYSTEM[p.planet!];
     const body = this.bodies.get(p.id)!;
     const position = new Vector3(p.x, p.y, p.z);
@@ -442,6 +443,10 @@ export class MovementWorld {
     const next = position.clone().add(this.controller.computedMovement());
     const landed = radial <= 0 && next.distanceTo(center) <= planet.radius + FOOT_OFFSET + 0.08;
     const resolved = landed ? new Vector3().copy(projectToSphere(next, planet, FOOT_OFFSET)) : next;
+    p.vx = movement.x / DT;
+    p.vy = movement.y / DT;
+    p.vz = movement.z / DT;
+    if (this.tryPortals(p, i, position, resolved.clone().sub(position), portals)) return;
     if (landed && !p.grounded && radial < -2) {
       p.landing = -radial;
       p.landingId++;
@@ -466,33 +471,39 @@ export class MovementWorld {
   }
 
   aimPortal(p: Player, other?: Portal): Portal | null {
-    if (p.seat >= 0 || p.planet) return null;
+    if (p.seat >= 0) return null;
     const eye = eyePosition(p);
     const direction = viewDirection(p);
     const ray = new RAPIER.Ray(eye, direction);
     const hit = this.world.castRayAndGetNormal(ray, PORTAL_RANGE, true, undefined, ALL_SOLID_FOR_PLAYER);
-    if (!hit || hit.timeOfImpact < 0.15) return null;
-    const face = this.portalSurfaces.get(hit.collider.handle);
-    if (!face || this.portalObstacles.some(({ box, shape }) =>
-      shape.intersectsRay(ray, box, UPRIGHT, hit.timeOfImpact),
-    )) return null;
+    const planet = p.planet ? SOLAR_SYSTEM[p.planet] : undefined;
+    const center = new Vector3();
+    const normal = new Vector3();
 
-    const normal = new Vector3().copy(hit.normal).round();
-    if (normal.dot(direction) > -0.15) return null;
-    const center = eye.addScaledVector(direction, hit.timeOfImpact);
-    const vertical = normal.y === 0;
-    if (vertical) center.y -= 0.3;
-    const radii = {
-      x: PORTAL_RADIUS_X,
-      y: vertical ? PORTAL_RADIUS_Y : 0,
-      z: vertical ? PORTAL_RADIUS_X : PORTAL_RADIUS_Y,
-    };
-    for (const axis of ["x", "y", "z"] as const) {
-      if (normal[axis]) continue;
-      const slack = face.halfSize[axis] - radii[axis] - 0.06;
-      if (slack < 0 || Math.abs(center[axis] - face.center[axis]) > slack + 0.8) return null;
-      center[axis] = Math.max(face.center[axis] - slack, Math.min(face.center[axis] + slack, center[axis]));
+    if (planet) {
+      const surface = new Sphere(new Vector3().copy(planet.position), planet.radius);
+      const point = new Ray(eye, direction).intersectSphere(surface, center);
+      if (!point || eye.distanceTo(center) > Math.min(PORTAL_RANGE, hit?.timeOfImpact ?? Infinity)) return null;
+      normal.copy(center).sub(surface.center).normalize();
+    } else {
+      if (!hit || hit.timeOfImpact < 0.15 || hit.collider.parent() ||
+          this.portalObstacles.some(({ box, shape }) => shape.intersectsRay(ray, box, UPRIGHT, hit.timeOfImpact))) return null;
+      const face = this.portalSurfaces.get(hit.collider.handle);
+      normal.copy(hit.normal).normalize();
+      center.copy(eye).addScaledVector(direction, hit.timeOfImpact);
+      if (face) {
+        const vertical = normal.y === 0;
+        if (vertical) center.y -= 0.3;
+        const radii = { x: PORTAL_RADIUS_X, y: vertical ? PORTAL_RADIUS_Y : 0, z: vertical ? PORTAL_RADIUS_X : PORTAL_RADIUS_Y };
+        for (const axis of ["x", "y", "z"] as const) {
+          if (normal[axis]) continue;
+          const slack = face.halfSize[axis] - radii[axis] - 0.06;
+          if (slack < 0 || Math.abs(center[axis] - face.center[axis]) > slack + 0.8) return null;
+          center[axis] = Math.max(face.center[axis] - slack, Math.min(face.center[axis] + slack, center[axis]));
+        }
+      } else if (!this.portalSurfaceFits(center, normal, hit.collider)) return null;
     }
+    if (normal.dot(direction) > -0.15) return null;
 
     if (other && normal.dot(other.normal) > 0.99) {
       const separation = center.clone().sub(other.center).applyQuaternion(portalFrame(normal).invert());
@@ -500,27 +511,56 @@ export class MovementWorld {
           (separation.x / PORTAL_RADIUS_X) ** 2 + (separation.y / PORTAL_RADIUS_Y) ** 2 < 4.2) return null;
     }
 
-    // Leave enough space to emerge upright, including under shallow overhangs.
-    const probe = center.clone().addScaledVector(normal, capsuleDepth(normal) + 0.12);
-    if (this.portalExitBlocked(probe)) return null;
-    return { center: { x: center.x, y: center.y, z: center.z }, normal: { x: normal.x, y: normal.y, z: normal.z } };
+    const up = playerUp(p);
+    const probe = center.clone().addScaledVector(normal, capsuleDepth(normal, up) + 0.12);
+    if (this.portalExitBlocked(probe, up, planet)) return null;
+    return { center: { ...center }, normal: { ...normal }, ...(planet && { planet: planet.id }) };
   }
 
-  private portalExitBlocked(position: Vec) {
-    return !!this.world.intersectionWithShape(position, UPRIGHT, this.portalCapsule, undefined, ALL_SOLID_FOR_PLAYER) ||
+  private portalSurfaceFits(center: Vector3, normal: Vector3, collider: RAPIER.Collider) {
+    const frame = portalFrame(normal);
+    const sample = new Vector3();
+    const inward = normal.clone().negate();
+    for (let index = 0; index < 8; index++) {
+      const angle = index * Math.PI / 4;
+      sample.set(Math.cos(angle) * PORTAL_RADIUS_X, Math.sin(angle) * PORTAL_RADIUS_Y, 0)
+        .applyQuaternion(frame).add(center).addScaledVector(normal, 0.4);
+      const hit = this.world.castRayAndGetNormal(
+        new RAPIER.Ray(sample, inward), 0.54, true, undefined, ALL_SOLID_FOR_PLAYER,
+      );
+      if (!hit || hit.collider.handle !== collider.handle || hit.timeOfImpact < 0.27 || normal.dot(hit.normal) < 0.93)
+        return false;
+    }
+    return true;
+  }
+
+  private portalExitBlocked(position: Vec, up: Vector3, planet?: CelestialBody) {
+    if (planet && new Vector3().copy(position).distanceTo(planet.position) < planet.radius + FOOT_OFFSET) return true;
+    const orientation = new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), up);
+    return !!this.world.intersectionWithShape(position, orientation, this.portalCapsule, undefined, ALL_SOLID_FOR_PLAYER) ||
       this.portalObstacles.some(({ box, shape }) =>
-        shape.intersectsShape(box, UPRIGHT, this.portalCapsule, position, UPRIGHT),
+        shape.intersectsShape(box, UPRIGHT, this.portalCapsule, position, orientation),
       );
   }
 
+  private tryPortals(p: Player, i: Input, start: Vec, moved: Vec, portals?: PortalPair) {
+    return portals?.blue && portals.orange &&
+      (this.transitPortal(p, i, start, moved, portals.blue, portals.orange) ||
+       this.transitPortal(p, i, start, moved, portals.orange, portals.blue));
+  }
+
   private transitPortal(p: Player, i: Input, start: Vec, moved: Vec, entry: Portal, exit: Portal) {
+    if ((p.planet ?? null) !== (entry.planet ?? null)) return false;
+    const entryUp = playerUp(p);
+    const planet = exit.planet ? SOLAR_SYSTEM[exit.planet] : undefined;
+    const exitUp = planet ? new Vector3().copy(exit.center).sub(planet.position).normalize() : new Vector3(0, 1, 0);
     const movement = new Vector3().copy(moved);
     const velocity = new Vector3(p.vx, p.vy, p.vz);
     const approach = -velocity.dot(entry.normal);
     if (approach <= 0.01) return false;
     const from = new Vector3().copy(start).sub(entry.center);
     const reached = from.clone().add(movement);
-    const clearance = capsuleDepth(entry.normal) + 0.055;
+    const clearance = capsuleDepth(entry.normal, entryUp) + 0.055;
     // Use collision-resolved movement to ensure a wall in front of the portal still blocks it.
     const distance = from.dot(entry.normal);
     const contact = (distance - clearance) / (approach * DT);
@@ -530,37 +570,41 @@ export class MovementWorld {
     // Test the contact point before the slide, while allowing a step onto a floor portal.
     const crossing = contact > 0 ? from.addScaledVector(velocity, DT * contact) : reached;
     const relative = crossing.clone().applyQuaternion(portalFrame(entry.normal).invert());
-    const vertical = entry.normal.y === 0;
+    const vertical = Math.abs(entryUp.dot(entry.normal)) < 0.5;
     if ((relative.x / (PORTAL_RADIUS_X - PLAYER_RADIUS)) ** 2 +
         (relative.y / (PORTAL_RADIUS_Y - (vertical ? 0.72 : PLAYER_RADIUS))) ** 2 > 1) return false;
 
     const rotation = portalRotation(entry, exit);
-    const exitCenter = new Vector3().copy(exit.center).addScaledVector(exit.normal, capsuleDepth(exit.normal) + 0.12);
+    const exitCenter = new Vector3().copy(exit.center).addScaledVector(exit.normal, capsuleDepth(exit.normal, exitUp) + 0.12);
     const position = crossing.addScaledVector(entry.normal, -crossing.dot(entry.normal))
       .applyQuaternion(rotation).add(exitCenter);
-    if (this.portalExitBlocked(position)) {
-      if (this.portalExitBlocked(exitCenter)) return false;
+    if (this.portalExitBlocked(position, exitUp, planet)) {
+      if (this.portalExitBlocked(exitCenter, exitUp, planet)) return false;
       // An upright capsule can hit the floor when a floor portal maps to a wall.
       // Nudge that exit toward the nearest clear point inside the aperture.
       const blocked = position.clone();
       position.copy(exitCenter);
       for (let attempt = 0; attempt < 4; attempt++) {
         const probe = position.clone().lerp(blocked, 0.5);
-        if (this.portalExitBlocked(probe)) blocked.copy(probe);
+        if (this.portalExitBlocked(probe, exitUp, planet)) blocked.copy(probe);
         else position.copy(probe);
       }
     }
 
     const facing = viewDirection({ ...p, yaw: i.yaw, pitch: i.pitch }).applyQuaternion(rotation);
+    const exitFrame = new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), exitUp);
+    facing.applyQuaternion(exitFrame.clone().invert());
     velocity.applyQuaternion(rotation);
     Object.assign(p, {
+      planet: exit.planet ?? null,
+      surfaceRotation: { x: exitFrame.x, y: exitFrame.y, z: exitFrame.z, w: exitFrame.w },
       x: position.x, y: position.y, z: position.z,
       vx: velocity.x, vy: velocity.y, vz: velocity.z,
       yaw: Math.atan2(-facing.x, -facing.z),
       pitch: Math.max(-1.35, Math.min(1.35, Math.asin(Math.max(-1, Math.min(1, facing.y))))),
       grounded: false,
       grapple: null,
-      travel: p.travel + Math.hypot(moved.x, moved.z),
+      travel: p.travel + movement.length(),
       portalTransit: (p.portalTransit ?? 0) + 1,
     });
     this.reset(p.id, p);
@@ -590,7 +634,7 @@ export class MovementWorld {
       }
     }
     if (p.planet && SOLAR_SYSTEM[p.planet]) {
-      this.moveOnSphere(p, i);
+      this.moveOnSphere(p, i, portals);
       return;
     }
     this.controller.setUp({ x: 0, y: 1, z: 0 });
@@ -672,9 +716,7 @@ export class MovementWorld {
     );
     const d = this.controller.computedMovement(),
       pos = body.body.translation();
-    if (portals?.blue && portals.orange &&
-        (this.transitPortal(p, i, pos, d, portals.blue, portals.orange) ||
-         this.transitPortal(p, i, pos, d, portals.orange, portals.blue))) return;
+    if (this.tryPortals(p, i, pos, d, portals)) return;
     p.x = Math.max(-HALF + 8, Math.min(HALF - 8, pos.x + d.x));
     p.y = pos.y + d.y;
     p.z = Math.max(-HALF + 8, Math.min(HALF - 8, pos.z + d.z));
