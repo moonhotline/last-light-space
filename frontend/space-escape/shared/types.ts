@@ -1,5 +1,5 @@
 import type { Vec } from "./map";
-import type { Inventory, ItemId } from "./adventure-data";
+import type { Inventory, ItemId, WEDGE_SENTINEL } from "./adventure-data";
 import type { SpaceshipKind } from "./celestial";
 import type { PortalColor, PortalPair } from "./portals";
 export const DT = 1 / 30;
@@ -87,6 +87,7 @@ export interface ResourceNode extends Vec {
   hitId: number;
 }
 export interface Drone extends Vec {
+  kind: typeof WEDGE_SENTINEL.kind;
   id: number;
   hp: number;
   yaw: number;

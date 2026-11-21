@@ -601,8 +601,15 @@ export class MovementWorld {
         p.grapple = this.aim(p, 85);
         if (p.grapple) {
           p.grappleId++;
+          const liftFromGround = p.grounded && p.grapple.y > p.y;
           p.grounded = false;
-          p.vy = Math.max(p.vy, 5);
+          const x = p.grapple.x - p.x, y = p.grapple.y - p.y, z = p.grapple.z - p.z;
+          const distance = Math.hypot(x, y, z);
+          const pickup = distance > 3 ? Math.min(4, (distance - 3) * .5) / distance : 0;
+          p.vx += x * pickup;
+          p.vy += y * pickup;
+          if (liftFromGround) p.vy = Math.max(p.vy, 3);
+          p.vz += z * pickup;
         }
       }
     }
@@ -622,8 +629,13 @@ export class MovementWorld {
     const speed = p.dashTime > 0 ? 43 : p.skate ? (i.sprint ? 32 : 23) : i.sprint ? 23 : 15;
     const factor = 1 - Math.exp(-(p.grounded && !p.grapple ? (p.skate ? 3.5 : 10) : 0.75) * DT);
     const dashForward = p.dashTime > 0 && len === 1 && i.forward === 0 && i.side === 0;
-    p.vx += ((dashForward ? -Math.sin(i.yaw) : dx) * speed - p.vx) * factor;
-    p.vz += ((dashForward ? -Math.cos(i.yaw) : dz) * speed - p.vz) * factor;
+    if (p.grapple && !dashForward) {
+      p.vx += dx * 13 * DT;
+      p.vz += dz * 13 * DT;
+    } else {
+      p.vx += ((dashForward ? -Math.sin(i.yaw) : dx) * speed - p.vx) * factor;
+      p.vz += ((dashForward ? -Math.cos(i.yaw) : dz) * speed - p.vz) * factor;
+    }
     if (i.jump && !p.jumpHeld && p.grounded) {
       p.vy = 12;
       p.grounded = false;
@@ -651,9 +663,10 @@ export class MovementWorld {
       const d = Math.hypot(dx, dy, dz);
       if (d < 3 || d > 100) p.grapple = null;
       else {
-        p.vx += (dx / d) * 52 * DT;
-        p.vy += (dy / d) * 52 * DT;
-        p.vz += (dz / d) * 52 * DT;
+        const pull = 58 * Math.min(1, (d - 2) / 12) * DT / d;
+        p.vx += dx * pull;
+        p.vy += dy * pull;
+        p.vz += dz * pull;
         const speed = Math.hypot(p.vx, p.vy, p.vz);
         if (speed > 48) {
           p.vx *= 48 / speed;

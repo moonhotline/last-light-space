@@ -25,6 +25,20 @@ test("place both portals with real controls, see through and walk through in bot
   await page.keyboard.press("4");
   await expect(page.locator("#portalBlue")).toHaveClass(/active/);
   await expect(page.locator("#portalOrange")).not.toHaveClass(/active/);
+  const weapon = await page.evaluate(() => {
+    const view = (window as any).__lastLight.view();
+    const gun = view.toolModel.getObjectByName("dawn_lab_portal_projector");
+    let triangles = 0, skin = 0;
+    view.toolModel.traverse((part: any) => {
+      if (part.isSkinnedMesh || part.isBone) skin++;
+    });
+    gun.traverse((part: any) => {
+      if (part.isMesh) triangles += (part.geometry.index?.count ?? part.geometry.attributes.position.count) / 3;
+    });
+    return { triangles, skin, mounted: gun.parent === view.toolModel, castsInWorld: view.scene.getObjectByName(gun.name) !== undefined };
+  });
+  expect(weapon.triangles).toBeGreaterThanOrEqual(200000);
+  expect(weapon).toMatchObject({ skin: 0, mounted: true, castsInWorld: false });
   await page.evaluate(() => (window as any).__lastLight.setViewRotation(-Math.PI / 2, 0));
   await page.evaluate(() => document.exitPointerLock());
   await page.locator("#portalOrange").click();

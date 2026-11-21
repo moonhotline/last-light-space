@@ -15,6 +15,7 @@ import {
   SPAWN_FLEET,
   SHIP_MAX_SPEED,
   OUTPOST,
+  WEDGE_SENTINEL,
   LORE,
   DESTINATION,
   type ItemId,
@@ -31,12 +32,13 @@ export function createAdventure(): Adventure {
     lore: [],
     completeAt: -1,
     nodes: RESOURCE_SITES.map((n, id) => ({ ...n, id, readyAt: 0, hitId: 0 })),
-    drones: [0, 1, 2].map((id) => ({
+    drones: Array.from({ length: WEDGE_SENTINEL.squadSize }, (_, id) => ({
       ...OUTPOST,
       x: OUTPOST.x + (id - 1) * 14,
       y: OUTPOST.y + 5,
       id,
-      hp: 100,
+      kind: WEDGE_SENTINEL.kind,
+      hp: WEDGE_SENTINEL.health,
       yaw: 0,
       target: "",
       mode: "patrol",
@@ -144,7 +146,7 @@ export function tool(sim: Simulation, p: Player) {
       sim.emit(
         a.drones.every((v) => v.hp <= 0)
           ? "封锁解除 · 切割反应堆，取出动力核心"
-          : "守卫已摧毁 · 合金废料 +1",
+          : `${WEDGE_SENTINEL.name}已摧毁 · 合金废料 +1`,
       );
     }
   } else {

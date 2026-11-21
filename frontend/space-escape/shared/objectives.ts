@@ -2,6 +2,7 @@ import type { Player, Snapshot } from "./types";
 import {
   LORE,
   OUTPOST,
+  WEDGE_SENTINEL,
   DESTINATION,
   REPAIR,
   ITEMS,
@@ -71,7 +72,7 @@ export function missionObjective(s: Snapshot, p: Player) {
       OUTPOST,
       4,
       "解除反应堆封锁",
-      `守卫 ${a.drones.filter((d) => d.hp > 0).length}/3 · 瞄准并发射脉冲，红色锁定时移动闪避`,
+      `${WEDGE_SENTINEL.name} ${a.drones.filter((d) => d.hp > 0).length}/${a.drones.length} · 瞄准并发射脉冲，红色锁定时移动闪避`,
     );
   if (count("core") < 1)
     return result(

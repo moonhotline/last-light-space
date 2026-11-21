@@ -90,6 +90,12 @@ export const ALIEN2_POS = atGround(9.5, 350, 1.2);      // 重装蜥蜴卫士 (R
 export const MINERALS_POS = atGround(3.5, 348, 0.6);    // 异星矿物样本晶体节点 (Minerals)
 export const LAB = atGround(12, 192);
 export const OUTPOST = atGround(176, -68);
+export const WEDGE_SENTINEL = {
+  kind: "wedge-sentinel",
+  name: "倒楔哨兵",
+  health: 100,
+  squadSize: 3,
+} as const;
 export const DESTINATION = atGround(-310, -210);
 export const LORE = [
   {

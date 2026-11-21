@@ -6,6 +6,7 @@ import {
   REPAIR,
   LORE,
   RESOURCE_SITES,
+  WEDGE_SENTINEL,
   type ItemId,
 } from "../shared/adventure-data";
 import { shipBoardingTarget } from "../shared/adventure";
@@ -63,6 +64,7 @@ import type { MovementWorld } from "../shared/physics";
 import type { PortalColor } from "../shared/portals";
 import {
   GameView,
+  type Equipment,
   exportHoverboardGlb,
   exportTechRifleGlb,
   exportSurveyCameraGlb,
@@ -580,7 +582,8 @@ function makeInput(): Input {
       (keys.has("KeyQ") ||
         pulses.has("KeyQ") ||
         (view.activeWeapon === "grapple" && keys.has("Mouse0"))),
-    fire: active && (keys.has("Mouse0") || keys.has("KeyT")),
+    fire: active && (keys.has("KeyT") ||
+      ((view.activeWeapon === "none" || view.activeWeapon === "rifle") && keys.has("Mouse0"))),
     brake: active && keys.has("KeyX"),
     interact: active && (keys.has("KeyE") || pulses.has("KeyE")),
     skate: active && isSkating,
@@ -954,7 +957,7 @@ function hud() {
         label.className = "enemy-label";
         label.style.left = point.x + "px";
         label.style.top = point.y + "px";
-        label.textContent = `守卫 ${d.hp} / 100${d.mode === "charge" ? " · 已锁定，移动闪避" : ""}`;
+        label.textContent = `${WEDGE_SENTINEL.name} ${d.hp} / ${WEDGE_SENTINEL.health}${d.mode === "charge" ? " · 已锁定，移动闪避" : ""}`;
         return [label];
       }),
   );
@@ -1151,7 +1154,7 @@ function keyDown(key: string) {
   }
   keys.add(key);
 }
-function selectWeapon(w: "none" | "rifle" | "grapple" | "camera") {
+function selectWeapon(w: Equipment) {
   view.setWeapon(w);
   const slots: Record<"rifle" | "grapple" | "camera", string> = {
     rifle: "wepRifle",
@@ -1162,7 +1165,7 @@ function selectWeapon(w: "none" | "rifle" | "grapple" | "camera") {
     const el = document.getElementById(id);
     if (el) el.classList.toggle("active", key === w);
   }
-  if (w === "camera") {
+  if (w === "camera" || w === "portal") {
     view.thirdPerson = false;
   }
   updateViewfinderVisibility();
@@ -1218,7 +1221,7 @@ addEventListener("keydown", (e) => {
   if (e.code === "Digit4") placePortal("blue");
   if (e.code === "Digit5") placePortal("orange");
   if (e.code === "Digit0" || e.code === "Backquote") selectWeapon("none");
-  if (e.code === "KeyQ") selectWeapon(view.activeWeapon === "grapple" ? "none" : "grapple");
+  if (e.code === "KeyQ" && view.activeWeapon !== "grapple") selectWeapon("grapple");
   if (e.code === "KeyT") command("mark");
   if (e.code === "KeyV") camera();
   if (e.code === "KeyP") {
@@ -1253,7 +1256,7 @@ addEventListener(
       view.cameraZoom = Math.max(1.0, Math.min(4.5, view.cameraZoom + delta));
       return;
     }
-    const weapons: ("none" | "rifle" | "grapple" | "camera")[] = [
+    const weapons: Equipment[] = [
       "none",
       "rifle",
       "grapple",
@@ -1343,7 +1346,8 @@ $("btnSwitchShip") && ($("btnSwitchShip").onclick = switchSpacecraft);
 function placePortal(color: PortalColor) {
   if (panel || !state?.portals || !me || me.seat >= 0 || me.planet) return;
   portalPlacement = color;
-  view.thirdPerson = false;
+  view.armPortal(color);
+  selectWeapon("portal");
 }
 $("portalBlue").onclick = () => placePortal("blue");
 $("portalOrange").onclick = () => placePortal("orange");

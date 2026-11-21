@@ -1,4 +1,6 @@
 import { weatherMaterials } from "./weathering";
+import { createSentinel } from "./sentinel-model";
+import { GrappleCable } from "./grapple-cable";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
@@ -7,6 +9,7 @@ import {
   LORE,
   RESOURCE_SITES,
   OUTPOST,
+  WEDGE_SENTINEL,
   DESTINATION,
   FIGHTER_POS,
   SPAWN_FLEET,
@@ -68,7 +71,8 @@ export class AdventureView {
   nodes: THREE.Group[] = [];
   clues: THREE.Group[] = [];
   drones: THREE.Group[] = [];
-  ropes = new Map<string, THREE.Line>();
+  ropes = new Map<string, GrappleCable>();
+  private readonly cableOrigin = new THREE.Vector3();
   bulletModel: THREE.Group | null = null;
   projectiles: {
     model: THREE.Group;
@@ -100,10 +104,9 @@ export class AdventureView {
       }
       throw error;
     };
-    const [ship, lab, drone, bullet, crateGltf, coreGltf, obeliskGltf, mineralGltf] = await Promise.all([
+    const [ship, lab, bullet, crateGltf, coreGltf, obeliskGltf, mineralGltf] = await Promise.all([
       load(SPAWN_FLEET.light_fighter.asset),
       load("/assets/dawn-lab.glb"),
-      load("/assets/drone.glb"),
       load("/assets/kinetic-bullet.glb"),
       load("/assets/crate.glb").catch(() => null),
       load("/assets/core.glb").catch(() => null),
@@ -117,7 +120,7 @@ export class AdventureView {
         o.receiveShadow = false;
       }
     });
-    [lab.scene, drone.scene, crateGltf?.scene, coreGltf?.scene, obeliskGltf?.scene, mineralGltf?.scene].forEach((root) => {
+    [lab.scene, crateGltf?.scene, coreGltf?.scene, obeliskGltf?.scene, mineralGltf?.scene].forEach((root) => {
       if (!root) return;
       root.traverse((o) => {
         if (o instanceof THREE.Mesh) {
@@ -272,8 +275,14 @@ export class AdventureView {
       this.scene.add(g);
       this.nodes.push(g);
     }
-    for (let i = 0; i < 3; i++) {
-      const g = drone.scene.clone(true);
+    const closeDrone = createSentinel("near");
+    const distantDrone = createSentinel("far");
+    for (let i = 0; i < WEDGE_SENTINEL.squadSize; i++) {
+      const g = new THREE.Group();
+      const near = closeDrone.clone(true);
+      const far = distantDrone.clone(true);
+      near.visible = false;
+      g.add(near, far);
       g.scale.setScalar(2.3);
       this.drones.push(g);
       this.scene.add(g);
@@ -303,32 +312,29 @@ export class AdventureView {
     this.projectiles.push({ model, start, end, age: 0, duration, color });
     this.burst({ x: start.x, y: start.y, z: start.z }, 4, color, 1.8);
   }
-  line(color: number) {
-    const g = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(),
-      new THREE.Vector3(),
-    ]);
-    const line = new THREE.Line(
-      g,
-      new THREE.LineBasicMaterial({
-        color,
-        transparent: true,
-        opacity: 0.85,
-        depthWrite: false,
-      }),
-    );
-    line.frustumCulled = false;
-    line.visible = false;
-    this.scene.add(line);
-    return line;
+  updateGrappleCables(s: Snapshot, local: Player | null, muzzle: THREE.Vector3 | undefined, dt: number, time: number) {
+    const ids = new Set<string>();
+    for (const p of s.players) {
+      ids.add(p.id);
+      const own = local?.id === p.id;
+      const data = own ? local : p;
+      let cable = this.ropes.get(p.id);
+      if (!cable) {
+        if (!data.grapple) continue;
+        cable = new GrappleCable();
+        this.ropes.set(p.id, cable);
+        this.scene.add(cable);
+      }
+      const start = own && muzzle ? muzzle : this.cableOrigin.set(data.x, data.y + .35, data.z);
+      cable.update(start, data.grapple, dt, time);
+    }
+    for (const [id, cable] of this.ropes) {
+      if (ids.has(id)) continue;
+      cable.dispose();
+      this.ropes.delete(id);
+    }
   }
-  setLine(line: THREE.Line, a: Vec, b: Vec) {
-    const p = line.geometry.getAttribute("position") as THREE.BufferAttribute;
-    p.setXYZ(0, a.x, a.y, a.z);
-    p.setXYZ(1, b.x, b.y, b.z);
-    p.needsUpdate = true;
-    line.visible = true;
-  }
+
   buildOutpost() {
     const mat = new THREE.MeshStandardMaterial({
       color: 0x3c474a,
@@ -508,6 +514,10 @@ export class AdventureView {
           d.hp ? 7 : 18,
         );
       g.visible = d.hp > 0;
+      const near = !!me && Math.hypot(me.x - d.x, me.y - d.y, me.z - d.z) <
+        (g.children[0].visible ? 41 : 35);
+      g.children[0].visible = near;
+      g.children[1].visible = !near;
       g.position.lerp(v(d), 1 - Math.exp(-dt * 18));
       g.rotation.set(
         Math.sin(t * 3 + id) * 0.05,
@@ -524,18 +534,6 @@ export class AdventureView {
     for (const p of s.players) {
       const own = p.id === me?.id,
         data = own ? me! : p;
-      let rope = this.ropes.get(p.id);
-      if (!rope) {
-        rope = this.line(0xb1e6e6);
-        this.ropes.set(p.id, rope);
-      }
-      rope.visible = !!data.grapple;
-      if (data.grapple)
-        this.setLine(
-          rope,
-          { x: data.x, y: data.y + 0.35, z: data.z },
-          data.grapple,
-        );
       if (this.changed("shot" + p.id, p.shotId)) {
         const start = new THREE.Vector3(data.x, data.y + 0.35, data.z);
         const end = new THREE.Vector3(p.shotEnd.x, p.shotEnd.y, p.shotEnd.z);
@@ -600,12 +598,5 @@ export class AdventureView {
         this.projectiles.splice(i, 1);
       }
     }
-    for (const [id, line] of this.ropes)
-      if (!s.players.some((p) => p.id === id)) {
-        this.scene.remove(line);
-        line.geometry.dispose();
-        (line.material as THREE.Material).dispose();
-        this.ropes.delete(id);
-      }
   }
 }
