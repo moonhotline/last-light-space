@@ -65,11 +65,11 @@ import { nextPortalColor, type PortalAction } from "../shared/portals";
 import {
   GameView,
   type Equipment,
+  downloadAsset,
   exportHoverboardGlb,
   exportTechRifleGlb,
   exportSurveyCameraGlb,
   exportGrappleLauncherGlb,
-  takeSnapshot,
 } from "./scene";
 const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id) as T;
@@ -105,6 +105,7 @@ let skateCumulativeYaw = 0;
 let lastPlayerYaw = 0;
 let lastSpaceTime = 0;
 let attachedFeedbackImg = "";
+let latestPhoto: string | null = null;
 let pending: Input[] = [],
   sequence = 0,
   yaw = 0,
@@ -1188,6 +1189,21 @@ function selectWeapon(w: Equipment) {
   updateViewfinderVisibility();
 }
 
+function capturePhoto() {
+  selectWeapon("camera");
+  // Capture after the world has rendered from the newly selected camera view.
+  requestAnimationFrame(() => {
+    const photo = view.takeSnapshot();
+    if (!photo) {
+      notice("拍照失败，请重试");
+      return;
+    }
+    latestPhoto = photo;
+    $<HTMLButtonElement>("savePhoto").disabled = false;
+    notice("已拍照，可在物品栏保存");
+  });
+}
+
 addEventListener("keydown", (e) => {
   if ((e.target as HTMLElement)?.matches("input, textarea")) {
     if (e.code === "Escape") {
@@ -1241,10 +1257,7 @@ addEventListener("keydown", (e) => {
   if (e.code === "KeyQ") selectWeapon(view.activeWeapon === "grapple" ? "none" : "grapple");
   if (e.code === "KeyT") command("mark");
   if (e.code === "KeyV") camera();
-  if (e.code === "KeyP") {
-    selectWeapon("camera");
-    takeSnapshot(view);
-  }
+  if (e.code === "KeyP") capturePhoto();
   if (e.code === "KeyK") toggleHoverboard();
   if (e.code === "KeyR") {
     if (view.activeWeapon === "rifle" || playerAmmo < 24) {
@@ -1313,7 +1326,7 @@ canvas.addEventListener("mousedown", (e) => {
       selectWeapon("rifle");
     }
     if (view.activeWeapon === "camera") {
-      takeSnapshot(view);
+      capturePhoto();
     } else {
       keys.add("Mouse0");
     }
@@ -1367,8 +1380,13 @@ function switchSpacecraft() {
     : "靠近停机坪上的飞船，按 E 登船并切换舰种");
 }
 
-$("snapshot") && ($("snapshot").onclick = () => takeSnapshot(view));
-$("snapPhoto") && ($("snapPhoto").onclick = () => takeSnapshot(view));
+$("snapshot").onclick = capturePhoto;
+$("snapPhoto").onclick = capturePhoto;
+$("savePhoto").onclick = () => {
+  if (latestPhoto) {
+    downloadAsset(latestPhoto, `last-light-snapshot-${Date.now()}.png`);
+  }
+};
 $("toggleSkate") && ($("toggleSkate").onclick = toggleHoverboard);
 $("btnSwitchShip") && ($("btnSwitchShip").onclick = switchSpacecraft);
 function togglePortalGun() {
