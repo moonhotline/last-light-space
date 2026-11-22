@@ -22,6 +22,7 @@ import {
 } from "./adventure-data";
 import { groundAt, distance3, distance, HALF, clamp, type Vec } from "./map";
 import { HOME_PLANET_SPHERE, SHIP_COLLIDER_SPECS } from "./colliders";
+import { HOME_COLLAR_RADIUS } from "./home-planet";
 import { eyePosition, viewDirection, FOOT_OFFSET, surfaceOrientation } from "./surface";
 import { SOLAR_SYSTEM, celestialCapture, geodesicArcDistance, projectToSphere, type SpaceshipKind } from "./celestial";
 import { celestialFlightFrame } from "./celestial-flight";
@@ -622,6 +623,19 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
         s.grounded = false;
       }
     } else if (proposed.y > 650 || Math.abs(proposed.x) > HALF - 10 || Math.abs(proposed.z) > HALF - 10) {
+      // Beyond the basin the stitched cap triangles decide the floor. Farther
+      // around the planet, continue resolving landings against the spherical shell.
+      const home = HOME_PLANET_SPHERE;
+      const northCap = proposed.y > home.center.y &&
+        Math.hypot(proposed.x - home.center.x, proposed.z - home.center.z) < HOME_COLLAR_RADIUS;
+      const capHeight = northCap ? sim.physics.homeSurfaceHeight(proposed.x, proposed.z) : null;
+      if (capHeight !== null && proposed.y <= capHeight + 0.2) {
+        s.x = proposed.x;
+        s.y = capHeight + 0.2;
+        s.z = proposed.z;
+        s.grounded = true;
+        if (s.vy < 0) s.vy = 0;
+      } else {
       // Deep space / interplanetary navigation + solid spherical crust of the converged home planet
       const hx = proposed.x - HOME_PLANET_SPHERE.center.x;
       const hy = proposed.y - HOME_PLANET_SPHERE.center.y;
@@ -645,6 +659,7 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
         s.y = proposed.y;
         s.z = proposed.z;
         s.grounded = false;
+      }
       }
     } else {
       // Kepler local basin

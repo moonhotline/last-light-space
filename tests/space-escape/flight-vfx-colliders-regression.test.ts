@@ -19,7 +19,8 @@ import {
   SHIP_COLLIDER_SPECS,
 } from "../../frontend/space-escape/shared/colliders";
 import { SOLAR_SYSTEM } from "../../frontend/space-escape/shared/celestial";
-import { groundAt, SCENIC_SITES, terrainMesh } from "../../frontend/space-escape/shared/map";
+import { groundAt, HALF, SCENIC_SITES, SEGMENTS, terrainMesh, terrainRaw } from "../../frontend/space-escape/shared/map";
+import { HOME_COLLAR_RADIUS, homeSphereHeight } from "../../frontend/space-escape/shared/home-planet";
 import { idleInput } from "../../frontend/space-escape/shared/types";
 import { ShipPropulsionFX } from "../../frontend/space-escape/src/thruster-fx";
 import { InterplanetarySystem } from "../../frontend/space-escape/src/interplanetary";
@@ -339,22 +340,68 @@ test("ship ShapeCast blocks obelisks, warp gate outer frame, and converged home 
   );
 });
 
-test("converged home planet globe never protrudes above playable basin terrain", () => {
-  const verts = terrainMesh().vertices;
-  const { center, radius } = HOME_PLANET_SPHERE;
+test("mission route remains authored and a single indexed cap seals the square into the globe", () => {
+  const mesh = terrainMesh();
+  const verts = mesh.vertices;
+  const gridCount = (SEGMENTS + 1) ** 2;
+  assert.ok(verts.length / 3 > gridCount, "the outer shelf must belong to the same collision mesh");
+  for (const [x, z] of [[0, 355], [12, 192], [-40, 160], [180, -90], [-110, -370]]) {
+    assert.ok(Math.abs(groundAt(x, z) - terrainRaw(x, z)) < 3,
+      `authored landmark height moved at (${x}, ${z})`);
+  }
   for (let i = 0; i < verts.length; i += 3) {
-    const x = verts[i];
-    const y = verts[i + 1];
-    const z = verts[i + 2];
-    const rSq = (x - center.x) ** 2 + (z - center.z) ** 2;
-    if (rSq < radius * radius) {
-      const sphereY = center.y + Math.sqrt(radius * radius - rSq);
-      assert.ok(
-        sphereY < y - 2,
-        `home-planet-globe protruded near (${x},${z}): sphereY=${sphereY}, terrainY=${y}`,
-      );
+    const x = verts[i], y = verts[i + 1], z = verts[i + 2];
+    const sphereY = homeSphereHeight(x, z);
+    if (sphereY !== null) {
+      assert.ok(y >= sphereY - 0.02,
+        `globe protrudes through shared terrain at (${x}, ${z})`);
     }
   }
+  for (let j = 0; j <= SEGMENTS; j++) {
+    for (const [ix, iz] of [[0, j], [SEGMENTS, j], [j, 0], [j, SEGMENTS]]) {
+      const v = (iz * (SEGMENTS + 1) + ix) * 3;
+      const sphereY = homeSphereHeight(verts[v], verts[v + 2]);
+      assert.ok(sphereY !== null && Math.abs(verts[v + 1] - sphereY) < 0.02,
+        "the square's boundary must meet the spherical shelf without a height step");
+    }
+  }
+  const perimeter = SEGMENTS * 4;
+  for (let i = 0; i < perimeter; i += 67) {
+    const v = (verts.length / 3 - perimeter + i) * 3;
+    assert.ok(Math.abs(Math.hypot(verts[v], verts[v + 2]) - HOME_COLLAR_RADIUS) < 0.02);
+    const sphereY = homeSphereHeight(verts[v], verts[v + 2]);
+    assert.ok(sphereY !== null && Math.abs(verts[v + 1] - sphereY) < 0.02,
+      "the circular collar must end flush against the globe");
+  }
+});
+
+test("ship touchdown, Rapier surface query, and visible terrain agree outside the old square", (t) => {
+  const sim = new Simulation(2026);
+  t.after(() => sim.dispose());
+  for (const [x, z] of [[0, 355], [HALF - 5, 0], [HALF + 250, 0], [2100, 700]]) {
+    const y = sim.physics.homeSurfaceHeight(x, z);
+    assert.ok(y !== null && Number.isFinite(y), `missing collision floor at (${x}, ${z})`);
+    assert.ok(Math.abs(y! - groundAt(x, z)) < 1.5,
+      `Rapier and the gameplay ground lookup must agree even beyond the old square at (${x}, ${z})`);
+  }
+  const p = sim.add("pilot");
+  sim.start(p.id);
+  p.seat = 0;
+  const ship = sim.s.adventure.ship;
+  const x = HALF + 250, z = 0;
+  const y = sim.physics.homeSurfaceHeight(x, z)!;
+  Object.assign(ship, {
+    kind: "light_fighter", repaired: true, grounded: false,
+    seats: [p.id, "", "", ""], x, y: y + 20, z,
+    vx: 0, vy: -35, vz: 0, pitch: 0, bank: 0,
+  });
+  for (let frame = 0; frame < 240; frame++) {
+    tickShip(sim, new Map([[p.id, { ...idleInput(frame + 1), brake: true }]]));
+    assert.ok(ship.y >= y - 0.1, "the ship must not pass through the outer shelf");
+    if (ship.grounded) break;
+  }
+  assert.ok(ship.grounded, "the formerly visual-only perimeter must now accept a ship landing");
+  assert.ok(Math.abs(ship.y - (y + 0.2)) < 1, "landing height must agree with the Rapier triangle surface");
 });
 
 test("intergalactic Mercury disembark places player outside hull collider and prediction syncs dynamic colliders", (t) => {

@@ -21,6 +21,7 @@ import {
 import {
   CAVE_COLLIDERS,
   COLLISION_GROUP,
+  HOME_PLANET_SPHERE,
   GROVE_TREE_COLLIDERS,
   LORE_COLLIDERS,
   makeCollisionGroups,
@@ -34,6 +35,7 @@ import {
   WARPGATE_FRAME_COLLIDERS,
   type BoxColliderSpec,
 } from "./colliders";
+import { HOME_COLLAR_RADIUS } from "./home-planet";
 import { DT, type Adventure, type Input, type Player } from "./types";
 import { PORTAL_RADIUS_X, PORTAL_RADIUS_Y, portalFrame, portalRotation, type Portal, type PortalPair } from "./portals";
 
@@ -117,6 +119,7 @@ export class MovementWorld {
     { body: RAPIER.RigidBody; collider: RAPIER.Collider }
   >();
   private terrainCollider: RAPIER.Collider;
+  private homeGlobeCollider: RAPIER.Collider;
   private portalSurfaces = new Map<number, { center: Vec; halfSize: Vec }>();
   private portalObstacles = LAB_PORTAL_OBSTACLES.map(box => ({
     box,
@@ -134,6 +137,12 @@ export class MovementWorld {
     const m = terrainMesh();
     this.terrainCollider = this.world.createCollider(
       RAPIER.ColliderDesc.trimesh(m.vertices, m.indices).setCollisionGroups(WORLD_MEMBERSHIP),
+    );
+    const home = HOME_PLANET_SPHERE;
+    this.homeGlobeCollider = this.world.createCollider(
+      RAPIER.ColliderDesc.ball(home.radius)
+        .setTranslation(home.center.x, home.center.y, home.center.z)
+        .setCollisionGroups(WORLD_MEMBERSHIP),
     );
 
     // Rocks (lowered threshold to > 1.2m from shared single source of truth)
@@ -717,9 +726,16 @@ export class MovementWorld {
     const d = this.controller.computedMovement(),
       pos = body.body.translation();
     if (this.tryPortals(p, i, pos, d, portals)) return;
-    p.x = Math.max(-HALF + 8, Math.min(HALF - 8, pos.x + d.x));
+    // Preserve the continuous polar shelf: no invisible square boundary.
+    // Keep the player on the supported north-cap until radial locomotion is implemented.
+    const nextX = pos.x + d.x;
+    const nextZ = pos.z + d.z;
+    const edge = HOME_COLLAR_RADIUS - 8;
+    const radial = Math.hypot(nextX, nextZ);
+    const scale = radial > edge ? edge / radial : 1;
+    p.x = nextX * scale;
     p.y = pos.y + d.y;
-    p.z = Math.max(-HALF + 8, Math.min(HALF - 8, pos.z + d.z));
+    p.z = nextZ * scale;
     p.travel += Math.hypot(d.x, d.z);
     p.grounded = this.controller.computedGrounded();
     if (p.grounded && p.vy < 0) {
@@ -755,6 +771,28 @@ export class MovementWorld {
           z: origin.z + direction.z * hit.timeOfImpact,
         }
       : null;
+  }
+
+  /**
+   * Exact north-cap terrain query via Rapier, using only the same indexed mesh
+   * and globe geometry the renderer displays. Southern landing stays radial.
+   */
+  homeSurfaceHeight(x: number, z: number): number | null {
+    const { center, radius } = HOME_PLANET_SPHERE;
+    if (Math.hypot(x - center.x, z - center.z) >= radius) return null;
+    const startY = center.y + radius + 2200;
+    const hit = this.world.castRay(
+      new RAPIER.Ray({ x, y: startY, z }, { x: 0, y: -1, z: 0 }),
+      radius * 2 + 2200,
+      true,
+      RAPIER.QueryFilterFlags.EXCLUDE_KINEMATIC,
+      WORLD_ONLY_QUERY,
+      undefined,
+      undefined,
+      (collider) => collider.handle === this.terrainCollider.handle ||
+        collider.handle === this.homeGlobeCollider.handle,
+    );
+    return hit ? startY - hit.timeOfImpact : null;
   }
 
   /**

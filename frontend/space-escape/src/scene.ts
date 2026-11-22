@@ -733,6 +733,9 @@ export class GameView {
       map: tex,
       bumpMap: tex,
       bumpScale: 0.28,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
     });
     this.terrain = new THREE.Mesh(g, mat);
     this.terrain.receiveShadow = true;
@@ -773,102 +776,8 @@ export class GameView {
     homePlanetGroup.name = "converged-home-planet";
     const { center: hpCenter, radius: hpRadius, cloudRadius: hpCloudR, atmosphereRadius: hpAtmoR } = HOME_PLANET_SPHERE;
 
-    // 1. Seamless curved planetary continental shelf bridging the square basin onto the spherical globe (256 x 48 = 24,576 tris)
-    const angular = 256;
-    const rings = 48;
-    const skirtPos = new Float32Array((angular + 1) * (rings + 1) * 3);
-    const skirtCol = new Float32Array((angular + 1) * (rings + 1) * 3);
-    const skirtUv = new Float32Array((angular + 1) * (rings + 1) * 2);
-    const skirtIndices: number[] = [];
-    const skirtTemp = new THREE.Color();
-    for (let row = 0; row <= rings; row++) {
-      const u = row / rings;
-      // Gentle S-curve slope down onto the spherical crust (no abrupt vertical mesa wall)
-      const uSmooth = u * u * (3 - 2 * u);
-      for (let col = 0; col <= angular; col++) {
-        const angle = (col / angular) * Math.PI * 2;
-        const dx = Math.sin(angle);
-        const dz = Math.cos(angle);
-        const sqEdge = HALF / Math.max(Math.abs(dx), Math.abs(dz));
-        const edgeX = dx * sqEdge;
-        const edgeZ = dz * sqEdge;
-        const edgeY = groundAt(clamp(edgeX, -HALF + 1, HALF - 1), clamp(edgeZ, -HALF + 1, HALF - 1));
-
-        // Expand gently across a broad 1,450m continental slope to weld flush into the round R=3800 sphere
-        const outerR = Math.min(hpRadius * 0.94, Math.max(sqEdge + 1100, 3250));
-        const r = sqEdge + (outerR - sqEdge) * Math.pow(u, 0.92);
-        const x = dx * r;
-        const z = dz * r;
-
-        // Exact spherical crust height at radial distance r
-        const sphereY = hpCenter.y + Math.sqrt(Math.max(1, hpRadius * hpRadius - r * r));
-        const ridge = 1 - Math.abs(noise(x * 0.0024 + 70, z * 0.0024 - 40) * 2 - 1);
-        const crag = 1 - Math.abs(noise(x * 0.008 + 12, z * 0.008) * 2 - 1);
-        const mountainEnvelope = Math.sin(u * Math.PI) * (1 - u * 0.55);
-        const mountainBump = mountainEnvelope * (75 * Math.pow(ridge, 2.4) + 28 * Math.pow(crag, 3.5));
-        const y = edgeY * (1 - uSmooth) + (sphereY + 1.5) * uSmooth + mountainBump;
-
-        const vIdx = row * (angular + 1) + col;
-        const vi = vIdx * 3;
-        skirtPos[vi] = x;
-        skirtPos[vi + 1] = y;
-        skirtPos[vi + 2] = z;
-        skirtUv[vIdx * 2] = x / 35;
-        skirtUv[vIdx * 2 + 1] = z / 35;
-
-        // Match basin edge biomes near u=0, blending smoothly into the spherical planet's slate/ice crust near u=1
-        skirtTemp.setHex(0x3a5264).lerp(new THREE.Color(0x6e8596), ridge * 0.52);
-        if (z > 400) skirtTemp.lerp(new THREE.Color(0xcde0ea), smooth((z - 400) / 800) * 0.38);
-        if (x < -400 && z < 200) skirtTemp.lerp(new THREE.Color(0x884c3d), smooth((-x - 400) / 800) * 0.34);
-        if (x > 400) skirtTemp.lerp(new THREE.Color(0x8ab3c2), smooth((x - 400) / 800) * 0.28);
-        skirtTemp.lerp(new THREE.Color(0x284054), uSmooth * 0.55);
-        skirtTemp.toArray(skirtCol, vi);
-
-        if (row < rings && col < angular) {
-          const a = vIdx;
-          const b = a + 1;
-          const c = a + angular + 1;
-          skirtIndices.push(a, c, b, b, c, c + 1);
-        }
-      }
-    }
-    const skirtGeo = new THREE.BufferGeometry();
-    skirtGeo.setAttribute("position", new THREE.BufferAttribute(skirtPos, 3));
-    skirtGeo.setAttribute("color", new THREE.BufferAttribute(skirtCol, 3));
-    skirtGeo.setAttribute("uv", new THREE.BufferAttribute(skirtUv, 2));
-    skirtGeo.setIndex(skirtIndices);
-    skirtGeo.computeVertexNormals();
-    // Blend outer ring normals smoothly into the spherical radial normal for a seamless terminator
-    const sNorm = skirtGeo.getAttribute("normal");
-    const tmpN = new THREE.Vector3();
-    const radN = new THREE.Vector3();
-    for (let row = 0; row <= rings; row++) {
-      const blend = Math.pow(row / rings, 1.4);
-      for (let col = 0; col <= angular; col++) {
-        const idx = row * (angular + 1) + col;
-        tmpN.fromBufferAttribute(sNorm, idx);
-        radN.set(
-          skirtPos[idx * 3] - hpCenter.x,
-          skirtPos[idx * 3 + 1] - hpCenter.y,
-          skirtPos[idx * 3 + 2] - hpCenter.z,
-        ).normalize();
-        tmpN.lerp(radN, blend).normalize();
-        sNorm.setXYZ(idx, tmpN.x, tmpN.y, tmpN.z);
-      }
-    }
-    const skirtMesh = new THREE.Mesh(
-      skirtGeo,
-      new THREE.MeshStandardMaterial({
-        vertexColors: true,
-        roughness: 0.9,
-        metalness: 0.08,
-        map: tex,
-        bumpMap: tex,
-        bumpScale: 0.24,
-      }),
-    );
-    skirtMesh.name = "home-planet-horizon-skirt";
-    homePlanetGroup.add(skirtMesh);
+    // Polar shelf lives in the same indexed terrainMesh() as Rapier collision.
+    // No separate visual-only skirt; do not obscure the integrated camera changes.
 
     // 2. Full high-poly spherical home planet globe (144 x 96 = 27,648 tris) with crisp 512x256 multi-biome crust texture
     const globeW = 512;
