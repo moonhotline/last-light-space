@@ -113,7 +113,9 @@ export function tool(sim: Simulation, p: Player) {
   p.hitKind = "";
   const a = sim.s.adventure,
     e = eye(p);
-  const wall = sim.physics.aim(p, 65);
+  const wall = sim.physics.aim(p, 65, 0.02);
+  p.shotOrigin = { x: e.x, y: e.y, z: e.z };
+  p.shotImpact = wall !== null;
   const direction = viewDirection(p);
   p.shotEnd = wall || {
     x: e.x + direction.x * 65,
@@ -132,6 +134,7 @@ export function tool(sim: Simulation, p: Player) {
   ].sort((a, b) => distance3(e, a.target) - distance3(e, b.target));
   const hit = targets.find((t) => sim.physics.visible(e, t.target));
   if (!hit) return;
+  p.shotImpact = true;
   p.shotEnd = { x: hit.target.x, y: hit.target.y, z: hit.target.z };
   if (hit.type === "drone") {
     const d = a.drones[hit.target.id];
@@ -374,6 +377,7 @@ interface FlightTuning {
   lateralAssist: number;
   acceleration: number;
   drag: number;
+  boostDrag: number;
   surfaceSpeed: number;
   surfaceBoost: number;
   cruiseSpeed: number;
@@ -385,13 +389,13 @@ const FLIGHT_TUNING: Record<SpaceshipKind, FlightTuning> = {
   light_fighter: {
     turnRate: 1.8, turnResponse: 12, maxBank: 0.52, rollResponse: 12,
     maxPitch: 0.36, pitchResponse: 8.5, lateralAssist: 1.65,
-    acceleration: 48, drag: 0.28, surfaceSpeed: 98, surfaceBoost: SHIP_MAX_SPEED,
+    acceleration: 48, drag: 0.28, boostDrag: 0.16, surfaceSpeed: 98, surfaceBoost: SHIP_MAX_SPEED,
     cruiseSpeed: 285, cruiseBoost: SHIP_MAX_SPEED, climbForce: 150,
   },
   intergalactic: {
     turnRate: 0.8, turnResponse: 4, maxBank: 0.4, rollResponse: 5,
     maxPitch: 0.22, pitchResponse: 4.5, lateralAssist: 0.85,
-    acceleration: 25, drag: 0.11, surfaceSpeed: 66, surfaceBoost: SHIP_MAX_SPEED,
+    acceleration: 25, drag: 0.11, boostDrag: 0.11, surfaceSpeed: 66, surfaceBoost: SHIP_MAX_SPEED,
     cruiseSpeed: 265, cruiseBoost: SHIP_MAX_SPEED, climbForce: 112.5,
   },
 };
@@ -468,7 +472,7 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
       -tuning.maxBank, tuning.maxBank,
     );
     s.bank += (targetBank - s.bank) * (1 - Math.exp(-tuning.rollResponse * DT));
-    const damping = i.brake || !pilot ? 3.5 : tuning.drag;
+    const damping = i.brake || !pilot ? 3.5 : (boosting ? tuning.boostDrag : tuning.drag);
     const drag = Math.exp(-damping * DT);
     const frame = celestialFlightFrame(s, s.yaw);
     s.flightRotation = { x: frame.surfaceRotation.x, y: frame.surfaceRotation.y,

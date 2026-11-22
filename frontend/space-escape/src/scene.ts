@@ -1,5 +1,5 @@
 import { weatherMaterials } from "./weathering";
-import { AdventureView, optimizeModel } from "./adventure-view";
+import { AdventureView, optimizeModel, type FiringTool } from "./adventure-view";
 import { missionObjective } from "../shared/objectives";
 import { celestialCockpitPose, celestialFlightFrame } from "../shared/celestial-flight";
 import { InterplanetarySystem, computeCelestialAlignment } from "./interplanetary";
@@ -185,8 +185,11 @@ export class StardustParallaxStream {
     this.group.quaternion.copy(cameraQuat);
 
     const speed = velocity.length();
-    const isFlightAtSpeed = isDriving && speed > 35;
-    const flightSpeedRatio = isFlightAtSpeed ? clamp((speed - 35) / 140, 0, 1) : 0;
+    const threshold = 300;
+    const isFlightAtSpeed = isDriving && speed >= threshold;
+    const flightSpeedRatio = isFlightAtSpeed
+      ? clamp((speed - threshold) / (SHIP_MAX_SPEED - threshold), 0, 1)
+      : 0;
     const boostGlow = isFlightAtSpeed ? clamp((thrust - 1.5) / 1.5, 0, 1) : 0;
     const baseOpacity = isFlightAtSpeed ? 0.1 + 0.32 * flightSpeedRatio : 0;
     const speedFactor = Math.max(10, speed);
@@ -365,6 +368,13 @@ export class GameView {
   private readonly toolCamera = new THREE.PerspectiveCamera(66, 1, 0.04, 8);
   toolModel = new THREE.Group();
   private rifleEnvironment: THREE.WebGLRenderTarget | null = null;
+  private flash = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: this.radialTexture(), transparent: true, depthWrite: false,
+    blending: THREE.AdditiveBlending, toneMapped: false,
+  }));
+  private firingTool: FiringTool | null = null;
+  private flashAge = Infinity;
+  private rifleNoise: AudioBuffer | null = null;
   private rifleFill = new THREE.PointLight(0xfff5e8, 0.45, 2, 2);
   interplanetary: InterplanetarySystem;
   stardustStream: StardustParallaxStream;
@@ -449,6 +459,31 @@ export class GameView {
     }
   }
 
+  private muzzleFeedback(kind: FiringTool, color: number) {
+    if (this.thirdPerson || this.activeWeapon !== kind) return;
+    const model = kind === "rifle" ? this.fpRifle : this.fpPortal;
+    const muzzle = model?.getObjectByName("weapon-muzzle");
+    if (!muzzle) return;
+    this.firingTool = kind;
+    this.flashAge = 0;
+    muzzle.add(this.flash);
+    this.flash.material.color.setHex(color);
+
+    // Match the viewmodel's on-screen muzzle even when flight or zoom changed the world FOV.
+    const world = muzzle.getWorldPosition(new THREE.Vector3());
+    const ratio = this.toolCamera.projectionMatrix.elements[5] / this.camera.projectionMatrix.elements[5];
+    world.x *= ratio;
+    world.y *= ratio;
+    return this.camera.localToWorld(world);
+  }
+
+  private addMuzzle(model: THREE.Group, x: number, y: number, z: number) {
+    const muzzle = new THREE.Object3D();
+    muzzle.name = "weapon-muzzle";
+    muzzle.position.set(x, y, z).divideScalar(model.scale.x);
+    model.add(muzzle);
+  }
+
   private mountFirstPerson(source: THREE.Group, kind: "rifle" | "grapple" | "camera") {
     const size = kind === "rifle" ? 1.12 : kind === "grapple" ? 0.62 : 0.4;
     const model = equipmentModel(source, size);
@@ -458,6 +493,7 @@ export class GameView {
       ? new THREE.Vector3(0.3, -0.17, -0.52)
       : new THREE.Vector3(0.34, -0.22, kind === "rifle" ? -0.85 : -0.68);
     model.position.copy(pos);
+    if (kind === "rifle") this.addMuzzle(model, 0.078, 0.084, -0.577);
     this.toolModel.add(model);
     if (kind === "grapple") {
       const light = new THREE.PointLight(0x65e6ff, 1.5, 2.4, 2);
@@ -565,6 +601,7 @@ export class GameView {
       this.scene,
       (p, n, c, s) => this.burst(p, n, c, s),
       (n, p) => this.sound(n, p),
+      (kind, color) => this.muzzleFeedback(kind, color),
     );
     this.interplanetary = new InterplanetarySystem(this.scene, this.camera);
     this.interplanetary.setShipReference(this.adventure.ship);
@@ -1402,7 +1439,8 @@ export class GameView {
     });
 
     void loader.loadAsync("/assets/portal-gun.glb").then(({ scene }) => {
-      const model = equipmentModel(scene, 0.59, Math.PI);
+      const model = equipmentModel(scene, 0.59, 0);
+      this.addMuzzle(model, 0, 0.025, -0.309);
       model.name = "first_person_portal";
       model.position.set(.35, -.24, -.69);
       model.rotation.set(-.095, .20, -.06);
@@ -1570,7 +1608,7 @@ export class GameView {
     this.music = this.musicLayers[0];
   }
   sound(name: string, pitch = 1) {
-    if (!this.listener) return;
+    if (!this.listener || this.listener.context.state !== "running") return;
     const ctx = this.listener.context,
       now = ctx.currentTime,
       gain = ctx.createGain(),
@@ -1586,6 +1624,11 @@ export class GameView {
       beacon: [220, 880, 1.7],
       mark: [520, 660, 0.26],
       tool: [760, 110, 0.16],
+      rifle: [156, 53, 0.12],
+      "portal-open": [310 * pitch, 965 * pitch, 0.23],
+      "portal-invalid": [145, 85, 0.115],
+      "portal-undo": [670, 230, 0.19],
+      "portal-transit": [440, 1220, 0.31],
       grapple: [280, 1100, 0.32],
       kill: [160, 32, 0.65],
       hurt: [110, 42, 0.35],
@@ -1595,7 +1638,7 @@ export class GameView {
     };
     const [a, b, d] = sounds[name] || sounds.mark;
     o.type =
-      name === "land" || name === "dash" || name === "step" || name === "shutter"
+      name === "land" || name === "dash" || name === "step" || name === "shutter" || name === "rifle" || name === "portal-invalid"
         ? "triangle"
         : "sine";
     o.frequency.setValueAtTime(a, now);
@@ -1603,9 +1646,23 @@ export class GameView {
     gain.gain.setValueAtTime(0, now);
     gain.gain.linearRampToValueAtTime(
       name === "beacon" ? 0.19 : name === "step" ? 0.035 : 0.13,
-      now + 0.016,
+      now + (name === "rifle" ? 0.003 : 0.016),
     );
     gain.gain.exponentialRampToValueAtTime(0.0001, now + d);
+    if (name === "rifle") {
+      if (!this.rifleNoise) {
+        this.rifleNoise = ctx.createBuffer(1, Math.round(ctx.sampleRate * 0.085), ctx.sampleRate);
+        const samples = this.rifleNoise.getChannelData(0);
+        for (let i = 0; i < samples.length; i++) {
+          samples[i] = (Math.random() * 2 - 1) * Math.exp(-6 * i / samples.length);
+        }
+      }
+      const crack = ctx.createBufferSource();
+      crack.buffer = this.rifleNoise;
+      crack.connect(gain);
+      crack.start(now);
+      crack.onended = () => crack.disconnect();
+    }
     o.start();
     o.stop(now + d + 0.02);
     o.onended = () => {
@@ -1673,12 +1730,23 @@ export class GameView {
     if (me) {
       if (this.weaponSwitchTime > 0) this.weaponSwitchTime -= dt;
       const switchDrop = Math.sin(Math.max(0, this.weaponSwitchTime) / 0.25 * Math.PI) * 0.14;
-      const recoilKick = this.activeWeapon === "rifle" ? Math.max(0, me.toolCooldown - 0.12) * 0.22 : 0;
+      this.flashAge += dt;
+      const firing = this.activeWeapon === this.firingTool;
+      const kick = firing && this.effects ? Math.exp(-this.flashAge / 0.065) : 0;
+      const recoilKick = kick * (this.activeWeapon === "rifle" ? 0.082 : 0.039);
+      const flashTime = this.activeWeapon === "portal" ? 0.14 : 0.085;
+      const flashFade = clamp(1 - this.flashAge / flashTime, 0, 1);
+      if (this.flash) {
+        this.flash.visible = this.toolModel.visible && firing && flashFade > 0 && this.effects > 0;
+        this.flash.material.opacity = flashFade * 0.92;
+        this.flash.scale.setScalar(0.24 + (1 - flashFade) * 0.24);
+      }
       this.toolModel.position.y =
         0 -
         switchDrop +
         Math.sin(t * 7) * Math.min(0.012, Math.hypot(me.vx, me.vz) * 0.001);
       this.toolModel.position.z = recoilKick;
+      this.toolModel.rotation.x = kick * 0.048;
 
       if (this.fpRifle) this.fpRifle.visible = this.activeWeapon === "rifle";
       if (this.fpGrapple) this.fpGrapple.visible = this.activeWeapon === "grapple";

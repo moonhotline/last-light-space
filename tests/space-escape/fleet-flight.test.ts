@@ -62,7 +62,7 @@ for (const spawn of Object.values(SPAWN_FLEET)) {
     fly({ forward: 1, sprint: true }, 240);
     const boosted = Math.hypot(ship.vx, ship.vz);
     assert.ok(boosted > 200, `boosted speed was ${boosted}`);
-    assert.ok(boosted <= 600 + 1e-6);
+    assert.ok(boosted <= 1000 + 1e-6);
     if (spawn.kind === "intergalactic") assert.ok(boosted > 399);
     const height = ship.y;
     fly({ brake: true, sprint: true }, 60);

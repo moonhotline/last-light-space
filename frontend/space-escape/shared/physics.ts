@@ -738,7 +738,7 @@ export class MovementWorld {
     this.world.step();
   }
 
-  aim(p: Player, range: number): Vec | null {
+  aim(p: Player, range: number, minDistance = 2): Vec | null {
     const origin = eyePosition(p);
     const direction = viewDirection(p);
     const hit = this.world.castRay(
@@ -748,7 +748,7 @@ export class MovementWorld {
       RAPIER.QueryFilterFlags.EXCLUDE_KINEMATIC,
       WORLD_ONLY_QUERY,
     );
-    return hit && hit.timeOfImpact > 2
+    return hit && hit.timeOfImpact > minDistance
       ? {
           x: origin.x + direction.x * hit.timeOfImpact,
           y: origin.y + direction.y * hit.timeOfImpact,

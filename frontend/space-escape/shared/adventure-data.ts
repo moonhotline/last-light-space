@@ -71,7 +71,7 @@ export interface SpawnShip {
   assetKey: string;
   modelSize: number;
 }
-export const SHIP_MAX_SPEED = 600;
+export const SHIP_MAX_SPEED = 1000;
 
 export const SPAWN_FLEET: Record<SpaceshipKind, SpawnShip> = {
   light_fighter: {

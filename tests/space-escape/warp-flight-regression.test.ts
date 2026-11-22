@@ -94,11 +94,11 @@ test("portal rejects frame flybys, approaching without crossing, and unpiloted s
   sim.tick();
   assert.equal(ship.warpUntil, undefined);
 });
-test("stardust requires actual speed above 35 m/s regardless of stationary ignition", () => {
+test("stardust requires actual speed at or above 300 m/s regardless of stationary ignition", () => {
   const stream = new StardustParallaxStream();
   for (const [speed, thrust, driving, visible] of [
-    [0, 8, true, false], [25, 8, true, false], [35, 8, true, false],
-    [35.1, 0, true, true], [90, 0, true, true], [90, 8, false, false],
+    [0, 8, true, false], [35, 8, true, false], [299, 8, true, false],
+    [300, 0, true, true], [1000, 8, true, true], [1000, 8, false, false],
   ] as const) {
     stream.update(new THREE.Vector3(), new THREE.Quaternion(), new THREE.Vector3(0, 0, -speed), thrust, driving, DT);
     for (const layer of stream.layers) assert.equal((layer.points.material as THREE.PointsMaterial).opacity > 0, visible);

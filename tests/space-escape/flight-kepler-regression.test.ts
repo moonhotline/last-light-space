@@ -13,7 +13,7 @@ import { ShipPropulsionFX } from "../../frontend/space-escape/src/thruster-fx";
 await initPhysics();
 for (const kind of ["light_fighter", "intergalactic"] as const) {
   for (const height of [120, 40000]) {
-    test(`${kind}: boost reaches 600 m/s and combined climb/strafe cannot exceed it at y=${height}`, t => {
+    test(`${kind}: boost reaches 1000 m/s and combined climb/strafe cannot exceed it at y=${height}`, t => {
       const sim = new Simulation(2026);
       t.after(() => sim.dispose());
       const p = sim.add("pilot"); sim.start(p.id); p.seat = 0;
@@ -21,17 +21,20 @@ for (const kind of ["light_fighter", "intergalactic"] as const) {
       Object.assign(ship, { kind, repaired: true, grounded: false, seats: [p.id, "", "", ""],
         x: 40000, y: height, z: 40000, yaw: 0, vx: 0, vy: 0, vz: 0 });
       // Keep the surface case over the basin without crossing terrain or buildings.
+      const testPosition = { x: height < 650 ? 200 : 40000, y: height, z: height < 650 ? 200 : 40000 };
       for (let seq = 1; seq <= 1200; seq++) {
-        Object.assign(ship, { x: height < 650 ? 200 : 40000, y: height, z: height < 650 ? 200 : 40000 });
+        Object.assign(ship, testPosition);
         sim.input(p.id, { ...idleInput(), seq, sprint: true, forward: 1, jump: seq > 900, side: seq > 900 ? 1 : 0 });
         sim.tick();
-        assert.ok(Math.hypot(ship.vx, ship.vy, ship.vz) <= 600 + 1e-6, "total velocity must respect the cap");
-        if (seq === 900) assert.ok(Math.hypot(ship.vx, ship.vy, ship.vz) > 599, "the cap must be attainable");
+        assert.ok(Math.hypot(ship.vx, ship.vy, ship.vz) <= 1000 + 1e-6, "total velocity must respect the cap");
+        if (seq === 900) assert.ok(Math.hypot(ship.vx, ship.vy, ship.vz) > 999, "the cap must be attainable");
       }
       const before = Math.hypot(ship.vx, ship.vy, ship.vz);
+      Object.assign(ship, testPosition);
       sim.input(p.id, { ...idleInput(), seq: 1201 }); sim.tick();
       assert.ok(Math.hypot(ship.vx, ship.vy, ship.vz) > before * 0.97, "releasing boost must retain momentum");
       for (let seq = 1202; seq <= 1262; seq++) {
+        Object.assign(ship, testPosition);
         sim.input(p.id, { ...idleInput(), seq, brake: true, sprint: true }); sim.tick();
       }
       assert.ok(Math.hypot(ship.vx, ship.vz) < 1, "braking must override boost");
