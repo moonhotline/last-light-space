@@ -204,8 +204,16 @@ test("the field gun alternates colors outdoors and undoes successful placements 
   tick(sim, player, { portalAction: "fire", pitch: -1.35 });
   const blue = sim.s.portals?.blue;
   assert.ok(blue && blue.normal.y > 0.95);
+  const placed = player.portalFeedback;
+  assert.equal(placed?.kind, "placed");
+  if (placed?.kind === "placed") {
+    assert.equal(placed.color, "blue");
+    assert.ok(new Vector3().copy(placed.end).distanceTo(blue.center) < 0.061);
+    assert.ok(new Vector3().copy(placed.origin).distanceTo(blue.center) > 1);
+  }
   tick(sim, player, { portalAction: "fire", pitch: -1.35 });
   assert.equal(sim.s.portals?.orange, undefined, "a miss does not advance the color");
+  assert.deepEqual(player.portalFeedback, { id: 2, kind: "blocked" });
   outdoor(1, 250);
   tick(sim, player, { portalAction: "fire", pitch: -1.35 });
   const red = sim.s.portals?.orange;
@@ -215,6 +223,7 @@ test("the field gun alternates colors outdoors and undoes successful placements 
   assert.notDeepEqual(sim.s.portals?.blue, blue);
   tick(sim, player, { portalAction: "undo" });
   assert.deepEqual(sim.s.portals, { blue, orange: red });
+  assert.deepEqual(player.portalFeedback, { id: 5, kind: "undo" });
   tick(sim, player, { portalAction: "undo" });
   assert.deepEqual(sim.s.portals, { blue });
   assert.equal(sim.snapshot().lastPortalColor, "blue");

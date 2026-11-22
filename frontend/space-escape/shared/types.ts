@@ -25,6 +25,12 @@ export interface Input {
   portalAction?: PortalAction;
   portalTransit?: number;
 }
+export type PortalFeedback = {
+  id: number;
+} & (
+  | { kind: "placed"; color: PortalColor; origin: Vec; end: Vec }
+  | { kind: "blocked" | "undo" }
+);
 export interface Player extends Vec {
   planet: string | null;
   surfaceRotation: { x: number; y: number; z: number; w: number };
@@ -35,6 +41,7 @@ export interface Player extends Vec {
   pitch: number;
   ack: number;
   portalTransit?: number;
+  portalFeedback?: PortalFeedback;
   vx: number;
   vz: number;
   vy: number;
@@ -63,6 +70,8 @@ export interface Player extends Vec {
   toolCooldown: number;
   shotId: number;
   shotEnd: Vec;
+  shotOrigin?: Vec;
+  shotImpact?: boolean;
   hitKind: string;
   interactHeld: boolean;
   lore: number;

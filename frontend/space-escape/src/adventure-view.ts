@@ -17,6 +17,11 @@ import { cosmicAudio } from "./sound-engine";
 import { GROVE_TREES, OUTPOST_POSTS } from "../shared/colliders";
 import { hash, type Vec } from "../shared/map";
 import type { Player, Snapshot } from "../shared/types";
+import { eyePosition } from "../shared/surface";
+
+export type FiringTool = "rifle" | "portal";
+const RIFLE_TRACER = 0xffc17b;
+const BARREL_AXIS = new THREE.Vector3(0, 1, 0);
 const v = (p: Vec) => new THREE.Vector3(p.x, p.y, p.z);
 const glow = (color: number, opacity = 1) =>
   new THREE.MeshBasicMaterial({
@@ -69,14 +74,18 @@ export class AdventureView {
   clues: THREE.Group[] = [];
   drones: THREE.Group[] = [];
   ropes = new Map<string, THREE.Line>();
-  bulletModel: THREE.Group | null = null;
-  projectiles: {
-    model: THREE.Group;
+  private readonly traceGeometry = new THREE.CylinderGeometry(1, 0.24, 1, 6);
+  private readonly spareTracers: THREE.Mesh<THREE.CylinderGeometry, THREE.MeshBasicMaterial>[] = [];
+  private readonly projectiles: {
+    mesh: THREE.Mesh<THREE.CylinderGeometry, THREE.MeshBasicMaterial>;
     start: THREE.Vector3;
     end: THREE.Vector3;
+    direction: THREE.Vector3;
+    distance: number;
+    speed: number;
+    tail: number;
     age: number;
-    duration: number;
-    color: number;
+    impact: boolean;
   }[] = [];
   effects = new Map<string, number>();
   propulsionFX: ShipPropulsionFX | null = null;
@@ -85,6 +94,7 @@ export class AdventureView {
     public scene: THREE.Scene,
     public burst: (p: Vec, n: number, c: number, s: number) => void,
     public sound: (n: string, p?: number) => void,
+    private readonly muzzle?: (kind: FiringTool, color: number) => THREE.Vector3 | undefined,
   ) {}
   async load() {
     const loader = new GLTFLoader();
@@ -100,23 +110,15 @@ export class AdventureView {
       }
       throw error;
     };
-    const [ship, lab, drone, bullet, crateGltf, coreGltf, obeliskGltf, mineralGltf] = await Promise.all([
+    const [ship, lab, drone, crateGltf, coreGltf, obeliskGltf, mineralGltf] = await Promise.all([
       load(SPAWN_FLEET.light_fighter.asset),
       load("/assets/dawn-lab.glb"),
       load("/assets/drone.glb"),
-      load("/assets/kinetic-bullet.glb"),
       load("/assets/crate.glb").catch(() => null),
       load("/assets/core.glb").catch(() => null),
       load("/assets/obelisk.glb").catch(() => null),
       load("/assets/models/minerals/scene.gltf").catch(() => null),
     ]);
-    this.bulletModel = bullet.scene;
-    this.bulletModel.traverse((o) => {
-      if (o instanceof THREE.Mesh) {
-        o.castShadow = true;
-        o.receiveShadow = false;
-      }
-    });
     [lab.scene, drone.scene, crateGltf?.scene, coreGltf?.scene, obeliskGltf?.scene, mineralGltf?.scene].forEach((root) => {
       if (!root) return;
       root.traverse((o) => {
@@ -281,27 +283,31 @@ export class AdventureView {
     this.buildGrove();
     this.buildOutpost();
   }
-  spawnProjectile(start: THREE.Vector3, end: THREE.Vector3, color = 0x00f0ff, speed = 175) {
-    const dist = start.distanceTo(end);
-    if (dist < 0.2) return;
-    const model = this.bulletModel ? this.bulletModel.clone(true) : new THREE.Group();
-    model.position.copy(start);
-    model.lookAt(end);
-    model.scale.setScalar(0.7);
-    if (color !== 0x00f0ff) {
-      model.traverse((o) => {
-        if (o instanceof THREE.Mesh && o.material) {
-          const m = o.material.clone();
-          if ("color" in m) m.color.setHex(color);
-          if ("emissive" in m) m.emissive.setHex(color);
-          o.material = m;
-        }
-      });
-    }
-    this.scene.add(model);
-    const duration = Math.max(0.04, Math.min(0.4, dist / speed));
-    this.projectiles.push({ model, start, end, age: 0, duration, color });
-    this.burst({ x: start.x, y: start.y, z: start.z }, 4, color, 1.8);
+  private spawnProjectile(
+    origin: Vec, target: Vec, color: number, speed: number, tail: number, width: number,
+    impact: boolean, muzzle?: THREE.Vector3,
+  ) {
+    const end = v(target);
+    const start = v(origin);
+    // The render-only weapon can extend past a wall when aiming point-blank.
+    if (muzzle && end.clone().sub(start).dot(end.clone().sub(muzzle)) > 0) start.copy(muzzle);
+    const direction = end.clone().sub(start);
+    const distance = direction.length();
+    if (distance < 0.01) return;
+    direction.divideScalar(distance);
+    // Warm-up can still be compiling a tracer when its lifetime ends, so recycle its material.
+    const available = this.projectiles.length >= 32 ? this.projectiles.shift()?.mesh : this.spareTracers.pop();
+    const mesh = available ?? new THREE.Mesh(this.traceGeometry, new THREE.MeshBasicMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    }));
+    mesh.name = "weapon-tracer";
+    mesh.material.color.setHex(color);
+    mesh.quaternion.setFromUnitVectors(BARREL_AXIS, direction);
+    mesh.position.copy(start);
+    mesh.scale.set(width, 0.01, width);
+    this.scene.add(mesh);
+    this.projectiles.push({ mesh, start, end, direction, distance, speed, tail, age: 0, impact });
   }
   line(color: number) {
     const g = new THREE.BufferGeometry().setFromPoints([
@@ -517,7 +523,7 @@ export class AdventureView {
       if (this.changed("enemyShot" + id, d.shotId)) {
         const start = new THREE.Vector3(d.x, d.y + 0.2, d.z);
         const end = new THREE.Vector3(d.aim.x, d.aim.y, d.aim.z);
-        this.spawnProjectile(start, end, 0xff5533, 140);
+        this.spawnProjectile(start, end, 0xff5533, 140, 3.0, 0.028, true);
         if (me && Math.hypot(me.x - d.x, me.z - d.z) < 100) this.sound("enemy");
       }
     });
@@ -536,26 +542,30 @@ export class AdventureView {
           { x: data.x, y: data.y + 0.35, z: data.z },
           data.grapple,
         );
+      const near = !!me && Math.hypot(me.x - p.x, me.y - p.y, me.z - p.z) < 80;
       if (this.changed("shot" + p.id, p.shotId)) {
-        const start = new THREE.Vector3(data.x, data.y + 0.35, data.z);
-        const end = new THREE.Vector3(p.shotEnd.x, p.shotEnd.y, p.shotEnd.z);
-        this.spawnProjectile(start, end, 0x00f0ff, 180);
+        const muzzle = own ? this.muzzle?.("rifle", RIFLE_TRACER) : undefined;
+        this.spawnProjectile(p.shotOrigin ?? eyePosition(p), p.shotEnd, RIFLE_TRACER,
+          340, 6, 0.016, p.shotImpact === true, muzzle);
+        if (near) this.sound("rifle");
+        if (own && p.hitKind) {
+          if (p.hitKind === "kill") this.sound("kill");
+          if (p.hitKind === "collect") this.sound("pickup");
+          const hit = document.getElementById("hitFeedback");
+          hit?.classList.add("flash");
+          setTimeout(() => hit?.classList.remove("flash"), 100);
+        }
       }
-      if (this.changed("shot" + p.id, p.shotId) && own) {
-        this.sound(
-          p.hitKind === "kill"
-            ? "kill"
-            : p.hitKind === "collect"
-              ? "pickup"
-              : "tool",
-        );
-        if (p.hitKind) {
-          document.getElementById("hitFeedback")?.classList.add("flash");
-          setTimeout(
-            () =>
-              document.getElementById("hitFeedback")?.classList.remove("flash"),
-            100,
-          );
+      const portal = p.portalFeedback;
+      if (this.changed("portal" + p.id, portal?.id ?? 0) && portal) {
+        if (portal.kind === "placed") {
+          const color = portal.color === "blue" ? 0x39c9ff : 0xff3956;
+          const muzzle = own ? this.muzzle?.("portal", color) : undefined;
+          this.spawnProjectile(portal.origin, portal.end, color, 220, 4.8, 0.034, false, muzzle);
+          if (near) this.sound("portal-open", portal.color === "blue" ? 1 : 0.83);
+        } else if (own) {
+          if (portal.kind === "blocked") this.muzzle?.("portal", 0xff8254);
+          this.sound(portal.kind === "undo" ? "portal-undo" : "portal-invalid");
         }
       }
       if (this.changed("grapple" + p.id, p.grappleId) && own) {
@@ -576,27 +586,22 @@ export class AdventureView {
     }
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const proj = this.projectiles[i];
+      const previous = proj.age;
       proj.age += dt;
-      const progress = Math.min(1, proj.age / proj.duration);
-      proj.model.position.lerpVectors(proj.start, proj.end, progress);
-      if (progress < 1 && Math.random() < 0.35) {
-        this.burst(
-          { x: proj.model.position.x, y: proj.model.position.y, z: proj.model.position.z },
-          1,
-          proj.color,
-          1.0,
-        );
+      const travelTime = Math.max(0.065, proj.distance / proj.speed);
+      const front = Math.min(proj.age / travelTime, 1) * proj.distance;
+      const remaining = Math.max(0, proj.age - travelTime);
+      const back = Math.max(0, front - proj.tail) + remaining * proj.speed * 0.18;
+      const length = Math.max(0, front - back);
+      proj.mesh.position.copy(proj.start).addScaledVector(proj.direction, front - length * 0.5);
+      proj.mesh.scale.y = length;
+      proj.mesh.material.opacity = Math.max(0, 1 - remaining / 0.06);
+      if (proj.impact && previous < travelTime && proj.age >= travelTime) {
+        this.burst(proj.end, 8, proj.mesh.material.color.getHex(), 3.2);
       }
-      if (progress >= 1) {
-        this.burst({ x: proj.end.x, y: proj.end.y, z: proj.end.z }, 10, proj.color, 3.2);
-        this.scene.remove(proj.model);
-        proj.model.traverse((o) => {
-          if (o instanceof THREE.Mesh) {
-            o.geometry?.dispose();
-            if (Array.isArray(o.material)) o.material.forEach((m) => m.dispose());
-            else o.material?.dispose();
-          }
-        });
+      if (remaining >= 0.06) {
+        this.scene.remove(proj.mesh);
+        this.spareTracers.push(proj.mesh);
         this.projectiles.splice(i, 1);
       }
     }

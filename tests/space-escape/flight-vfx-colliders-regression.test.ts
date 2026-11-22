@@ -166,7 +166,7 @@ test("planets, landmarks, warp gates, and speed streaks use high-poly geometry a
   const stream = new StardustParallaxStream();
   const streaks = stream.group.getObjectByName("velocity-warp-streaks") as THREE.LineSegments;
   assert.ok(streaks instanceof THREE.LineSegments);
-  stream.update(new THREE.Vector3(), new THREE.Quaternion(), new THREE.Vector3(0, 0, -180), 2.5, true, 1 / 60);
+  stream.update(new THREE.Vector3(), new THREE.Quaternion(), new THREE.Vector3(0, 0, -800), 2.5, true, 1 / 60);
   assert.ok((streaks.material as THREE.LineBasicMaterial).opacity > 0.3);
 });
 

@@ -297,6 +297,7 @@ function receive(next: Snapshot) {
   }
   const portaled = !!me && (me.portalTransit ?? 0) > previousTransit;
   if (me && portaled) {
+    view.sound("portal-transit");
     portalActions.length = 0;
     yaw = me.yaw;
     pitch = me.pitch;

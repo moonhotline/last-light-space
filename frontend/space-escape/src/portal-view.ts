@@ -21,20 +21,30 @@ const fragmentShader = `
 uniform vec3 tint;
 uniform float time;
 uniform bool linked;
+uniform float opening;
 uniform bool preview;
 uniform sampler2D destination;
 varying vec2 aperture;
 varying vec4 screen;
 
 void main() {
-  float radius = length(aperture);
+  float radius = length(aperture) / mix(0.48, 1.0, opening);
+  float aa = clamp(fwidth(radius), 0.002, 0.06);
   if (radius > 1.0) discard;
-  float ring = smoothstep(0.86, 0.96, radius);
-  float edge = smoothstep(0.96, 1.0, radius);
-  float wave = 0.5 + 0.5 * sin(atan(aperture.y, aperture.x) * 13.0 - time * 2.0);
-  vec3 interior = tint * ((linked ? 0.21 : 0.065) + 0.045 * wave);
+
+  float angle = atan(aperture.y, aperture.x + 0.00001);
+  float flow = sin(angle * 9.0 - time * 5.5 + 1.1 * sin(angle * 3.0 + time));
+  float arcs = pow(max(0.0, sin(angle * 4.0 - time * 3.6)), 9.0);
+  float filament = 1.0 - smoothstep(0.008, 0.022 + aa, abs(radius - (0.925 + 0.014 * flow)));
+  float outerRim = 1.0 - smoothstep(0.006, 0.017 + aa, abs(radius - 0.972));
+  float edgeGlow = smoothstep(0.74, 0.97, radius) * (0.19 + 0.12 * flow);
+  float charge = (1.0 - opening) * smoothstep(0.55, 0.98, radius);
+  float inwardWave = 0.5 + 0.5 * sin(radius * 35.0 + angle * 2.0 + time * 3.0);
+  vec3 interior = tint * ((linked ? 0.16 : 0.058) + 0.05 * inwardWave * radius);
   if (preview) interior = texture2D(destination, screen.xy / screen.w * 0.5 + 0.5).rgb;
-  gl_FragColor = vec4(mix(interior, tint * (1.3 + 1.7 * wave), ring) * (1.0 - 0.55 * edge), 1.0);
+  vec3 halo = tint * (edgeGlow + filament * (0.9 + 1.5 * arcs) + 0.42 * outerRim + 2.0 * charge);
+  vec3 core = mix(tint, vec3(0.91, 0.97, 1.0), 0.63) * arcs * filament * 0.9;
+  gl_FragColor = vec4(interior * (1.0 - 0.85 * smoothstep(0.88, 0.99, radius)) + halo + core, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }
@@ -48,6 +58,7 @@ function makePortal(scene: Scene, color: PortalColor) {
     uniforms: {
       tint: { value: new Color(color === "blue" ? 0x38bdf8 : 0xff3045) },
       time: { value: 0 },
+      opening: { value: 1 },
       linked: { value: false },
       preview: { value: false },
       destination: { value: target.texture },
@@ -57,7 +68,7 @@ function makePortal(scene: Scene, color: PortalColor) {
   mesh.name = "manual-portal-" + color;
   mesh.visible = false;
   scene.add(mesh);
-  return { mesh, target, uniforms: material.uniforms };
+  return { mesh, target, uniforms: material.uniforms, placement: undefined as Portal | undefined, openedAt: 0 };
 }
 
 export class PortalView {
@@ -77,12 +88,20 @@ export class PortalView {
 
   update(pair: PortalPair | undefined, viewer: PerspectiveCamera, skyViewer: PerspectiveCamera, time: number) {
     PORTAL_COLORS.forEach(color => {
-      const { mesh, uniforms } = this.portals[color];
+      const slot = this.portals[color];
+      const { mesh, uniforms } = slot;
       const portal = pair?.[color];
       mesh.visible = !!portal;
       uniforms.time.value = time;
       uniforms.linked.value = !!(pair?.blue && pair.orange);
       uniforms.preview.value = false;
+      const previous = slot.placement;
+      if (portal && (!previous || (["x", "y", "z"] as const).some(axis =>
+        portal.center[axis] !== previous.center[axis] || portal.normal[axis] !== previous.normal[axis],
+      ))) slot.openedAt = time;
+      slot.placement = portal;
+      const progress = time > 0 ? Math.min(1, Math.max(0, (time - slot.openedAt) / 0.19)) : 1;
+      uniforms.opening.value = 1 - (1 - progress) ** 3;
       if (portal) {
         mesh.position.copy(portal.center).addScaledVector(portal.normal, 0.035);
         mesh.quaternion.copy(portalFrame(portal.normal));

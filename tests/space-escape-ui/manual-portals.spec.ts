@@ -20,11 +20,20 @@ async function startInLab(page: Page) {
 test("place both portals with real controls, see through and walk through in both directions", async ({ page }, info) => {
   test.setTimeout(90000);
   const errors: string[] = [];
-  page.on("pageerror", error => errors.push(error.message));
+  page.on("pageerror", error => errors.push(error.stack ?? error.message));
   page.on("console", message => {
     if (message.type() === "error" && /shader|WebGL/i.test(message.text())) errors.push(message.text());
   });
   await startInLab(page);
+  await page.evaluate(() => {
+    const view = (window as any).__lastLight.view();
+    const sound = view.sound.bind(view);
+    view.testPortalSounds = [];
+    view.sound = (name: string, pitch?: number) => {
+      if (name.startsWith("portal-")) view.testPortalSounds.push(name);
+      sound(name, pitch);
+    };
+  });
   await page.keyboard.press("4");
   await page.keyboard.press("5");
   expect(await page.evaluate(() => (window as any).__lastLight.snapshot().portals)).toEqual({});
@@ -39,6 +48,12 @@ test("place both portals with real controls, see through and walk through in bot
   })).toBe(true);
   await expect(page.locator("#portalNext")).toHaveText("放蓝门");
   await page.mouse.click(720, 450);
+  await expect(page.locator("#portalNext")).toHaveText("放红门");
+  // The same aperture cannot host both colors.
+  await page.mouse.click(720, 450);
+  await expect.poll(() => page.evaluate(() =>
+    (window as any).__lastLight.snapshot().players[0].portalFeedback?.kind,
+  )).toBe("blocked");
   await expect(page.locator("#portalNext")).toHaveText("放红门");
   await page.evaluate(() => (window as any).__lastLight.setViewRotation(-Math.PI / 2, 0));
   await page.mouse.click(720, 450);
@@ -121,7 +136,68 @@ test("place both portals with real controls, see through and walk through in bot
   } finally {
     await page.keyboard.up("w");
   }
+  expect(await page.evaluate(() => (window as any).__lastLight.view().testPortalSounds)).toEqual([
+    "portal-open", "portal-invalid", "portal-open", "portal-undo", "portal-open",
+    "portal-transit", "portal-transit",
+  ]);
   expect(errors).toEqual([]);
+});
+
+test("rifle fires a muzzle tracer with a real surface impact and no impact for a sky shot", async ({ page }) => {
+  await startInLab(page);
+  if (await page.evaluate(() => (window as any).__lastLight.view().thirdPerson)) {
+    await page.keyboard.press("KeyV");
+  }
+  if (await page.evaluate(() => (window as any).__lastLight.view().activeWeapon !== "rifle")) {
+    await page.keyboard.press("Digit1");
+  }
+  await expect(page.locator("#wepRifle")).toHaveClass(/active/);
+  await expect.poll(() => page.evaluate(() => !!(window as any).__lastLight.view().fpRifle)).toBe(true);
+  await page.evaluate(() => {
+    const view = (window as any).__lastLight.view();
+    const adventure = view.adventure;
+    const spawn = adventure.spawnProjectile.bind(adventure);
+    view.testRifleShots = [];
+    adventure.spawnProjectile = (...args: any[]) => {
+      spawn(...args);
+      if (args[2] === 0xffc17b) view.testRifleShots.push({
+        impact: args[6],
+        muzzle: !!args[7],
+        tracer: !!view.scene.getObjectByName("weapon-tracer"),
+        flashAtMuzzle: view.flash.parent?.name === "weapon-muzzle",
+      });
+    };
+  });
+
+  // Shoot one metre from the south-facing lab wall, inside the grapple ray's minimum range.
+  const reset = (position: { x: number; y: number; z: number }, pitch: number) =>
+    page.evaluate(({ position, pitch }) => {
+      const api = (window as any).__lastLight;
+      const sim = api.sim();
+      const player = sim.s.players[0];
+      Object.assign(player, position, { vx: 0, vy: 0, vz: 0, toolCooldown: 0 });
+      sim.physics.reset(player.id, player);
+      api.setViewRotation(0, pitch);
+    }, { position, pitch });
+  const shots = () => page.evaluate(() => (window as any).__lastLight.view().testRifleShots);
+  const fire = async () => {
+    await page.mouse.down();
+    try {
+      await expect.poll(shots).not.toHaveLength(0);
+    } finally {
+      await page.mouse.up();
+    }
+  };
+  await reset({ x: LAB.x + 4, y: LAB.y + 1.125, z: LAB.z - 2.5 }, 0);
+  await fire();
+  expect((await shots())[0]).toEqual({ impact: true, muzzle: true, tracer: true, flashAtMuzzle: true });
+  await reset({ x: 14, y: 95, z: 312 }, 1.35);
+  await page.mouse.down();
+  try {
+    await expect.poll(async () => (await shots()).some((shot: { impact: boolean }) => !shot.impact)).toBe(true);
+  } finally {
+    await page.mouse.up();
+  }
 });
 
 test.describe("touch controls", () => {

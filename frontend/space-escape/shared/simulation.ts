@@ -10,7 +10,7 @@ import {
 } from "./adventure";
 import { type ItemId } from "./adventure-data";
 import { MovementWorld, fuelCapacity } from "./physics";
-import { playerUp } from "./surface";
+import { eyePosition, playerUp } from "./surface";
 import {
   SPAWN,
   BEACON_SITES,
@@ -272,18 +272,32 @@ export class Simulation {
             if (last.previous) portals[last.color] = last.previous;
             else delete portals[last.color];
             s.lastPortalColor = last.previousColor;
+            p.portalFeedback = { id: (p.portalFeedback?.id ?? 0) + 1, kind: "undo" };
             this.emit("已撤回最近一次传送门放置");
           }
         } else if (color) {
           const other = color === "blue" ? portals.orange : portals.blue;
-          const placement = this.physics.aimPortal({ ...p, yaw: i.yaw, pitch: i.pitch }, other);
+          const aiming = { ...p, yaw: i.yaw, pitch: i.pitch };
+          const placement = this.physics.aimPortal(aiming, other);
+          const id = (p.portalFeedback?.id ?? 0) + 1;
           if (placement) {
             this.portalHistory.push({ color, previous: portals[color], previousColor: s.lastPortalColor });
             if (this.portalHistory.length > 16) this.portalHistory.shift();
             portals[color] = placement;
             s.lastPortalColor = color;
+            const eye = eyePosition(aiming);
+            p.portalFeedback = {
+              id, kind: "placed", color,
+              origin: { x: eye.x, y: eye.y, z: eye.z },
+              end: {
+                x: placement.center.x + placement.normal.x * 0.06,
+                y: placement.center.y + placement.normal.y * 0.06,
+                z: placement.center.z + placement.normal.z * 0.06,
+              },
+            };
             this.emit(portals.blue && portals.orange ? "双向传送门已连通" : "传送门已放置 · 放置另一扇即可连通");
           } else {
+            p.portalFeedback = { id, kind: "blocked" };
             this.emit("无法放置 · 对准足够平整、宽敞的表面");
           }
         }
