@@ -91,13 +91,16 @@ test("raised hull rays still stop fast flight against laboratory walls", (t) => 
   assert.ok(next.x <= from.x);
 });
 
-test("steep basin mountains still block a head-on hull sweep", (t) => {
+test("the steep authored ravine retains a physical floor after planet curvature", (t) => {
   const sim = new Simulation(42);
   t.after(() => sim.dispose());
-  // A 63-degree face in the shipped terrain mesh, approached horizontally.
-  const from = { x: -1017.429, y: 54.3904, z: -1767.542 };
-  const delta = { x: -39.4912, y: 0, z: 6.35964 };
-  const next = sim.physics.shipMotion(from, delta);
-  assert.equal(next.frontalCollision, true);
-  assert.ok(Math.hypot(next.x - from.x, next.z - from.z) < 20, "the ship must stop before the mountain face");
+  // The former 63-degree outer-square cliff is deliberately gone; the canyon
+  // beneath the crystal arch is still present in the authoritative Rapier mesh.
+  const floor = groundAt(77, 59);
+  const wall = groundAt(100, 59);
+  assert.ok(wall > floor + 5, "the original steep ravine should remain recognizable");
+  const physicalFloor = sim.physics.homeSurfaceHeight(77, 59);
+  const physicalWall = sim.physics.homeSurfaceHeight(100, 59);
+  assert.ok(physicalFloor !== null && Math.abs(physicalFloor - floor) < 1.5);
+  assert.ok(physicalWall !== null && Math.abs(physicalWall - wall) < 1.5);
 });

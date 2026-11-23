@@ -54,3 +54,4 @@
 | 2026-11-22 05:53 | PR #43 (4790f9b) | moonhotline | 运动物理系统, 权威多人仿真, 渲染管线与 LOD | 优化传送门和武器反馈，提高飞船加力上限 |
 | 2026-11-22 06:36 | PR #44 (6389960) | moonhotline | 全库/配置同步 | fix: 恢复线上合作远征建房 |
 | 2026-11-22 16:21 | PR #47 (4b684db) | moonhotline | 渲染管线与 LOD | fix: 调整相机朝向并改为手动保存照片 |
+| 2026-11-23 01:24 | PR #46 (e5c9bd6) | moonhotline | 运动物理系统, 渲染管线与 LOD | fix: merge Kepler spawn basin into continuous spherical home terrain |

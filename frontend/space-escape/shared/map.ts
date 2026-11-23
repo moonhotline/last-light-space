@@ -1,4 +1,5 @@
-/** One authored 3.58 km basin. Rendering and Rapier use the exact same triangles. */
+/** Authored Kepler basin and a collidable curved polar shelf on the home globe. */
+import { HOME_COLLAR_RADIUS, HOME_PLANET_SPHERE, homeSphereHeight } from "./home-planet";
 export interface Vec {
   x: number;
   y: number;
@@ -127,33 +128,165 @@ export function terrainRaw(x: number, z: number) {
   y = y * (1 - grovePad) + 170 * grovePad;
   return y;
 }
+/**
+ * Preserve authored route/landing/lab heights near the spawn while gradually bending
+ * the remote heightfield onto the actual spherical crust. Relief tapers to zero with
+ * a smooth envelope before the square boundary: the square is never a cliff.
+ */
+export function curvedTerrainHeight(x: number, z: number) {
+  const sphereY = homeSphereHeight(x, z);
+  if (sphereY === null) return terrainRaw(x, z);
+  const poleY = HOME_PLANET_SPHERE.center.y + HOME_PLANET_SPHERE.radius;
+  const radialDistance = Math.hypot(x, z);
+  const curvature = smooth((radialDistance - 600) / 620);
+  const authored = terrainRaw(x, z) + (sphereY - poleY) * curvature;
+  const edgeDistance = HALF - Math.max(Math.abs(x), Math.abs(z));
+  return sphereY + (authored - sphereY) * smooth(edgeDistance / 420);
+}
+
+const COLLAR_BANDS = 32;
+const PERIMETER = SEGMENTS * 4;
+const GRID_WIDTH = SEGMENTS + 1;
+const GRID_VERTEX_COUNT = GRID_WIDTH ** 2;
+
+/** The collar reuses every original boundary vertex, not a detached skirt. */
+function perimeterGridIndex(index: number) {
+  const i = ((index % PERIMETER) + PERIMETER) % PERIMETER;
+  if (i < SEGMENTS) return i;
+  if (i < SEGMENTS * 2) return (i - SEGMENTS) * GRID_WIDTH + SEGMENTS;
+  if (i < SEGMENTS * 3) return SEGMENTS * GRID_WIDTH + SEGMENTS - (i - SEGMENTS * 2);
+  return (SEGMENTS - (i - SEGMENTS * 3)) * GRID_WIDTH;
+}
+
+/** The same polar-shelf height function is used for mesh vertices and gameplay heights. */
+function collarHeight(x: number, z: number, u: number): number {
+  const ridge = 1 - Math.abs(noise(x * 0.0024 + 70, z * 0.0024 - 40) * 2 - 1);
+  const crag = 1 - Math.abs(noise(x * 0.008 + 12, z * 0.008) * 2 - 1);
+  const envelope = Math.sin(Math.PI * u) ** 2;
+  return (homeSphereHeight(x, z) ?? HOME_PLANET_SPHERE.center.y) +
+    envelope * (28 + 65 * ridge ** 2.4 + 26 * crag ** 3.5);
+}
+
 let terrainCache: { vertices: Float32Array; indices: Uint32Array } | undefined;
 export function terrainMesh() {
   if (terrainCache) return terrainCache;
-  const vertices = new Float32Array((SEGMENTS + 1) ** 2 * 3),
-    indices = new Uint32Array(SEGMENTS ** 2 * 6);
-  for (let iz = 0; iz <= SEGMENTS; iz++)
+  // High-resolution mission basin plus circularly converging mountain rows, all
+  // one indexed mesh shared by the renderer and authoritative Rapier collision.
+  const vertices = new Float32Array((GRID_VERTEX_COUNT + PERIMETER * COLLAR_BANDS) * 3);
+  const indices = new Uint32Array((SEGMENTS ** 2 + PERIMETER * COLLAR_BANDS) * 6);
+  for (let iz = 0; iz <= SEGMENTS; iz++) {
     for (let ix = 0; ix <= SEGMENTS; ix++) {
-      const p = (iz * (SEGMENTS + 1) + ix) * 3,
-        x = ix * CELL - HALF,
-        z = iz * CELL - HALF;
+      const p = (iz * GRID_WIDTH + ix) * 3;
+      const x = ix * CELL - HALF;
+      const z = iz * CELL - HALF;
       vertices[p] = x;
-      vertices[p + 1] = terrainRaw(x, z);
+      vertices[p + 1] = curvedTerrainHeight(x, z);
       vertices[p + 2] = z;
     }
+  }
   let n = 0;
-  for (let z = 0; z < SEGMENTS; z++)
+  for (let z = 0; z < SEGMENTS; z++) {
     for (let x = 0; x < SEGMENTS; x++) {
-      const a = z * (SEGMENTS + 1) + x,
-        b = a + 1,
-        c = a + SEGMENTS + 1,
-        d = c + 1;
+      const a = z * GRID_WIDTH + x;
+      const b = a + 1;
+      const c = a + GRID_WIDTH;
+      const d = c + 1;
       indices.set([a, c, b, b, c, d], n);
       n += 6;
     }
+  }
+  for (let row = 1; row <= COLLAR_BANDS; row++) {
+    const u = row / COLLAR_BANDS;
+    for (let i = 0; i < PERIMETER; i++) {
+      const edge = perimeterGridIndex(i) * 3;
+      const bx = vertices[edge];
+      const bz = vertices[edge + 2];
+      const boundaryRadius = Math.hypot(bx, bz);
+      const radius = boundaryRadius + (HOME_COLLAR_RADIUS - boundaryRadius) * u;
+      const x = bx * radius / boundaryRadius;
+      const z = bz * radius / boundaryRadius;
+
+      const vertexIndex = GRID_VERTEX_COUNT + (row - 1) * PERIMETER + i;
+      const p = vertexIndex * 3;
+      vertices[p] = x;
+      vertices[p + 1] = collarHeight(x, z, u);
+      vertices[p + 2] = z;
+
+      const next = (i + 1) % PERIMETER;
+      const a = row === 1 ? perimeterGridIndex(i) : GRID_VERTEX_COUNT + (row - 2) * PERIMETER + i;
+      const b = row === 1 ? perimeterGridIndex(next) : GRID_VERTEX_COUNT + (row - 2) * PERIMETER + next;
+      const c = vertexIndex;
+      const d = GRID_VERTEX_COUNT + (row - 1) * PERIMETER + next;
+      indices.set([a, b, c, b, d, c], n);
+      n += 6;
+    }
+  }
   return (terrainCache = { vertices, indices });
 }
+/**
+ * Intersect a vertical query with the actual indexed collar triangles. Unlike
+ * analytic noise samples, this exactly reproduces the height Rapier sees.
+ */
+function collarMeshHeight(x: number, z: number): number | null {
+  const r = Math.hypot(x, z);
+  const squareX = x * HALF / Math.max(Math.abs(x), Math.abs(z));
+  const squareZ = z * HALF / Math.max(Math.abs(x), Math.abs(z));
+  const edgeR = Math.hypot(squareX, squareZ);
+  const u = (r - edgeR) / (HOME_COLLAR_RADIUS - edgeR);
+  const row = Math.floor(u * COLLAR_BANDS);
+  const epsilon = 0.00001;
+  const segment = squareZ <= -HALF + epsilon
+    ? (squareX + HALF) / CELL
+    : squareX >= HALF - epsilon
+      ? SEGMENTS + (squareZ + HALF) / CELL
+      : squareZ >= HALF - epsilon
+        ? 2 * SEGMENTS + (HALF - squareX) / CELL
+        : 3 * SEGMENTS + (HALF - squareZ) / CELL;
+  const nearbySegment = Math.floor(segment);
+  const vertices = terrainMesh().vertices;
+  const index = (band: number, i: number) =>
+    band === 0 ? perimeterGridIndex(i) :
+      GRID_VERTEX_COUNT + (band - 1) * PERIMETER + ((i % PERIMETER + PERIMETER) % PERIMETER);
+  const heightOnTriangle = (ia: number, ib: number, ic: number): number | null => {
+    const a = ia * 3, b = ib * 3, c = ic * 3;
+    const abx = vertices[b] - vertices[a], abz = vertices[b + 2] - vertices[a + 2];
+    const acx = vertices[c] - vertices[a], acz = vertices[c + 2] - vertices[a + 2];
+    const det = abx * acz - abz * acx;
+    if (Math.abs(det) < 0.000001) return null;
+    const px = x - vertices[a], pz = z - vertices[a + 2];
+    const wb = (px * acz - pz * acx) / det;
+    const wc = (abx * pz - abz * px) / det;
+    const wa = 1 - wb - wc;
+    if (Math.min(wa, wb, wc) < -0.00001) return null;
+    return wa * vertices[a + 1] + wb * vertices[b + 1] + wc * vertices[c + 1];
+  };
+  for (let band = Math.max(0, row - 1); band <= Math.min(COLLAR_BANDS - 1, row + 1); band++) {
+    for (let seg = nearbySegment - 1; seg <= nearbySegment + 1; seg++) {
+      const a = index(band, seg);
+      const b = index(band, seg + 1);
+      const c = index(band + 1, seg);
+      const d = index(band + 1, seg + 1);
+      const first = heightOnTriangle(a, b, c);
+      if (first !== null) return first;
+      const second = heightOnTriangle(b, d, c);
+      if (second !== null) return second;
+    }
+  }
+  // Near floating-point seam cases only; the very same function generated the vertices.
+  return collarHeight(x, z, Math.max(0, Math.min(1, u)));
+}
+
 export function groundAt(x: number, z: number) {
+  // Outside the original square, use the same height source as the stitched
+  // shelf. This keeps foot placement, camera avoidance and disembark consistent.
+  const distanceFromPole = Math.hypot(x, z);
+  if (Math.abs(x) > HALF || Math.abs(z) > HALF) {
+    const sphereY = homeSphereHeight(x, z);
+    if (sphereY !== null) {
+      if (distanceFromPole >= HOME_COLLAR_RADIUS) return sphereY;
+      return collarMeshHeight(x, z) ?? sphereY;
+    }
+  }
   const fx = clamp((x + HALF) / CELL, 0, SEGMENTS - 0.00001),
     fz = clamp((z + HALF) / CELL, 0, SEGMENTS - 0.00001);
   const ix = Math.floor(fx),

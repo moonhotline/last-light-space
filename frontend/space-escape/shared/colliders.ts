@@ -82,13 +82,8 @@ export interface ShipColliderSpec {
   yOffset: number;
 }
 
-/** Converged spherical home planet beneath the playable Kepler basin (north pole at y=-8, strictly below min terrain y=+3.08). */
-export const HOME_PLANET_SPHERE = {
-  center: { x: 0, y: -3808, z: 0 } as Vec,
-  radius: 3800,
-  cloudRadius: 3865,
-  atmosphereRadius: 4080,
-};
+/** Shared physical shell for the continuously meshed north-polar terrain. */
+export { HOME_PLANET_SPHERE } from "./home-planet";
 
 /** Deterministic Echo Grove trees shared by visual InstancedMesh and Rapier colliders. */
 export const GROVE_TREES: readonly GroveTreeSpec[] = Array.from({ length: 52 }, (_, i) => {
