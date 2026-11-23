@@ -55,3 +55,4 @@
 | 2026-11-22 06:36 | PR #44 (6389960) | moonhotline | 全库/配置同步 | fix: 恢复线上合作远征建房 |
 | 2026-11-22 16:21 | PR #47 (4b684db) | moonhotline | 渲染管线与 LOD | fix: 调整相机朝向并改为手动保存照片 |
 | 2026-11-23 01:24 | PR #46 (e5c9bd6) | moonhotline | 运动物理系统, 渲染管线与 LOD | fix: merge Kepler spawn basin into continuous spherical home terrain |
+| 2026-11-23 01:29 | Commit b23f755 | moonhotline | 运动物理系统, 渲染管线与 LOD | fix: stitch Kepler spawn basin into continuous collidable home planet (#46) |
