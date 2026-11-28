@@ -3,6 +3,7 @@ import type { Inventory, ItemId } from "./adventure-data";
 import type { SpaceshipKind } from "./celestial";
 import type { PortalAction, PortalColor, PortalPair } from "./portals";
 export const DT = 1 / 30;
+export const MAX_PLAYERS = 4;
 export const fuelCapacity = (level: number) => (level >= 1 ? 150 : 100);
 export type Phase = "lobby" | "active" | "won";
 export interface FighterRecall {

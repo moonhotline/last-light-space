@@ -1,47 +1,36 @@
 import { routePartykitRequest, Server } from "partyserver";
 import type { Connection, ConnectionContext, WSMessage } from "partyserver";
-import { initPhysics } from "../shared/physics";
-import { Simulation } from "../shared/simulation";
+import { encodeWireMessage, initPartyPhysics, parseWireMessage } from "./runtime";
+import { ROOM_CAPACITY, RoomSession, roomHealthPayload } from "../shared/room-session";
+import type { Simulation } from "../shared/simulation";
 import { DT } from "../shared/types";
 
-// Polyfill Cloudflare Workers / workerd environment for Rapier wasm-bindgen
-if (typeof (globalThis as any).window === "undefined") {
-  (globalThis as any).window = globalThis;
-}
-if (typeof (globalThis as any).performance === "undefined") {
-  (globalThis as any).performance = { now: () => Date.now() };
-} else if (typeof (globalThis as any).performance.now !== "function") {
-  (globalThis as any).performance.now = () => Date.now();
-}
-
-async function loadWasmModule() {
-  try {
-    const mod = await import("./rapier.wasm");
-    return (mod as any).default || mod;
-  } catch {
-    return undefined;
-  }
-}
-
-type Message = { type?: string; data?: unknown };
-
 export class Main extends Server {
-  sim!: Simulation;
-  commands = new Map<string, number>();
+  session!: RoomSession;
   timer: ReturnType<typeof setInterval> | undefined;
 
+  get sim(): Simulation {
+    return this.session.sim;
+  }
+
   async onStart() {
-    const wasmModule = await loadWasmModule();
-    await initPhysics(wasmModule);
-    this.sim = new Simulation();
+    await initPartyPhysics();
+    this.session = new RoomSession({
+      send: (playerId, type, data) => {
+        for (const conn of this.getConnections()) {
+          if (conn.id === playerId) {
+            conn.send(encodeWireMessage(type, data));
+            break;
+          }
+        }
+      },
+      broadcast: (type, data) => this.broadcast(encodeWireMessage(type, data)),
+    });
   }
 
   private startLoop() {
     if (this.timer) return;
-    this.timer = setInterval(() => {
-      this.sim.tick();
-      this.broadcastSnapshot();
-    }, DT * 1000);
+    this.timer = setInterval(() => this.session.stepTick(), DT * 1000);
   }
 
   private stopLoop() {
@@ -51,75 +40,29 @@ export class Main extends Server {
   }
 
   onConnect(connection: Connection, context: ConnectionContext) {
-    if ([...this.getConnections()].length > 4) {
+    if ([...this.getConnections()].length > ROOM_CAPACITY) {
       connection.close(4001, "room full");
       return;
     }
     const name = new URL(context.request.url).searchParams.get("name") || undefined;
     try {
-      this.sim.add(connection.id, name);
+      this.session.join(connection.id, name, true);
     } catch {
       connection.close(4001, "room full");
       return;
     }
     this.startLoop();
-    connection.send(JSON.stringify({ type: "snapshot", data: this.sim.snapshot() }));
-    this.broadcastSnapshot();
   }
 
   onMessage(connection: Connection, raw: WSMessage) {
-    if (typeof raw !== "string") return;
-    let message: Message;
-    try {
-      message = JSON.parse(raw) as Message;
-    } catch {
-      return;
-    }
-    if (message.type === "input") this.sim.input(connection.id, message.data);
-    if (message.type === "sync")
-      connection.send(JSON.stringify({ type: "snapshot", data: this.sim.snapshot() }));
-    if (message.type === "start" && this.sim.start(connection.id)) this.broadcastSnapshot();
-    if (message.type === "restart") this.restart(connection.id);
-    if (message.type === "action") {
-      if (message.data === "close-lore") {
-        this.sim.action(connection.id, message.data);
-        return;
-      }
-      const now = Date.now();
-      if (now - (this.commands.get(connection.id) || 0) < 100) return;
-      this.commands.set(connection.id, now);
-      this.sim.action(connection.id, message.data);
-    }
-    if (message.type === "chat") {
-      const p = this.sim.player(connection.id);
-      const rawText =
-        typeof message.data === "string"
-          ? message.data
-          : (message.data as any)?.text;
-      const text = String(rawText || "").trim().slice(0, 150);
-      if (text && p) {
-        this.broadcast(
-          JSON.stringify({
-            type: "chat",
-            data: {
-              id: p.id,
-              name: p.name,
-              color: p.color,
-              text,
-              time: Date.now(),
-            },
-          }),
-        );
-      }
-    }
+    const message = parseWireMessage(raw);
+    if (!message) return;
+    this.session.handleMessage(connection.id, message.type, message.data);
   }
 
   onClose(connection: Connection) {
-    if (!this.sim.player(connection.id)) return;
-    this.sim.remove(connection.id);
-    this.commands.delete(connection.id);
-    if (!this.sim.s.players.length) this.stopLoop();
-    this.broadcastSnapshot();
+    if (!this.session.leave(connection.id)) return;
+    if (!this.session.sim.s.players.length) this.stopLoop();
   }
 
   onError(connection: Connection) {
@@ -127,36 +70,8 @@ export class Main extends Server {
   }
 
   onRequest() {
-    return Response.json({
-      ok: true,
-      game: "last-light",
-      transport: "partykit",
-      version: "0.3.0",
-      room: this.name,
-      capacity: 4,
-    });
-  }
-
-  private restart(id: string) {
-    if (
-      id !== this.sim.s.host ||
-      (this.sim.s.phase !== "won" && this.sim.s.completedAt <= 0)
-    )
-      return;
-    const players = this.sim.s.players.map((player) => ({
-      id: player.id,
-      name: player.name,
-    }));
-    const seed = this.sim.s.seed + 1;
-    this.sim.dispose();
-    this.sim = new Simulation(seed);
-    players.forEach((player) => this.sim.add(player.id, player.name));
-    this.broadcastSnapshot();
-  }
-
-  private broadcastSnapshot() {
-    this.broadcast(
-      JSON.stringify({ type: "snapshot", data: this.sim.snapshot() }),
+    return Response.json(
+      roomHealthPayload({ transport: "partykit", room: this.name }),
     );
   }
 }
@@ -165,17 +80,16 @@ export default {
   async fetch(request: Request, env: any): Promise<Response> {
     const url = new URL(request.url);
 
-    if (url.pathname === "/_health" || url.pathname === "/healthz" || url.pathname === "/parties/main/_health") {
-      return Response.json({
-        ok: true,
-        game: "last-light",
-        transport: "partyserver",
-        version: "0.3.0",
-      }, {
+    if (
+      url.pathname === "/_health" ||
+      url.pathname === "/healthz" ||
+      url.pathname === "/parties/main/_health"
+    ) {
+      return Response.json(roomHealthPayload({ transport: "partyserver" }), {
         headers: {
           "Access-Control-Allow-Origin": "*",
           "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-        }
+        },
       });
     }
 
@@ -186,5 +100,5 @@ export default {
     if (partyResponse) return partyResponse;
 
     return new Response("Not Found", { status: 404 });
-  }
+  },
 };

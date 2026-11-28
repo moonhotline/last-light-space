@@ -22,6 +22,7 @@ import {
 } from "./map";
 import {
   DT,
+  MAX_PLAYERS,
   fuelCapacity,
   idleInput,
   parseInput,
@@ -70,7 +71,7 @@ export class Simulation {
           .slice(0, 16) || existing.name;
       return existing;
     }
-    if (this.s.players.length >= 4)
+    if (this.s.players.length >= MAX_PLAYERS)
       throw new Error("房间已满");
     const slot = [0, 1, 2, 3].find(
       (n) => !this.s.players.some((p) => p.color === n),

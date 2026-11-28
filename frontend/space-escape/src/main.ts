@@ -15,6 +15,7 @@ import { missionObjective } from "../shared/objectives";
 import { distance3 } from "../shared/map";
 import {
   connectPartyRoom,
+  resolveRoomEndpoint,
   roomCode,
   type MultiplayerRoom,
   type RoomEndpoint,
@@ -1511,7 +1512,13 @@ function addChatMessage(data: { name: string; color?: number; text: string }) {
   const item = document.createElement("div");
   item.className = "chat-item";
   const color = colors[data.color ?? 0] || "var(--mint)";
-  item.innerHTML = `<span class="chat-author" style="color: ${color}">[${data.name}]:</span><span>${data.text}</span>`;
+  const author = document.createElement("span");
+  author.className = "chat-author";
+  author.style.color = color;
+  author.textContent = `[${String(data.name || "探索员")}]:`;
+  const body = document.createElement("span");
+  body.textContent = String(data.text || "");
+  item.append(author, body);
   list.appendChild(item);
   list.scrollTop = list.scrollHeight;
   setTimeout(() => item.classList.add("fading"), 6000);
@@ -1652,31 +1659,7 @@ void Promise.all([
     .catch(() => ({ url: "" })),
 ])
   .then(([,, config]: [unknown, unknown, any]) => {
-    const overrideUrl = import.meta.env.VITE_ROOM_URL;
-    const url =
-      overrideUrl ||
-      config.url ||
-      (config.sameOrigin
-        ? `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}`
-        : "") ||
-      (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)
-        ? "ws://127.0.0.1:2567"
-        : "");
-    try {
-      const p = new URL(url);
-      if (
-        ["http:", "https:", "ws:", "wss:"].includes(p.protocol) &&
-        !p.username &&
-        !p.password
-      ) {
-        endpoint = { url };
-        if (!overrideUrl && config.url && config.transport === "partyserver") {
-          endpoint.transport = config.transport;
-        }
-      }
-    } catch {
-      /* Solo stays available offline after assets load. */
-    }
+    endpoint = resolveRoomEndpoint(config, import.meta.env.VITE_ROOM_URL);
     loading = false;
     $<HTMLButtonElement>("launch").disabled = false;
     canvas.dataset.ready = "true";
