@@ -34,6 +34,50 @@ export interface RoomEndpoint {
   transport?: "partyserver";
 }
 
+export interface ConnectionConfig {
+  url?: string;
+  sameOrigin?: boolean;
+  transport?: string;
+}
+
+/**
+ * Resolve and validate the multiplayer room endpoint from build overrides,
+ * runtime `connection.json`, or localhost fallback.
+ */
+export function resolveRoomEndpoint(
+  config: ConnectionConfig | null | undefined,
+  overrideUrl?: string,
+  loc?: Pick<Location, "protocol" | "host" | "hostname">,
+): RoomEndpoint | null {
+  const effectiveLoc = loc ?? (typeof location !== "undefined" ? location : undefined);
+  const url =
+    overrideUrl ||
+    config?.url ||
+    (config?.sameOrigin && effectiveLoc
+      ? `${effectiveLoc.protocol === "https:" ? "wss:" : "ws:"}//${effectiveLoc.host}`
+      : "") ||
+    (effectiveLoc && /^(localhost|127\.0\.0\.1)$/.test(effectiveLoc.hostname)
+      ? "ws://127.0.0.1:2567"
+      : "");
+  try {
+    const parsed = new URL(url);
+    if (
+      ["http:", "https:", "ws:", "wss:"].includes(parsed.protocol) &&
+      !parsed.username &&
+      !parsed.password
+    ) {
+      const endpoint: RoomEndpoint = { url };
+      if (!overrideUrl && config?.url && config.transport === "partyserver") {
+        endpoint.transport = "partyserver";
+      }
+      return endpoint;
+    }
+  } catch {
+    /* Solo stays available offline when no valid endpoint is configured. */
+  }
+  return null;
+}
+
 export interface MultiplayerRoom {
   roomId: string;
   sessionId: string;

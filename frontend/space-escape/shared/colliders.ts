@@ -15,7 +15,7 @@ import {
   RESOURCE_SITES,
   SPAWN_FLEET,
 } from "./adventure-data";
-import { SOLAR_SYSTEM, type SpaceshipKind } from "./celestial";
+import { SOLAR_SYSTEM, WARP_GATE_IDS, warpGateYaw, type SpaceshipKind } from "./celestial";
 import { distance, groundAt, hash, ROCKS, SCENIC_SITES, type Vec } from "./map";
 
 /** Rapier 16-bit collision group bitflags (membership << 16 | filter). */
@@ -249,18 +249,10 @@ export const RESOURCE_COLLIDER_SPECS = RESOURCE_SITES.map((node, id) => ({
 /** Warp Gate structural outer ring colliders (leaves inner r*0.81 portal aperture completely clear). */
 export const WARPGATE_FRAME_COLLIDERS: readonly BoxColliderSpec[] = (() => {
   const result: BoxColliderSpec[] = [];
-  const gateIds = ["warpgate", "warpgate_east", "warpgate_south", "warpgate_west"] as const;
-  for (const id of gateIds) {
+  for (const id of WARP_GATE_IDS) {
     const body = SOLAR_SYSTEM[id];
     if (!body) continue;
-    const rotY =
-      id === "warpgate_south"
-        ? Math.PI
-        : id === "warpgate_east"
-          ? -Math.PI / 2
-          : id === "warpgate_west"
-            ? Math.PI / 2
-            : 0;
+    const rotY = warpGateYaw(id);
     const cosY = Math.cos(rotY);
     const sinY = Math.sin(rotY);
     // 8 outer structural beams at radius 0.945 * R (inner edge ~0.875 * R, safely outside 0.81 * R portal)

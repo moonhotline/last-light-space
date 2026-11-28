@@ -14,6 +14,7 @@ import {
 import { alignShipToGround, clean3DEntityText, normalizeModelContainer, updateShipTransform } from "./interplanetary";
 import { ShipPropulsionFX } from "./thruster-fx";
 import { cosmicAudio } from "./sound-engine";
+import { loadGltfWithRetry, resolvePilotFlightState, type PilotFlightFlags } from "./asset-loader";
 import { GROVE_TREES, OUTPOST_POSTS } from "../shared/colliders";
 import { hash, type Vec } from "../shared/map";
 import type { Player, Snapshot } from "../shared/types";
@@ -98,18 +99,7 @@ export class AdventureView {
   ) {}
   async load() {
     const loader = new GLTFLoader();
-    const load = async (url: string) => {
-      let error: unknown;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          return await loader.loadAsync(url);
-        } catch (e) {
-          error = e;
-          await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
-        }
-      }
-      throw error;
-    };
+    const load = (url: string) => loadGltfWithRetry(loader, url);
     const [ship, lab, drone, crateGltf, coreGltf, obeliskGltf, mineralGltf] = await Promise.all([
       load(SPAWN_FLEET.light_fighter.asset),
       load("/assets/dawn-lab.glb"),
@@ -425,7 +415,7 @@ export class AdventureView {
     me: Player | null,
     dt: number,
     t: number,
-    pilotFlight?: { boosting: boolean; braking: boolean },
+    pilotFlight?: PilotFlightFlags,
   ) {
     if (!s) return;
     const a = s.adventure,
@@ -454,13 +444,7 @@ export class AdventureView {
         | undefined;
       if (engine) engine.visible = isFighter && ship.repaired;
     }
-    const speed = Math.hypot(ship.vx ?? 0, ship.vy ?? 0, ship.vz ?? 0);
-    const isBoosting = pilotFlight
-      ? pilotFlight.boosting
-      : (ship.thrust || 0) > 1.8 || speed > 42;
-    const isBraking = pilotFlight
-      ? pilotFlight.braking
-      : (ship.vy ?? 0) < -15;
+    const { boosting: isBoosting, braking: isBraking } = resolvePilotFlightState(ship, pilotFlight);
     if (isFighter) {
       if (this.propulsionFX) this.propulsionFX.rootGroup.visible = true;
       this.propulsionFX?.update(dt, ship, null, isBoosting, isBraking);

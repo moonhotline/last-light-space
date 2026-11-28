@@ -36,13 +36,22 @@ import {
   type BoxColliderSpec,
 } from "./colliders";
 import { HOME_COLLAR_RADIUS } from "./home-planet";
-import { DT, type Adventure, type Input, type Player } from "./types";
+import {
+  DT,
+  fuelCapacity,
+  type Adventure,
+  type Input,
+  type Player,
+  type ShipMotionContext,
+  type ShipMotionResult,
+} from "./types";
 import { PORTAL_RADIUS_X, PORTAL_RADIUS_Y, portalFrame, portalRotation, type Portal, type PortalPair } from "./portals";
+
+export { fuelCapacity, type ShipMotionContext, type ShipMotionResult };
 
 let ready: Promise<void> | undefined;
 export const initPhysics = (wasmModule?: unknown) =>
   (ready ??= wasmModule ? (RAPIER as any).init(wasmModule) : RAPIER.init());
-export const fuelCapacity = (level: number) => (level >= 1 ? 150 : 100);
 
 const ALL_SOLID_FOR_PLAYER = makeCollisionGroups(
   COLLISION_GROUP.PLAYER,
@@ -76,21 +85,6 @@ function membershipFor(group: number): number {
   if (group === COLLISION_GROUP.SHIP) return SHIP_MEMBERSHIP;
   if (group === COLLISION_GROUP.NPC) return NPC_MEMBERSHIP;
   return WORLD_MEMBERSHIP;
-}
-
-export interface ShipMotionContext {
-  kind?: SpaceshipKind;
-  yaw?: number;
-  pitch?: number;
-  bank?: number;
-  flightRotation?: { x: number; y: number; z: number; w: number };
-}
-
-export interface ShipMotionResult extends Vec {
-  frontalCollision: boolean;
-  collided: boolean;
-  normal?: Vec;
-  impactRatio?: number;
 }
 
 const PLAYER_HALF_SEGMENT = 0.48;
@@ -351,10 +345,32 @@ export class MovementWorld {
       }
     }
 
+    this.syncQueryPipeline();
+  }
+
+  private syncQueryPipeline() {
     this.world.propagateModifiedBodyPositionsToColliders();
     if (typeof (this.world as unknown as { updateSceneQueries?: () => void }).updateSceneQueries === "function") {
       (this.world as unknown as { updateSceneQueries: () => void }).updateSceneQueries();
     }
+  }
+
+  /** Shared dash/skate speed calculation and jump/jetpack state transitions for basin & spherical walking. */
+  private stepLocomotionState(p: Player, i: Input): { speed: number; shouldJump: boolean } {
+    p.dashCooldown = Math.max(0, p.dashCooldown - DT);
+    p.dashTime = Math.max(0, p.dashTime - DT);
+    if (i.dash && !p.dashHeld && p.dashCooldown === 0 && p.fuel >= 16) {
+      p.dashTime = 0.3;
+      p.dashCooldown = 1.5;
+      p.fuel -= 16;
+    }
+    p.dashHeld = i.dash;
+    p.skate = !!i.skate;
+    const speed = p.dashTime > 0 ? 43 : p.skate ? (i.sprint ? 32 : 23) : i.sprint ? 23 : 15;
+    const shouldJump = i.jump && !p.jumpHeld && p.grounded;
+    p.jumpHeld = i.jump;
+    p.jetting = i.jet && p.fuel > 0;
+    return { speed, shouldJump };
   }
 
   private shipQuaternion(ctx?: ShipMotionContext): Quaternion {
@@ -389,10 +405,7 @@ export class MovementWorld {
     const b = this.bodies.get(id)?.body;
     b?.setTranslation(p, true);
     b?.setNextKinematicTranslation(p);
-    this.world.propagateModifiedBodyPositionsToColliders();
-    if (typeof (this.world as unknown as { updateSceneQueries?: () => void }).updateSceneQueries === "function") {
-      (this.world as unknown as { updateSceneQueries: () => void }).updateSceneQueries();
-    }
+    this.syncQueryPipeline();
   }
 
   private moveOnSphere(p: Player, i: Input, portals?: PortalPair) {
@@ -405,32 +418,21 @@ export class MovementWorld {
     const velocity = new Vector3(p.vx, p.vy, p.vz);
     let radial = velocity.dot(up);
     const tangent = velocity.addScaledVector(up, -radial);
-    const wasJumpHeld = p.jumpHeld;
     const wasGrounded = p.grounded;
-    p.dashCooldown = Math.max(0, p.dashCooldown - DT);
-    p.dashTime = Math.max(0, p.dashTime - DT);
-    if (i.dash && !p.dashHeld && p.dashCooldown === 0 && p.fuel >= 16) {
-      p.dashTime = 0.3;
-      p.dashCooldown = 1.5;
-      p.fuel -= 16;
-    }
-    p.dashHeld = i.dash;
-    p.skate = !!i.skate;
-    const speed = p.dashTime > 0 ? 43 : p.skate ? (i.sprint ? 32 : 23) : i.sprint ? 23 : 15;
+    const { speed, shouldJump } = this.stepLocomotionState(p, i);
+    const len = Math.max(1, Math.hypot(i.forward, i.side));
+    const dashForward = p.dashTime > 0 && i.forward === 0 && i.side === 0;
     const target = new Vector3(
-      Math.cos(i.yaw) * i.side - Math.sin(i.yaw) * i.forward,
+      dashForward ? -Math.sin(i.yaw) : (Math.cos(i.yaw) * i.side - Math.sin(i.yaw) * i.forward) / len,
       0,
-      -Math.sin(i.yaw) * i.side - Math.cos(i.yaw) * i.forward,
+      dashForward ? -Math.cos(i.yaw) : (-Math.sin(i.yaw) * i.side - Math.cos(i.yaw) * i.forward) / len,
     )
-      .divideScalar(Math.max(1, Math.hypot(i.forward, i.side)))
       .applyQuaternion(frame)
       .multiplyScalar(speed);
     tangent.lerp(target, 1 - Math.exp(-(wasGrounded ? 10 : 2) * DT));
-    p.jumpHeld = i.jump;
-    p.jetting = i.jet && p.fuel > 0;
     const gravity = new Vector3().copy(sphericalGravity(position, planet).gravityVec);
     radial = Math.max(-40, radial + gravity.dot(up) * DT);
-    if (i.jump && !wasJumpHeld && wasGrounded) radial = 12;
+    if (shouldJump) radial = 12;
     if (p.jetting) {
       radial = Math.min(p.level >= 1 ? 24 : 19, radial + (p.level >= 1 ? 25 : 21) * DT);
       p.fuel = Math.max(0, p.fuel - DT * 20);
@@ -663,26 +665,15 @@ export class MovementWorld {
     const len = Math.max(1, Math.hypot(i.forward, i.side));
     const dx = (Math.cos(i.yaw) * i.side - Math.sin(i.yaw) * i.forward) / len,
       dz = (-Math.sin(i.yaw) * i.side - Math.cos(i.yaw) * i.forward) / len;
-    p.dashCooldown = Math.max(0, p.dashCooldown - DT);
-    p.dashTime = Math.max(0, p.dashTime - DT);
-    if (i.dash && !p.dashHeld && p.dashCooldown === 0 && p.fuel >= 16) {
-      p.dashTime = 0.3;
-      p.dashCooldown = 1.5;
-      p.fuel -= 16;
-    }
-    p.dashHeld = i.dash;
-    p.skate = !!i.skate;
-    const speed = p.dashTime > 0 ? 43 : p.skate ? (i.sprint ? 32 : 23) : i.sprint ? 23 : 15;
+    const { speed, shouldJump } = this.stepLocomotionState(p, i);
     const factor = 1 - Math.exp(-(p.grounded && !p.grapple ? (p.skate ? 3.5 : 10) : 0.75) * DT);
     const dashForward = p.dashTime > 0 && len === 1 && i.forward === 0 && i.side === 0;
     p.vx += ((dashForward ? -Math.sin(i.yaw) : dx) * speed - p.vx) * factor;
     p.vz += ((dashForward ? -Math.cos(i.yaw) : dz) * speed - p.vz) * factor;
-    if (i.jump && !p.jumpHeld && p.grounded) {
+    if (shouldJump) {
       p.vy = 12;
       p.grounded = false;
     }
-    p.jumpHeld = i.jump;
-    p.jetting = i.jet && p.fuel > 0;
     if (p.jetting) {
       p.vy = Math.min(p.level >= 1 ? 24 : 19, p.vy + (p.level >= 1 ? 25 : 21) * DT);
       p.fuel = Math.max(0, p.fuel - DT * 20);

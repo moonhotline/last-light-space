@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "space:dev": "vite --config frontend/space-escape/vite.config.ts",
+    "space:check": "node scripts/check-architecture.mjs",
     "space:build": "tsc -p frontend/space-escape/tsconfig.json && vite build --config frontend/space-escape/vite.config.ts",
     "space:server": "tsx frontend/space-escape/server/index.ts",
     "space:party": "partykit dev",

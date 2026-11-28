@@ -5,6 +5,8 @@ import {
   MINERAL_SAMPLES,
   ALIEN_ROSTER,
   celestialCapture,
+  geodesicArcDistance,
+  warpGateYaw,
   type CelestialBody,
   type SpaceshipKind,
   type FlightFlightMode,
@@ -302,20 +304,7 @@ export function mercuryGeodesicDistance(
   p1: { x: number; y: number; z: number },
   p2: { x: number; y: number; z: number },
 ): { geodesicArc: number; altDiff: number; totalDistance: number; valueOf: () => number } {
-  const merc = SOLAR_SYSTEM.mercury;
-  const v1 = new THREE.Vector3(p1.x - merc.position.x, p1.y - merc.position.y, p1.z - merc.position.z);
-  const v2 = new THREE.Vector3(p2.x - merc.position.x, p2.y - merc.position.y, p2.z - merc.position.z);
-
-  const r1 = v1.length();
-  const r2 = v2.length();
-
-  v1.normalize();
-  v2.normalize();
-
-  const dot = THREE.MathUtils.clamp(v1.dot(v2), -1, 1);
-  const deltaTheta = Math.acos(dot);
-  const geodesicArc = merc.radius * deltaTheta; // 320m * deltaTheta
-  const altDiff = Math.abs(r1 - r2);
+  const { arcDistance: geodesicArc, heightDiff: altDiff } = geodesicArcDistance(p1, p2, SOLAR_SYSTEM.mercury);
   const totalDistance = altDiff > 12 ? geodesicArc + (altDiff - 12) : geodesicArc;
 
   return {
@@ -470,9 +459,7 @@ export class InterplanetarySystem {
 
       if (id.startsWith("warpgate")) {
         const gate = buildWarpGate(body);
-        if (id === "warpgate_south") pGroup.rotation.y = Math.PI;
-        else if (id === "warpgate_east") pGroup.rotation.y = -Math.PI / 2;
-        else if (id === "warpgate_west") pGroup.rotation.y = Math.PI / 2;
+        pGroup.rotation.y = warpGateYaw(id);
         // Keep the entry shape shared, but never give a portal a spherical shell.
         pGroup.add(...gate.group.children.slice());
         this.systemGroup.add(pGroup);

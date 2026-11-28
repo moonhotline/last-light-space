@@ -1,13 +1,3 @@
-declare module "partysocket" {
-  export default class PartySocket {
-    id: string;
-    constructor(options: any);
-    addEventListener(event: string, handler: (e: any) => void): void;
-    send(data: string): void;
-    close(code?: number, reason?: string): void;
-  }
-}
-
 declare module "partykit/server" {
   export interface Room {
     id: string;

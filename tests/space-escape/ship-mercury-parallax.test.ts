@@ -22,7 +22,7 @@ import {
   clean3DEntityText,
   mercuryGeodesicDistance,
 } from "../../frontend/space-escape/src/interplanetary";
-import { StardustParallaxStream } from "../../frontend/space-escape/src/scene";
+import { StardustParallaxStream } from "../../frontend/space-escape/src/stardust-stream";
 import { Simulation } from "../../frontend/space-escape/shared/simulation";
 import { initPhysics } from "../../frontend/space-escape/shared/physics";
 import { idleInput } from "../../frontend/space-escape/shared/types";

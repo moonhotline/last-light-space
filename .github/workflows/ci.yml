@@ -25,7 +25,10 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Run Test Suite (55 Unit & Integration Tests)
+      - name: Run Architecture Guardrails
+        run: npm run space:check
+
+      - name: Run Test Suite (Unit, Regression & Architecture Tests)
         run: npm run space:test
 
       - name: Run Vercel Build Command

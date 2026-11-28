@@ -5,74 +5,55 @@ import { fileURLToPath } from "node:url";
 import { Server, Room, type Client } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import { initPhysics } from "../shared/physics";
-import { Simulation } from "../shared/simulation";
+import {
+  ROOM_CAPACITY,
+  ROOM_MESSAGE_TYPES,
+  RoomSession,
+  roomHealthPayload,
+} from "../shared/room-session";
 import { DT } from "../shared/types";
 
 await initPhysics();
+
 class EscapeRoom extends Room {
-  maxClients = 4;
-  sim!: Simulation;
-  commands = new Map<string, number>();
+  maxClients = ROOM_CAPACITY;
+  session!: RoomSession;
+
   onCreate() {
     this.roomId = randomBytes(4).toString("hex").slice(0, 6).toUpperCase();
-    this.sim = new Simulation();
-    this.onMessage("input", (client, data) =>
-      this.sim.input(client.sessionId, data),
-    );
-    this.onMessage("sync", (client) =>
-      client.send("snapshot", this.sim.snapshot()),
-    );
-    this.onMessage("action", (client, data) => {
-      // Closing a local reading panel must not consume the gameplay action cooldown.
-      if (data === "close-lore") {
-        this.sim.action(client.sessionId, data);
-        return;
-      }
-      const now = Date.now();
-      if (now - (this.commands.get(client.sessionId) || 0) < 100) return;
-      this.commands.set(client.sessionId, now);
-      this.sim.action(client.sessionId, data);
+    this.session = new RoomSession({
+      send: (playerId, type, data) => {
+        this.clients.find((client) => client.sessionId === playerId)?.send(type, data);
+      },
+      broadcast: (type, data) => this.broadcast(type, data),
+      onLock: () => {
+        void this.lock();
+      },
+      onUnlock: () => {
+        void this.unlock();
+      },
     });
-    this.onMessage("start", (client) => {
-      if (this.sim.start(client.sessionId)) void this.lock();
-    });
-    this.onMessage("restart", (client) => {
-      if (
-        client.sessionId !== this.sim.s.host ||
-        (this.sim.s.phase !== "won" && this.sim.s.completedAt <= 0)
-      )
-        return;
-      const players = this.sim.s.players.map((p) => ({
-        id: p.id,
-        name: p.name,
-      }));
-      const seed = this.sim.s.seed + 1;
-      this.sim.dispose();
-      this.sim = new Simulation(seed);
-      players.forEach((p) => this.sim.add(p.id, p.name));
-      void this.unlock();
-      this.broadcast("snapshot", this.sim.snapshot());
-    });
-    this.setFixedTimestep(() => {
-      this.sim.tick();
-      if (this.sim.s.tick % 2 === 0)
-        this.broadcast("snapshot", this.sim.snapshot());
-    }, 1 / DT);
+    for (const type of ROOM_MESSAGE_TYPES) {
+      this.onMessage(type, (client, data) =>
+        this.session.handleMessage(client.sessionId, type, data),
+      );
+    }
+    this.setFixedTimestep(() => this.session.stepTick(), 1 / DT);
   }
+
   onJoin(client: Client, options: { name?: string }) {
-    this.sim.add(
+    this.session.join(
       client.sessionId,
       typeof options?.name === "string" ? options.name : undefined,
     );
-    this.broadcast("snapshot", this.sim.snapshot());
   }
+
   onLeave(client: Client) {
-    this.sim.remove(client.sessionId);
-    this.commands.delete(client.sessionId);
-    this.broadcast("snapshot", this.sim.snapshot());
+    this.session.leave(client.sessionId);
   }
+
   onDispose() {
-    this.sim.dispose();
+    this.session.dispose();
   }
 }
 
@@ -87,9 +68,7 @@ app.use((req, res, next) => {
   }
   next();
 });
-app.get("/health", (_req, res) =>
-  res.json({ ok: true, game: "last-light", version: "0.3.0", capacity: 4 }),
-);
+app.get("/health", (_req, res) => res.json(roomHealthPayload()));
 // One origin serves both the built game and WebSocket rooms for local/tunnel play.
 // Static-only hosts retain their own connection.json with an explicit room URL.
 app.get("/connection.json", (_req, res) => {
