@@ -81,20 +81,3 @@ export async function exportSurveyCameraGlb(): Promise<void> {
 export async function exportGrappleLauncherGlb(): Promise<void> {
   downloadAsset("/assets/echo-grapple.glb", `kepler-echo-grapple-${Date.now()}.glb`);
 }
-
-export function takeSnapshot(view: { canvas: HTMLCanvasElement; sound(name: string): void }): void {
-  view.sound("shutter");
-  const flash = document.createElement("div");
-  flash.className = "camera-flash";
-  document.body.appendChild(flash);
-  setTimeout(() => flash.remove(), 450);
-  try {
-    const url = view.canvas.toDataURL("image/png");
-    const a = document.createElement("a");
-    a.download = `last-light-snapshot-${Date.now()}.png`;
-    a.href = url;
-    a.click();
-  } catch (err) {
-    console.error("Camera snapshot error:", err);
-  }
-}

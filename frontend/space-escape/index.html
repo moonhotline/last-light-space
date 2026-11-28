@@ -31,8 +31,8 @@
         ><button
           id="snapshot"
           class="icon"
-          title="拍照快照下载 P"
-          aria-label="拍照快照下载"
+          title="拍照 P"
+          aria-label="拍照"
         >
           <i data-lucide="camera"></i></button
         ><button
@@ -210,10 +210,11 @@
               <div class="prop-item">
                 <div class="prop-text">
                   <b>远征全息相机 · SURVEY CAMERA</b>
-                  <small>全高清星球实景 · 原生画质保存到本地相册</small>
+                  <small>保留最近一张照片，可手动保存至本地</small>
                 </div>
                 <div class="prop-btns">
-                  <button id="snapPhoto" class="secondary"><i data-lucide="camera"></i>拍照下载快照 <kbd>P</kbd></button>
+                  <button id="snapPhoto" class="secondary"><i data-lucide="camera"></i>拍照 <kbd>P</kbd></button>
+                  <button id="savePhoto" class="secondary" disabled><i data-lucide="download"></i>保存照片</button>
                   <button id="downloadCamera" class="secondary"><i data-lucide="download"></i>下载相机 GLB</button>
                 </div>
               </div>
@@ -428,7 +429,7 @@
           <div class="weapon-hud">
             <button id="wepRifle" class="wep-slot" type="button"><kbd>1</kbd> HMG-379电磁枪</button>
             <button id="wepGrapple" class="wep-slot" type="button"><kbd>2</kbd> DX5机动钩索</button>
-            <button id="wepCamera" class="wep-slot" type="button"><kbd>3</kbd> 拍立得复古相机</button>
+            <button id="wepCamera" class="wep-slot" type="button"><kbd>3</kbd> 复古相机</button>
             <button id="wepPortal" class="wep-slot" type="button" hidden><kbd>F</kbd> 传送枪</button>
             <span id="weaponAmmo" class="weapon-ammo">24 / 24</span>
           </div>

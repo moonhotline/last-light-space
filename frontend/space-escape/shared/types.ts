@@ -37,6 +37,7 @@ export interface PhysicsQueries {
   visible(a: Vec, b: Vec): boolean;
   reset(id: string, p: Vec): void;
   shipMotion(a: Vec, delta: Vec, ctx?: ShipMotionContext): ShipMotionResult;
+  homeSurfaceHeight(x: number, z: number): number | null;
 }
 export interface SimulationHost {
   s: Snapshot;

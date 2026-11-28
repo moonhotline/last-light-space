@@ -394,13 +394,13 @@ export class GameView {
   }
 
   private mountFirstPerson(source: THREE.Group, kind: "rifle" | "grapple" | "camera") {
-    const size = kind === "rifle" ? 1.12 : kind === "grapple" ? 0.62 : 0.4;
-    const model = equipmentModel(source, size);
+    const size = kind === "rifle" ? 1.12 : kind === "grapple" ? 0.62 : 0.24;
+    const model = equipmentModel(source, size, kind === "camera" ? 0 : Math.PI);
     model.name = `first_person_${kind}`;
     model.userData.asset = kind === "rifle" ? "hmg-379" : kind;
     const pos =
       kind === "camera"
-        ? new THREE.Vector3(0.3, -0.17, -0.52)
+        ? new THREE.Vector3(0.28, -0.14, -0.56)
         : new THREE.Vector3(0.34, -0.22, kind === "rifle" ? -0.85 : -0.68);
     model.position.copy(pos);
     if (kind === "rifle") this.addMuzzle(model, 0.078, 0.084, -0.577);
@@ -480,7 +480,8 @@ export class GameView {
     this.rifleAsset = equipmentModel(rifleGltf.scene, 0.95, 0);
     this.brightenRifle(this.rifleAsset);
     this.grappleAsset = equipmentModel(grappleGltf.scene, 0.55, 0);
-    this.cameraAsset = equipmentModel(cameraGltf.scene, 0.35, 0);
+    // The imported lens faces +Z. Align it with the view camera's -Z axis.
+    this.cameraAsset = equipmentModel(cameraGltf.scene, 0.23, Math.PI);
     this.obeliskAsset = obeliskGltf.scene;
 
     for (const m of [
@@ -1301,7 +1302,28 @@ export class GameView {
     this.frames++;
     this.canvas.dataset.frames = String(this.frames);
   }
-
+  takeSnapshot(): string | null {
+    const showTool = this.toolPass.enabled;
+    try {
+      if (showTool) {
+        this.toolPass.enabled = false;
+        this.composer.render(0);
+      }
+      const photo = this.canvas.toDataURL("image/png");
+      if (photo === "data:,") return null;
+      this.sound("shutter");
+      const flash = document.createElement("div");
+      flash.className = "camera-flash";
+      document.body.appendChild(flash);
+      setTimeout(() => flash.remove(), 450);
+      return photo;
+    } catch (err) {
+      console.error("Camera snapshot error:", err);
+      return null;
+    } finally {
+      this.toolPass.enabled = showTool;
+    }
+  }
   project(target: Vec) {
     const v = new THREE.Vector3(target.x, target.y + 9, target.z).project(this.camera);
     if (v.z > 1) return null;

@@ -48,17 +48,16 @@ import type { MovementWorld } from "../shared/physics";
 import type { PortalAction } from "../shared/portals";
 import { GameView, type Equipment } from "./scene";
 import {
+  downloadAsset,
   exportHoverboardGlb,
   exportTechRifleGlb,
   exportSurveyCameraGlb,
   exportGrappleLauncherGlb,
-  takeSnapshot,
 } from "./asset-loader";
 import { StuntTracker } from "./stunt-tracker";
 import { setupFeedbackPanel } from "./feedback-panel";
 import { setupChatConsole } from "./chat-console";
 import { HudController } from "./hud-controller";
-
 const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id) as T;
 const text = (id: string, s: string) => {
@@ -80,6 +79,7 @@ let me: Player | null = null;
 let predicted: Player | null = null;
 let prediction: MovementWorld | null = null;
 let lastSpaceTime = 0;
+let latestPhoto: string | null = null;
 let pending: Input[] = [];
 let sequence = 0;
 let yaw = 0;
@@ -816,6 +816,21 @@ function usePortalGun(action: PortalAction) {
   if (portalActions.length < 8) portalActions.push(action);
 }
 
+function capturePhoto() {
+  selectWeapon("camera");
+  // Capture after the world has rendered from the newly selected camera view.
+  requestAnimationFrame(() => {
+    const photo = view.takeSnapshot();
+    if (!photo) {
+      notice("拍照失败，请重试");
+      return;
+    }
+    latestPhoto = photo;
+    $<HTMLButtonElement>("savePhoto").disabled = false;
+    notice("已拍照，可在物品栏保存");
+  });
+}
+
 addEventListener("keydown", (e) => {
   if ((e.target as HTMLElement)?.matches("input, textarea")) {
     if (e.code === "Escape") {
@@ -866,10 +881,7 @@ addEventListener("keydown", (e) => {
   if (e.code === "KeyQ") selectWeapon(view.activeWeapon === "grapple" ? "none" : "grapple");
   if (e.code === "KeyT") command("mark");
   if (e.code === "KeyV") camera();
-  if (e.code === "KeyP") {
-    selectWeapon("camera");
-    takeSnapshot(view);
-  }
+  if (e.code === "KeyP") capturePhoto();
   if (e.code === "KeyK") toggleHoverboard();
   if (e.code === "KeyR") {
     if (view.activeWeapon === "rifle" || playerAmmo < 24) playerReloadTime = 2.0;
@@ -934,7 +946,7 @@ canvas.addEventListener("mousedown", (e) => {
   }
   if (e.button === 0) {
     if (view.activeWeapon === "none" && !view.thirdPerson) selectWeapon("rifle");
-    if (view.activeWeapon === "camera") takeSnapshot(view);
+    if (view.activeWeapon === "camera") capturePhoto();
     else keys.add("Mouse0");
     if (!mobile() && document.pointerLockElement !== canvas) lock();
   }
@@ -994,8 +1006,13 @@ function switchSpacecraft() {
   );
 }
 
-$("snapshot") && ($("snapshot").onclick = () => takeSnapshot(view));
-$("snapPhoto") && ($("snapPhoto").onclick = () => takeSnapshot(view));
+$("snapshot").onclick = capturePhoto;
+$("snapPhoto").onclick = capturePhoto;
+$("savePhoto").onclick = () => {
+  if (latestPhoto) {
+    downloadAsset(latestPhoto, `last-light-snapshot-${Date.now()}.png`);
+  }
+};
 $("toggleSkate") && ($("toggleSkate").onclick = toggleHoverboard);
 $("btnSwitchShip") && ($("btnSwitchShip").onclick = switchSpacecraft);
 $("wepPortal").onclick = togglePortalGun;
