@@ -56,3 +56,5 @@
 | 2026-11-22 16:21 | PR #47 (4b684db) | moonhotline | 渲染管线与 LOD | fix: 调整相机朝向并改为手动保存照片 |
 | 2026-11-23 01:24 | PR #46 (e5c9bd6) | moonhotline | 运动物理系统, 渲染管线与 LOD | fix: merge Kepler spawn basin into continuous spherical home terrain |
 | 2026-11-23 01:29 | Commit b23f755 | moonhotline | 运动物理系统, 渲染管线与 LOD | fix: stitch Kepler spawn basin into continuous collidable home planet (#46) |
+| 2026-11-28 13:35 | PR #48 (13eda88) | moonhotline | 网络架构与服务, 天体物理与大气, 运动物理系统, 权威多人仿真, 渲染管线与 LOD | refactor(arch): converge space-escape modules, unify multiplayer protocol, elimi |
+| 2026-11-28 13:36 | Commit 4c0b120 | moonhotline | 网络架构与服务, 天体物理与大气, 运动物理系统, 权威多人仿真, 渲染管线与 LOD | refactor(arch): converge space-escape modules, unify multiplayer protocol, elimi |
