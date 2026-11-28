@@ -42,7 +42,7 @@ import {
   Image,
 } from "lucide";
 import { distance, WORLD_SIZE } from "../shared/map";
-import { DT, type Input, type Player, type Snapshot } from "../shared/types";
+import { DT, MAX_PLAYERS, type Input, type Player, type Snapshot } from "../shared/types";
 import type { Simulation } from "../shared/simulation";
 import type { MovementWorld } from "../shared/physics";
 import type { PortalAction } from "../shared/portals";
@@ -244,6 +244,9 @@ function releaseSession() {
   lastEvent = 0;
   lastLore = -1;
   stunts.reset();
+  latestPhoto = null;
+  const savePhotoBtn = $("savePhoto") as HTMLButtonElement | null;
+  if (savePhotoBtn) savePhotoBtn.disabled = true;
   const skateBtn = $("toggleSkate");
   if (skateBtn) skateBtn.textContent = "装备滑板 (K)";
   hudController.reset();
@@ -327,7 +330,7 @@ function receive(next: Snapshot) {
     }
   }
   if (mode === "coop" && room) {
-    text("linkState", `房间 ${room.roomId} · ${next.players.length}/4 人`);
+    text("linkState", `房间 ${room.roomId} · ${next.players.length}/${MAX_PLAYERS} 人`);
   }
   if (reconnecting) {
     reconnecting = false;

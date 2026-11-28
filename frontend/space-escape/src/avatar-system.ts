@@ -127,11 +127,21 @@ export class AvatarSystem {
     for (const [id, avatar] of this.avatars) {
       if (!ids.has(id)) {
         disposeNameplate(avatar);
+        for (const ownedName of ["avatar-lamp", "jet--1", "jet-1"]) {
+          const mesh = avatar.getObjectByName(ownedName) as THREE.Mesh | undefined;
+          if (mesh?.isMesh) {
+            mesh.geometry?.dispose();
+            const mat = mesh.material;
+            if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+            else mat?.dispose();
+          }
+        }
         this.scene.remove(avatar);
         this.avatars.delete(id);
         const anim = this.mixers.get(id);
         if (anim) {
           anim.mixer.stopAllAction();
+          anim.mixer.uncacheRoot(anim.mixer.getRoot());
           this.mixers.delete(id);
         }
       }
@@ -273,6 +283,7 @@ export class AvatarSystem {
       new THREE.SphereGeometry(0.06, 12, 8),
       new THREE.MeshBasicMaterial({ color: teamColor }),
     );
+    lamp.name = "avatar-lamp";
     lamp.position.set(0, 1.76, 0.14);
     avatar.add(lamp);
 

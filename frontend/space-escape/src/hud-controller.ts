@@ -7,7 +7,7 @@ import { distance, distance3, groundAt, sector } from "../shared/map";
 import { missionObjective } from "../shared/objectives";
 import type { MovementWorld } from "../shared/physics";
 import { nextPortalColor } from "../shared/portals";
-import { fuelCapacity, PLAYER_COLORS, type Player, type Snapshot } from "../shared/types";
+import { fuelCapacity, MAX_PLAYERS, PLAYER_COLORS, type Player, type Snapshot } from "../shared/types";
 import type { GameView } from "./scene";
 import type { StuntTracker } from "./stunt-tracker";
 
@@ -151,7 +151,7 @@ export class HudController {
 
     const crew =
       mode === "coop" && state.players.length > 0
-        ? ` · 远征队 (${state.players.length}/4 人: ` +
+        ? ` · 远征队 (${state.players.length}/${MAX_PLAYERS} 人: ` +
           state.players
             .map((p) => (p.id === state.host ? `[队长] ${p.name}` : p.name))
             .join("，") +
@@ -197,9 +197,9 @@ export class HudController {
       "resultReason",
       "游隼号驶入回声林地。月球缓缓升起，而这片不该存在的森林，仍在呼吸。第一章完成，世界继续开放。",
     );
-    const totalTricks =
-      state.players.reduce((n, p) => n + (p.trickScore || 0), 0) +
-      (me?.trickScore || localTrickScore);
+    const serverTricks = state.players.reduce((n, p) => n + (p.trickScore || 0), 0);
+    const myServerTricks = me?.trickScore || 0;
+    const totalTricks = serverTricks - myServerTricks + Math.max(myServerTricks, localTrickScore);
     const statRow = (label: string, value: string) => {
       const box = document.createElement("div");
       const strong = document.createElement("b");

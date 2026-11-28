@@ -111,6 +111,10 @@ export function setupFeedbackPanel(deps: FeedbackPanelDeps): { renderEchoes: () 
     snapBtn.onclick = () => {
       try {
         const captured = deps.canvas.toDataURL("image/jpeg", 0.85);
+        if (!isSafeImageDataUrl(captured)) {
+          deps.notice("截取画面失败");
+          return;
+        }
         setPreview(captured);
         deps.notice("已截取当前游戏画面作为建议附件");
       } catch {

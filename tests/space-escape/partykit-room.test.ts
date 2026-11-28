@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type * as Party from "partykit/server";
 import GameRoom from "../../frontend/space-escape/party/index";
-import { RoomSession, roomHealthPayload } from "../../frontend/space-escape/shared/room-session";
+import { CHAT_COOLDOWN_MS, RoomSession, roomHealthPayload } from "../../frontend/space-escape/shared/room-session";
 import { resolveRoomEndpoint } from "../../frontend/space-escape/src/party-room";
 
 class FakeConnection {
@@ -157,8 +157,18 @@ test("RoomSession enforces action cooldowns, close-lore bypass, chat sanitizatio
   assert.equal(sanitizedChat.data.text, "img src=x onerror=alert(1)hi");
   assert.equal(sanitizedChat.data.text.includes("<"), false);
   assert.equal(sanitizedChat.data.text.includes(">"), false);
+
+  // Rapid chat flood within CHAT_COOLDOWN_MS is throttled per sender without blocking gameplay actions
+  const afterFirstChat = broadcasts.filter((b) => b.type === "chat").length;
+  clock += 50;
+  session.handleMessage("guest", "chat", { text: "flood spam" });
+  assert.equal(broadcasts.filter((b) => b.type === "chat").length, afterFirstChat);
+
+  // After CHAT_COOLDOWN_MS elapses, valid chat broadcasts again and enforces 150-char limit
+  clock += CHAT_COOLDOWN_MS;
   session.handleMessage("guest", "chat", { text: `  ${"x".repeat(200)}  ` });
   const chatMsg = broadcasts.filter((b) => b.type === "chat").at(-1)!;
+  assert.equal(broadcasts.filter((b) => b.type === "chat").length, afterFirstChat + 1);
   assert.equal(chatMsg.data.id, "guest");
   assert.equal(chatMsg.data.name, "Scout");
   assert.equal(chatMsg.data.text.length, 150);

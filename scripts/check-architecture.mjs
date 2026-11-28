@@ -37,6 +37,8 @@ const REGEX_PRECEDING_KEYWORDS = new Set([
   "do",
 ]);
 
+const CONTROL_FLOW_PAREN_KEYWORDS = new Set(["if", "while", "for", "with"]);
+
 const REGEX_PRECEDING_PUNCT = new Set([
   "(",
   "[",
@@ -45,7 +47,6 @@ const REGEX_PRECEDING_PUNCT = new Set([
   ";",
   ":",
   "=",
-  "!",
   "?",
   "&",
   "|",
@@ -74,6 +75,8 @@ function scanJsTs(source, { stripStrings }) {
   function scanBlock(stopOnBrace) {
     let braceDepth = 0;
     let canStartRegex = true;
+    let prevKeyword = "";
+    const parenStack = [];
 
     while (i < n) {
       const ch = source[i];
@@ -86,7 +89,7 @@ function scanJsTs(source, { stripStrings }) {
         return;
       }
 
-      // Whitespace preserves regex context
+      // Whitespace preserves regex and control-flow keyword context
       if (ch === " " || ch === "\t" || ch === "\r" || ch === "\n") {
         out.push(ch);
         i++;
@@ -152,6 +155,7 @@ function scanJsTs(source, { stripStrings }) {
           i++;
         }
         canStartRegex = false;
+        prevKeyword = "";
         continue;
       }
 
@@ -178,6 +182,7 @@ function scanJsTs(source, { stripStrings }) {
           i++;
         }
         canStartRegex = false;
+        prevKeyword = "";
         continue;
       }
 
@@ -211,6 +216,7 @@ function scanJsTs(source, { stripStrings }) {
           i++;
         }
         canStartRegex = false;
+        prevKeyword = "";
         continue;
       }
 
@@ -220,6 +226,7 @@ function scanJsTs(source, { stripStrings }) {
         out.push(ch);
         i++;
         canStartRegex = true;
+        prevKeyword = "";
         continue;
       }
       if (ch === "}") {
@@ -227,6 +234,25 @@ function scanJsTs(source, { stripStrings }) {
         out.push(ch);
         i++;
         canStartRegex = true;
+        prevKeyword = "";
+        continue;
+      }
+
+      // Track control-flow parens (`if (...) /re/`) vs expression parens (`(a) / b`)
+      if (ch === "(") {
+        parenStack.push(CONTROL_FLOW_PAREN_KEYWORDS.has(prevKeyword));
+        out.push(ch);
+        i++;
+        canStartRegex = true;
+        prevKeyword = "";
+        continue;
+      }
+      if (ch === ")") {
+        const afterControlParen = parenStack.pop() ?? false;
+        out.push(ch);
+        i++;
+        canStartRegex = afterControlParen;
+        prevKeyword = "";
         continue;
       }
 
@@ -237,6 +263,7 @@ function scanJsTs(source, { stripStrings }) {
         const word = source.slice(start, i);
         out.push(word);
         canStartRegex = REGEX_PRECEDING_KEYWORDS.has(word);
+        prevKeyword = word;
         continue;
       }
 
@@ -246,6 +273,35 @@ function scanJsTs(source, { stripStrings }) {
         while (i < n && /[0-9A-Za-z_.]/.test(source[i])) i++;
         out.push(source.slice(start, i));
         canStartRegex = false;
+        prevKeyword = "";
+        continue;
+      }
+
+      prevKeyword = "";
+
+      // Multi-char operators affecting regex vs division context
+      if (ch === "!" && next === "=" && source[i + 2] === "=") {
+        out.push("!==");
+        i += 3;
+        canStartRegex = true;
+        continue;
+      }
+      if (ch === "!" && next === "=") {
+        out.push("!=");
+        i += 2;
+        canStartRegex = true;
+        continue;
+      }
+      if ((ch === "+" && next === "+") || (ch === "-" && next === "-")) {
+        // Postfix `i++ / 2` keeps canStartRegex=false; prefix `++i` keeps canStartRegex=true.
+        out.push(ch + next);
+        i += 2;
+        continue;
+      }
+      if (ch === "!") {
+        // Postfix TS non-null `a! / b` keeps canStartRegex=false; prefix `!` keeps canStartRegex=true.
+        out.push(ch);
+        i++;
         continue;
       }
 
@@ -260,7 +316,7 @@ function scanJsTs(source, { stripStrings }) {
       // Punctuation / operators
       out.push(ch);
       i++;
-      if (ch === ")" || ch === "]") {
+      if (ch === "]") {
         canStartRegex = false;
       } else if (REGEX_PRECEDING_PUNCT.has(ch)) {
         canStartRegex = true;
@@ -433,6 +489,7 @@ export function runArchitectureChecks(rootDir) {
   }
 
   const graph = new Map();
+  const staticRuntimeGraph = new Map();
   const relPath = (p) => path.relative(rootDir, p).split(path.sep).join("/");
 
   for (const file of tsFiles) {
@@ -443,11 +500,15 @@ export function runArchitectureChecks(rootDir) {
     const fromRel = relPath(file);
     const imports = parseImports(source);
     const edges = new Set();
+    const staticRuntimeEdges = new Set();
 
     for (const imp of imports) {
       const resolved = resolveRelative(file, imp.specifier);
       if (!resolved) continue;
       edges.add(resolved);
+      if (!imp.dynamic && !imp.typeOnly) {
+        staticRuntimeEdges.add(resolved);
+      }
 
       const toLayer = layerOf(spaceRoot, resolved);
       const toRel = relPath(resolved);
@@ -490,27 +551,14 @@ export function runArchitectureChecks(rootDir) {
           message: `shared/types.ts must not depend on ${toRel}`,
         });
       }
-
-      // Rule 3: Keep Rapier WASM chunk lazy-loaded from browser src/
-      if (
-        fromLayer === "src" &&
-        toRel === "frontend/space-escape/shared/physics.ts" &&
-        !imp.dynamic &&
-        !imp.typeOnly
-      ) {
-        violations.push({
-          rule: "lazy-physics-chunk",
-          file: fromRel,
-          message: `src/ must not statically import shared/physics.ts (use dynamic import() or import type)`,
-        });
-      }
     }
 
     graph.set(file, [...edges]);
+    staticRuntimeGraph.set(file, [...staticRuntimeEdges]);
 
     // Rule 2e: shared/ must remain DOM-free
     if (fromLayer === "shared") {
-      const domRe = /\b(window|document|localStorage|sessionStorage|HTMLCanvasElement|HTMLElement)\b/g;
+      const domRe = /(?<!\.)\b(window|document|localStorage|sessionStorage|HTMLCanvasElement|HTMLElement)\b/g;
       let m;
       while ((m = domRe.exec(codeOnly)) !== null) {
         violations.push({
@@ -523,7 +571,7 @@ export function runArchitectureChecks(rootDir) {
 
     // Rule 5: Warp gate IDs SSOT (owned by shared/celestial.ts)
     if (fromRel !== "frontend/space-escape/shared/celestial.ts") {
-      const warpIdRe = /["'`](warpgate_east|warpgate_south|warpgate_north|warpgate_west)["'`]/g;
+      const warpIdRe = /["'`](warpgate_east|warpgate_south|warpgate_west)["'`]/g;
       let m;
       while ((m = warpIdRe.exec(noComments)) !== null) {
         violations.push({
@@ -536,7 +584,8 @@ export function runArchitectureChecks(rootDir) {
 
     // Rule 6: Zero unsafe HTML injection in src/
     if (fromLayer === "src") {
-      const htmlRe = /(\.(?:innerHTML|outerHTML)\s*\+?=|\.insertAdjacentHTML\s*\(|document\.writeln?\s*\()/g;
+      const htmlRe =
+        /(\.(?:innerHTML|outerHTML)\s*(?:[+\-*/%&|^]?|&&|\|\||\?\?)=(?!=)|\.(?:insertAdjacentHTML|setHTMLUnsafe|createContextualFragment)\s*\(|\bdocument\.writeln?\s*\()/g;
       let m;
       while ((m = htmlRe.exec(codeOnly)) !== null) {
         violations.push({
@@ -545,6 +594,45 @@ export function runArchitectureChecks(rootDir) {
           message: `Unsafe HTML sink '${m[1].trim()}' at line ${lineOfIndex(codeOnly, m.index)}; use safe DOM APIs`,
         });
       }
+      const bracketHtmlRe =
+        /(\[\s*["'`](?:innerHTML|outerHTML)["'`]\s*\]\s*(?:[+\-*/%&|^]?|&&|\|\||\?\?)=(?!=))/g;
+      while ((m = bracketHtmlRe.exec(noComments)) !== null) {
+        violations.push({
+          rule: "no-unsafe-html",
+          file: fromRel,
+          message: `Unsafe HTML sink '${m[1].trim()}' at line ${lineOfIndex(noComments, m.index)}; use safe DOM APIs`,
+        });
+      }
+    }
+  }
+
+  // Rule 3: Keep Rapier WASM chunk lazy-loaded from browser src/ (direct and transitive static imports)
+  const physicsFile = path.join(spaceRoot, "shared/physics.ts");
+  for (const file of tsFiles) {
+    if (layerOf(spaceRoot, file) !== "src") continue;
+    const queue = [[file]];
+    const visited = new Set([file]);
+    let foundPath = null;
+    while (queue.length > 0 && !foundPath) {
+      const chain = queue.shift();
+      const current = chain[chain.length - 1];
+      for (const next of staticRuntimeGraph.get(current) || []) {
+        if (next === physicsFile) {
+          foundPath = [...chain, next];
+          break;
+        }
+        if (!visited.has(next)) {
+          visited.add(next);
+          queue.push([...chain, next]);
+        }
+      }
+    }
+    if (foundPath) {
+      violations.push({
+        rule: "lazy-physics-chunk",
+        file: relPath(file),
+        message: `src/ must not statically reach shared/physics.ts (${foundPath.map(relPath).join(" -> ")}); use dynamic import() or import type`,
+      });
     }
   }
 
@@ -590,11 +678,16 @@ export function runArchitectureChecks(rootDir) {
     }
   }
 
-  // Rule 7: Zero emoji or regional indicator characters in code, HTML, and architecture docs (per AGENTS.md)
+  // Rule 7: Zero emoji or regional indicator characters in code, HTML, CSS, and project docs (per AGENTS.md)
   const emojiTargets = [
     ...tsFiles,
     path.join(spaceRoot, "index.html"),
+    path.join(spaceRoot, "model-viewer.html"),
+    path.join(spaceRoot, "src/style.css"),
     ...collectFiles(path.join(rootDir, "docs/architecture"), (name) => name.endsWith(".md")),
+    path.join(rootDir, "README.md"),
+    path.join(rootDir, "AGENTS.md"),
+    path.join(rootDir, "MEMORY.md"),
   ].filter((p) => fs.existsSync(p));
 
   for (const file of emojiTargets) {

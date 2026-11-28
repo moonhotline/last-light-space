@@ -18,6 +18,8 @@ export interface ChatMessagePayload {
   text: string;
 }
 
+export const MAX_CHAT_ITEMS = 25;
+
 /**
  * Owns multiplayer chat log rendering (safe DOM, zero `innerHTML`) and local
  * solo slash-command execution.
@@ -38,6 +40,9 @@ export function setupChatConsole(deps: ChatConsoleDeps) {
     body.textContent = String(data.text || "");
     item.append(author, body);
     list.appendChild(item);
+    while (list.children.length > MAX_CHAT_ITEMS) {
+      list.firstElementChild?.remove();
+    }
     list.scrollTop = list.scrollHeight;
     setTimeout(() => item.classList.add("fading"), 6000);
     setTimeout(() => item.remove(), 7000);
