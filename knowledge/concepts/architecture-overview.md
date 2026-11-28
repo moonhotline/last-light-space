@@ -7,7 +7,7 @@ tags:
   - architecture
   - network
   - fullstack
-timestamp: 2026-11-28T13:35:10.236Z
+timestamp: 2026-11-28T13:36:54.400Z
 sources:
   - "README.md"
   - "frontend/space-escape/server/index.ts"
