@@ -116,6 +116,9 @@ export function buildBasinEnvironment(): BasinEnvironmentResult {
     map: tex,
     bumpMap: tex,
     bumpScale: 0.28,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
   });
   const terrain = new THREE.Mesh(g, mat);
   terrain.receiveShadow = true;

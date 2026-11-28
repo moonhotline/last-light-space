@@ -29,21 +29,22 @@ Strict acyclic dependency direction (enforced by `npm run space:check` / `script
 6. **Zero Unsafe HTML Sinks**: Zero `.innerHTML =`, `.outerHTML =`, or `.insertAdjacentHTML(` calls in `frontend/space-escape/src/`.
 7. **Zero Emoji Policy**: Zero emoji code points across source, HTML, and architecture docs (per `AGENTS.md`).
 
-## 2. Converged Module Inventory (14,985 LOC across 47 TS files, 46 runtime/type modules + 1 `.d.ts`)
+## 2. Converged Module Inventory (15,114 LOC across 48 TS files, 47 runtime/type modules + 1 `.d.ts`)
 
-### `shared/` (22 files, 5,370 LOC)
+### `shared/` (23 files, 5,573 LOC)
 | Module | LOC | Responsibility | Status |
 | --- | ---: | --- | --- |
-| `types.ts` | 252 | Wire/snapshot contracts, `MAX_PLAYERS`, `PLAYER_COLORS`, `fuelCapacity`, `FighterRecall`, `PhysicsQueries`, `SimulationHost`, `parseInput` | Leaf SSOT |
-| `map.ts` | 324 | Procedural 3.58 km terrain mesh, `Vec`, `groundAt`, beacons, crystals, rocks | Clean |
+| `types.ts` | 253 | Wire/snapshot contracts, `MAX_PLAYERS`, `PLAYER_COLORS`, `fuelCapacity`, `FighterRecall`, `PhysicsQueries`, `SimulationHost`, `parseInput` | Leaf SSOT |
+| `home-planet.ts` | 21 | Physical home globe constants (`HOME_PLANET_SPHERE`, `HOME_COLLAR_RADIUS`, `homeSphereHeight`) | Clean SSOT |
+| `map.ts` | 457 | Authored Kepler basin + stitched polar shelf `terrainMesh()`, `Vec`, `groundAt`, beacons, crystals, rocks | Clean |
 | `celestial.ts` | 492 | `SOLAR_SYSTEM` catalog, `WARP_GATE_IDS`, `warpGateYaw`, `celestialCapture`, `sphericalGravity`, `geodesicArcDistance` | Clean SSOT |
 | `celestial-flight.ts` | 35 | Spherical flight reference frame & cockpit pose | Clean |
 | `surface.ts` | 31 | Spherical player surface frame, `eyePosition`, `viewDirection` | Clean |
 | `portals.ts` | 34 | Portal constants, color alternation, frame/rotation math | Clean |
 | `adventure-data.ts` | 189 | Items, repair recipe, fleet specs, lore, resource sites, lab geometry | Clean |
-| `colliders.ts` | 313 | Static & dynamic collider specs (consumes `WARP_GATE_IDS`, `warpGateYaw`) | Clean |
-| `physics.ts` | 938 | `MovementWorld` (Rapier world, unified `syncQueryPipeline` & `stepLocomotionState`, portals, ship shape casts) | Deduplicated |
-| `adventure.ts` | 780 | Tool/mining, ship boarding/flight, warp gates, drones (depends on `SimulationHost`) | Acyclic |
+| `colliders.ts` | 308 | Static & dynamic collider specs (consumes `WARP_GATE_IDS`, `warpGateYaw`, re-exports `HOME_PLANET_SPHERE`) | Clean |
+| `physics.ts` | 976 | `MovementWorld` (Rapier world, unified `syncQueryPipeline` & `stepLocomotionState`, stitched home globe, portals, ship shape casts) | Deduplicated |
+| `adventure.ts` | 795 | Tool/mining, ship boarding/flight, warp gates, drones (depends on `SimulationHost`) | Acyclic |
 | `fighter-recall.ts` | 159 | Autonomous light-fighter recall state machine (depends on `SimulationHost`) | Acyclic |
 | `simulation.ts` | 368 | Authoritative 30 Hz `Simulation` loop | Acyclic |
 | `room-session.ts` | 202 | Canonical multiplayer `RoomSession`, `roomHealthPayload`, cooldowns, chat sanitization, snapshot stride | New SSOT |
@@ -65,20 +66,20 @@ Strict acyclic dependency direction (enforced by `npm run space:check` / `script
 | `party/index.ts` | 80 | Thin legacy PartyKit adapter over `RoomSession` + `party/runtime.ts` | Converged |
 | `party/worker.ts` | 104 | Thin Cloudflare PartyServer Durable Object adapter over `RoomSession` + `party/runtime.ts` | Converged (15 Hz snapshot stride aligned) |
 
-### `src/` (21 files, 9,292 LOC)
+### `src/` (21 files, 9,218 LOC)
 | Module | LOC | Responsibility | Status |
 | --- | ---: | --- | --- |
-| `main.ts` | 1,147 | Entry point, input loop, session lifecycle, client prediction, `window.__lastLight` debug API (down from 1,779 LOC) | Decomposed |
+| `main.ts` | 1,164 | Entry point, input loop, session lifecycle, photo capture, client prediction, `window.__lastLight` debug API (down from 1,779 LOC) | Decomposed |
 | `hud-controller.ts` | 393 | `HudController`, `computeInteractionPrompt`, `formatClock`, safe DOM `renderResult` | Extracted from `main.ts` |
 | `feedback-panel.ts` | 195 | Safe DOM feedback/echoes panel with strict `data:image/` validation | Extracted from `main.ts` |
 | `chat-console.ts` | 166 | Safe DOM chat console & solo slash commands | Extracted from `main.ts` |
 | `stunt-tracker.ts` | 144 | Encapsulated hoverboard stunt & combo telemetry state machine | Extracted from `main.ts` |
 | `party-room.ts` | 200 | Client WebSocket / Colyseus adapter + canonical `resolveRoomEndpoint` | Converged |
-| `scene.ts` | 1,358 | `GameView` orchestrator, camera/tools, particles, audio, post-processing (down from 2,550 LOC) | Decomposed |
-| `world-environment.ts` | 691 | Playable basin terrain, instanced rocks, converged home globe, cosmic sky, thermal updrafts | Extracted from `scene.ts` |
+| `scene.ts` | 1,380 | `GameView` orchestrator, camera/tools, snapshot capture, particles, audio, post-processing (down from 2,550 LOC) | Decomposed |
+| `world-environment.ts` | 595 | Stitched basin terrain (`polygonOffset`), instanced rocks, converged home globe, cosmic sky, thermal updrafts | Extracted from `scene.ts` |
 | `avatar-system.ts` | 431 | `AvatarSystem`: Mixamo rigs, animations, hoverboard kickflip, nameplates, equipment visibility | Extracted from `scene.ts` |
 | `stardust-stream.ts` | 196 | `StardustParallaxStream` 3-layer high-speed flight parallax VFX | Extracted from `scene.ts` |
-| `asset-loader.ts` | 100 | `loadGltfWithRetry`, `createRadialGlowTexture`, `resolvePilotFlightState`, GLB export & snapshot helpers | Extracted from `scene.ts` / `adventure-view.ts` |
+| `asset-loader.ts` | 83 | `loadGltfWithRetry`, `createRadialGlowTexture`, `resolvePilotFlightState`, GLB export & download helpers | Extracted from `scene.ts` / `adventure-view.ts` |
 | `interplanetary.ts` | 1,008 | Solar system meshes, ship transforms, Blerk companion, progressive GLTF hydration | Uses canonical `geodesicArcDistance` & `warpGateYaw` |
 | `thruster-fx.ts` | 825 | Volumetric ship propulsion & retro-brake VFX | Cohesive |
 | `celestial-visuals.ts` | 683 | Procedural planet textures, landmarks, atmosphere shader, rings, warp gate mesh | Cohesive |
