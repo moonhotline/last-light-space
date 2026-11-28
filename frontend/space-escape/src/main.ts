@@ -46,15 +46,14 @@ import { DT, type Input, type Player, type Snapshot } from "../shared/types";
 import type { Simulation } from "../shared/simulation";
 import type { MovementWorld } from "../shared/physics";
 import type { PortalAction } from "../shared/portals";
+import { GameView, type Equipment } from "./scene";
 import {
-  GameView,
-  type Equipment,
   exportHoverboardGlb,
   exportTechRifleGlb,
   exportSurveyCameraGlb,
   exportGrappleLauncherGlb,
   takeSnapshot,
-} from "./scene";
+} from "./asset-loader";
 import { StuntTracker } from "./stunt-tracker";
 import { setupFeedbackPanel } from "./feedback-panel";
 import { setupChatConsole } from "./chat-console";

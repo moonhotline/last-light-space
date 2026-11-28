@@ -5,7 +5,7 @@ import { SOLAR_SYSTEM, type SpaceshipKind } from "../../frontend/space-escape/sh
 import { DT, idleInput } from "../../frontend/space-escape/shared/types";
 import { Simulation } from "../../frontend/space-escape/shared/simulation";
 import { initPhysics } from "../../frontend/space-escape/shared/physics";
-import { StardustParallaxStream } from "../../frontend/space-escape/src/scene";
+import { StardustParallaxStream } from "../../frontend/space-escape/src/stardust-stream";
 import { ShipPropulsionFX } from "../../frontend/space-escape/src/thruster-fx";
 
 await initPhysics();

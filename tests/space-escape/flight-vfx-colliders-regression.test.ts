@@ -23,7 +23,7 @@ import { groundAt, SCENIC_SITES, terrainMesh } from "../../frontend/space-escape
 import { idleInput } from "../../frontend/space-escape/shared/types";
 import { ShipPropulsionFX } from "../../frontend/space-escape/src/thruster-fx";
 import { InterplanetarySystem } from "../../frontend/space-escape/src/interplanetary";
-import { StardustParallaxStream } from "../../frontend/space-escape/src/scene";
+import { StardustParallaxStream } from "../../frontend/space-escape/src/stardust-stream";
 
 await initPhysics();
 
