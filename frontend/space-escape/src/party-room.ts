@@ -20,7 +20,9 @@ class PartySocket {
     this.ws.removeEventListener(type, listener);
   }
   send(data: string) {
-    this.ws.send(data);
+    if (this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(data);
+    }
   }
   close(code?: number, reason?: string) {
     this.ws.close(code, reason);

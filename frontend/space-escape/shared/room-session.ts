@@ -10,6 +10,7 @@ export const ROOM_GAME_ID = "last-light";
 export const ROOM_PROTOCOL_VERSION = "0.3.0";
 export const ROOM_CAPACITY = MAX_PLAYERS;
 export const ACTION_COOLDOWN_MS = 100;
+export const CHAT_COOLDOWN_MS = 400;
 export const MAX_CHAT_LENGTH = 150;
 export const SNAPSHOT_BROADCAST_STRIDE = 2;
 
@@ -57,6 +58,7 @@ export function roomHealthPayload(options?: {
 export class RoomSession {
   sim: Simulation;
   private commands = new Map<string, number>();
+  private chatTimes = new Map<string, number>();
 
   constructor(
     private readonly transport: RoomTransport,
@@ -84,6 +86,7 @@ export class RoomSession {
     if (!this.sim.player(id)) return false;
     this.sim.remove(id);
     this.commands.delete(id);
+    this.chatTimes.delete(id);
     this.broadcastSnapshot();
     return true;
   }
@@ -138,6 +141,7 @@ export class RoomSession {
   dispose(): void {
     this.sim.dispose();
     this.commands.clear();
+    this.chatTimes.clear();
   }
 
   private handleAction(senderId: string, data: unknown): void {
@@ -169,12 +173,16 @@ export class RoomSession {
       .trim()
       .slice(0, MAX_CHAT_LENGTH);
     if (!text) return;
+    const now = this.now();
+    const last = this.chatTimes.get(senderId);
+    if (last !== undefined && now - last < CHAT_COOLDOWN_MS) return;
+    this.chatTimes.set(senderId, now);
     this.transport.broadcast("chat", {
       id: player.id,
       name: player.name,
       color: player.color,
       text,
-      time: this.now(),
+      time: now,
     });
   }
 
@@ -192,6 +200,7 @@ export class RoomSession {
     const seed = this.sim.s.seed + 1;
     this.sim.dispose();
     this.commands.clear();
+    this.chatTimes.clear();
     this.sim = new Simulation(seed);
     for (const player of players) {
       this.sim.add(player.id, player.name);

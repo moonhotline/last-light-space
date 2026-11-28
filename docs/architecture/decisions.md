@@ -44,7 +44,7 @@
 
 1. **Unwired Shared Subsystems (8 modules in `frontend/space-escape/shared/`)**:
    - `entity-system.ts`, `expedition.ts`, `interplanetary-nav.ts`, `lod-culling.ts`, `mineral-system.ts`, `npc-ai.ts`, `perf-benchmark.ts`, `tick-engine.ts`.
-   - **Observation**: All 8 modules have passing tests (`tests/space-escape/*.test.ts`) and OKF knowledge references (`scripts/update-okf.mjs`, `knowledge/concepts/*.md`), but zero runtime imports in `src/`, `server/`, or `party/`.
+   - **Observation**: All 8 modules have passing tests (`tests/space-escape/*.test.ts`) and 5 (`entity-system.ts`, `interplanetary-nav.ts`, `lod-culling.ts`, `npc-ai.ts`, `perf-benchmark.ts`) have OKF knowledge references (`scripts/update-okf.mjs`, `knowledge/concepts/*.md`), but zero runtime imports in `src/`, `server/`, or `party/`.
    - **Options**: (A) Wire selected subsystems (e.g., `SnapshotInterpolator` for remote multiplayer smoothing, `MineralSystem` for geological scanning) into the live runtime; or (B) Archive/delete unused prototypes once product roadmap confirms they are not planned.
    - **Action taken**: Preserved untouched (respecting existing test coverage and avoiding unapproved breaking deletion).
 

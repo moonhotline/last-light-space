@@ -25,20 +25,29 @@ test("architecture guardrails pass with zero cycles, boundary leaks, XSS sinks, 
   assert.ok(result.stats.checkedTsFiles >= 40, "expected full module graph to be scanned");
 });
 
-test("stripCommentsAndStrings masks comments, strings, and regexes while preserving template expressions", () => {
+test("stripCommentsAndStrings masks comments, strings, and regexes while preserving template expressions and regex/division context", () => {
   const sample = [
     "// el.innerHTML = 'commented'",
     "/* block window.document */",
     "const msg = 'el.innerHTML = 1';",
     "const re = /'/;",
     "const blockRe = /[/*]/;",
+    "if (ok) /'/.test(msg);",
+    "el.innerHTML = 'after-control-regex';",
+    "const end = '';",
+    "const divNonNull = a! / b; el.innerHTML = 'after-non-null'; const z = c / d;",
+    "const divPostInc = i++ / 2; el.outerHTML = 'after-post-inc'; const w = c / d;",
     "const tpl = `safe ${(el.innerHTML = 'live')} ${({ a: 1 }).a}`;",
     "el.innerHTML += 'append';",
   ].join("\n");
   const stripped = stripCommentsAndStrings(sample);
   assert.equal(stripped.split("\n").length, sample.split("\n").length);
-  const matches = stripped.match(/\.innerHTML\s*\+?=/g) || [];
-  assert.equal(matches.length, 2, "expected both template expression and += HTML sinks to survive stripping");
+  const matches = stripped.match(/\.(?:innerHTML|outerHTML)\s*\+?=/g) || [];
+  assert.equal(
+    matches.length,
+    5,
+    "expected all 5 live HTML sinks (control-flow regex, non-null div, post-inc div, template expr, +=) to survive stripping",
+  );
   assert.ok(!/\bwindow\b/.test(stripped));
 });
 
@@ -72,9 +81,10 @@ test("architecture guardrails catch cycles, layer leaks, bypass attempts, HTML s
     fs.writeFileSync(full, content, "utf8");
   };
 
-  write("frontend/space-escape/shared/a.ts", "import { b } from './b';\nexport const a = `${window.location}` + b;\n");
+  write("frontend/space-escape/shared/a.ts", "import { b } from './b';\nexport const a = `${window.location}` + b;\nexport const safeProp = (obj: Record<string, number>) => obj.window;\n");
   write("frontend/space-escape/shared/b.ts", `import { a } from "./a";\nexport const b = a;\n`);
   write("frontend/space-escape/shared/physics.ts", `export const initPhysics = () => {};\n`);
+  write("frontend/space-escape/shared/simulation.ts", `import { initPhysics } from "./physics";\nexport const sim = initPhysics;\n`);
   write("frontend/space-escape/shared/room-session.ts", `export class RoomSession {}\n`);
   write(
     "frontend/space-escape/src/bad.ts",
@@ -82,12 +92,19 @@ test("architecture guardrails catch cycles, layer leaks, bypass attempts, HTML s
       `export type Local = { id: string };`,
       `import { initPhysics } from "../shared/physics.js";`,
       `export function render(el: HTMLElement) {`,
+      `  if (el.innerHTML === "") return;`,
       `  const re = /'/;`,
       "  const gate = `warpgate_east`;",
       "  const tpl = `${(el.innerHTML = gate)}`;",
       `  el.innerHTML += String(initPhysics) + String(re) + tpl;`,
+      `  (el as any)["innerHTML"] = "bracket";`,
+      `  (el as any).setHTMLUnsafe("unsafe");`,
       `}`,
     ].join("\n"),
+  );
+  write(
+    "frontend/space-escape/src/transitive-physics.ts",
+    `import { sim } from "../shared/simulation";\nexport const leaked = sim;\n`,
   );
   write("frontend/space-escape/server/index.ts", `export const bad = "close-lore";\n`);
   write("frontend/space-escape/party/index.ts", `import { RoomSession } from "../shared/room-session.js";\nexport const ok = RoomSession;\n`);
@@ -104,12 +121,24 @@ test("architecture guardrails catch cycles, layer leaks, bypass attempts, HTML s
   assert.ok(rules.has("canonical-room-session"), "expected RoomSession adapter violation on server/index.ts");
   assert.ok(rules.has("no-emoji"), "expected emoji violation");
 
+  // Verify obj.window property access does not trigger shared-dom-free (only window.location does)
+  const domViolations = result.violations.filter((v: { rule: string }) => v.rule === "shared-dom-free");
+  assert.equal(domViolations.length, 1);
+
+  // Verify both direct (bad.ts) AND transitive (transitive-physics.ts -> shared/simulation.ts -> shared/physics.ts) fail Rule 3
+  const lazyViolations = result.violations.filter((v: { rule: string }) => v.rule === "lazy-physics-chunk");
+  assert.equal(lazyViolations.length, 2);
+  assert.ok(
+    lazyViolations.some((v: { file: string }) => v.file === "frontend/space-escape/src/transitive-physics.ts"),
+    "expected transitive static import via shared/simulation.ts to fail lazy-physics-chunk",
+  );
+
   // Verify party/index.ts importing ../shared/room-session.js passed Rule 4
   assert.ok(
     !result.violations.some((v: { file: string; rule: string }) => v.file === "frontend/space-escape/party/index.ts" && v.rule === "canonical-room-session"),
     "expected .js specifier resolving to shared/room-session.ts to pass Rule 4",
   );
-  // Verify both innerHTML sinks in bad.ts (template expression + +=) were caught
+  // Verify equality check `el.innerHTML === ""` did NOT trigger, while the 4 real sinks (=, +=, ["innerHTML"]=, setHTMLUnsafe) did
   const htmlViolations = result.violations.filter((v: { rule: string }) => v.rule === "no-unsafe-html");
-  assert.equal(htmlViolations.length, 2);
+  assert.equal(htmlViolations.length, 4);
 });
