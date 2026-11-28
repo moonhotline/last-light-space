@@ -4,6 +4,12 @@ import type { SpaceshipKind } from "./celestial";
 import type { PortalAction, PortalColor, PortalPair } from "./portals";
 export const DT = 1 / 30;
 export const MAX_PLAYERS = 4;
+export const PLAYER_COLORS = [
+  { css: "#b0edff", hex: 0x9eeafa },
+  { css: "#ffd397", hex: 0xffc98b },
+  { css: "#ffa994", hex: 0xff9f81 },
+  { css: "#bbc5ff", hex: 0xa6baff },
+] as const;
 export const fuelCapacity = (level: number) => (level >= 1 ? 150 : 100);
 export type Phase = "lobby" | "active" | "won";
 export interface FighterRecall {

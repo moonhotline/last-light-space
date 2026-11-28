@@ -1,18 +1,8 @@
 import "./style.css";
 import * as THREE from "three";
 import { cosmicAudio } from "./sound-engine";
-import {
-  ITEMS,
-  REPAIR,
-  LORE,
-  RESOURCE_SITES,
-  type ItemId,
-} from "../shared/adventure-data";
-import { shipBoardingTarget } from "../shared/adventure";
-import { SOLAR_SYSTEM, celestialCapture } from "../shared/celestial";
-import { celestialFlightFrame } from "../shared/celestial-flight";
-import { missionObjective } from "../shared/objectives";
-import { distance3 } from "../shared/map";
+import { LORE } from "../shared/adventure-data";
+import { SOLAR_SYSTEM } from "../shared/celestial";
 import {
   connectPartyRoom,
   resolveRoomEndpoint,
@@ -51,18 +41,11 @@ import {
   Send,
   Image,
 } from "lucide";
-import {
-  distance,
-  groundAt,
-  sector,
-  BEACON_SITES,
-  WORLD_SIZE,
-  type Vec,
-} from "../shared/map";
-import { DT, fuelCapacity, type Input, type Player, type Snapshot } from "../shared/types";
+import { distance, WORLD_SIZE } from "../shared/map";
+import { DT, type Input, type Player, type Snapshot } from "../shared/types";
 import type { Simulation } from "../shared/simulation";
 import type { MovementWorld } from "../shared/physics";
-import { nextPortalColor, type PortalAction } from "../shared/portals";
+import type { PortalAction } from "../shared/portals";
 import {
   GameView,
   type Equipment,
@@ -72,82 +55,67 @@ import {
   exportGrappleLauncherGlb,
   takeSnapshot,
 } from "./scene";
+import { StuntTracker } from "./stunt-tracker";
+import { setupFeedbackPanel } from "./feedback-panel";
+import { setupChatConsole } from "./chat-console";
+import { HudController } from "./hud-controller";
+
 const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id) as T;
 const text = (id: string, s: string) => {
   if ($(id).textContent !== s) $(id).textContent = s;
 };
-const canvas = $<HTMLCanvasElement>("world"),
-  view = new GameView(canvas),
-  keys = new Set<string>(),
-  pulses = new Set<string>();
-const colors = ["#b0edff", "#ffd397", "#ffa994", "#bbc5ff"];
-let mode: "practice" | "coop" = "practice",
-  sim: Simulation | null = null,
-  room: MultiplayerRoom | null = null,
-  state: Snapshot | null = null,
-  me: Player | null = null,
-  predicted: Player | null = null,
-  prediction: MovementWorld | null = null;
-let isSkating = false;
-let stuntText = "";
-let stuntUntil = 0;
-let localTrickScore = 0;
-let lastGrapplePos: Vec | null = null;
-let swingMinY = Infinity;
-let swingMaxSpeed = 0;
-let swingAirTime = 0;
-let swingTickScore = 0;
-let gravitySwingAwarded = false;
-let apexVaultAwarded = false;
-let skateCruiseTimer = 0;
-let skateAirTime = 0;
-let skateCumulativeYaw = 0;
-let lastPlayerYaw = 0;
+
+const canvas = $<HTMLCanvasElement>("world");
+const view = new GameView(canvas);
+const keys = new Set<string>();
+const pulses = new Set<string>();
+const stunts = new StuntTracker();
+const hudController = new HudController();
+
+let mode: "practice" | "coop" = "practice";
+let sim: Simulation | null = null;
+let room: MultiplayerRoom | null = null;
+let state: Snapshot | null = null;
+let me: Player | null = null;
+let predicted: Player | null = null;
+let prediction: MovementWorld | null = null;
 let lastSpaceTime = 0;
-let attachedFeedbackImg = "";
-let pending: Input[] = [],
-  sequence = 0,
-  yaw = 0,
-  pitch = 0,
-  playerAmmo = 24,
-  playerReloadTime = 0,
-  accumulator = 0,
-  lastFrame = performance.now(),
-  spaceAt = 0;
+let pending: Input[] = [];
+let sequence = 0;
+let yaw = 0;
+let pitch = 0;
+let playerAmmo = 24;
+let playerReloadTime = 0;
+let accumulator = 0;
+let lastFrame = performance.now();
+let spaceAt = 0;
 let panel:
-    | "landing"
-    | "lobby"
-    | "paused"
-    | "result"
-    | "inventory"
-    | "archive"
-    | "feedback"
-    | null = "landing",
-  endpoint: RoomEndpoint | null = null,
-  muted = false,
-  loading = true,
-  reconnecting = false,
-  lastEvent = 0,
-  uiAt = 0,
-  toastTimer = 0,
-  lastLore = -1,
-  inventorySignature = "";
+  | "landing"
+  | "lobby"
+  | "paused"
+  | "result"
+  | "inventory"
+  | "archive"
+  | "feedback"
+  | null = "landing";
+let endpoint: RoomEndpoint | null = null;
+let muted = false;
+let loading = true;
+let reconnecting = false;
+let lastEvent = 0;
+let uiAt = 0;
+let toastTimer = 0;
+let lastLore = -1;
 let correction = { x: 0, y: 0, z: 0 };
 const portalActions: PortalAction[] = [];
-let SimulationCtor: typeof import("../shared/simulation").Simulation | null =
-    null,
-  MovementWorldCtor: typeof import("../shared/physics").MovementWorld | null =
-    null,
-  initPhysicsFn: typeof import("../shared/physics").initPhysics | null = null;
-const mobile = () =>
-  matchMedia("(pointer: coarse)").matches || innerWidth <= 760;
-const clock = (n: number) =>
-  `${Math.floor(n / 60)
-    .toString()
-    .padStart(2, "0")}:${Math.floor(n % 60)
-    .toString()
-    .padStart(2, "0")}`;
+
+let SimulationCtor: typeof import("../shared/simulation").Simulation | null = null;
+let MovementWorldCtor: typeof import("../shared/physics").MovementWorld | null = null;
+let initPhysicsFn: typeof import("../shared/physics").initPhysics | null = null;
+
+const mobile = () => matchMedia("(pointer: coarse)").matches || innerWidth <= 760;
+
 function paintIcons() {
   createIcons({
     icons: {
@@ -182,6 +150,7 @@ function paintIcons() {
     },
   });
 }
+
 function notice(message: string) {
   clearTimeout(toastTimer);
   text("toast", message);
@@ -190,6 +159,7 @@ function notice(message: string) {
     $("toast").hidden = true;
   }, 3800);
 }
+
 function show(next: typeof panel) {
   panel = next;
   for (const id of [
@@ -200,8 +170,9 @@ function show(next: typeof panel) {
     "inventory",
     "archive",
     "feedbackSheet",
-  ])
+  ]) {
     $(id).hidden = (next === "feedback" ? "feedbackSheet" : next) !== id;
+  }
   $("overlay").hidden = !next;
   $("hud").hidden = !state || state.phase === "lobby";
   document.body.dataset.paused = String(!!next);
@@ -210,6 +181,7 @@ function show(next: typeof panel) {
   spaceAt = 0;
   if (next) document.exitPointerLock();
 }
+
 function unlockAudio() {
   const vol = muted ? 0 : Number($<HTMLInputElement>("volume").value);
   cosmicAudio.setVolume(vol);
@@ -222,9 +194,11 @@ function unlockAudio() {
     })
     .catch(() => notice("音频暂时不可用"));
 }
+
 function lock() {
   if (!mobile()) void canvas.requestPointerLock()?.catch(() => undefined);
 }
+
 function chooseMode(next: typeof mode) {
   mode = next;
   $("practiceTab").setAttribute("aria-selected", String(mode === "practice"));
@@ -240,6 +214,7 @@ function chooseMode(next: typeof mode) {
         : "联机频道未接通 · 仍可独自探索",
   );
 }
+
 const callsign = () => {
   const val = $<HTMLInputElement>("callsign").value.trim().slice(0, 16);
   if (val) {
@@ -249,6 +224,7 @@ const callsign = () => {
   }
   return val || "探索员";
 };
+
 function releaseSession() {
   const old = room;
   room = null;
@@ -268,11 +244,16 @@ function releaseSession() {
   correction = { x: 0, y: 0, z: 0 };
   lastEvent = 0;
   lastLore = -1;
+  stunts.reset();
+  const skateBtn = $("toggleSkate");
+  if (skateBtn) skateBtn.textContent = "装备滑板 (K)";
+  hudController.reset();
   view.lastMe = "";
   delete document.body.dataset.phase;
   $("journal").hidden = true;
   document.exitPointerLock();
 }
+
 async function loadSimulation() {
   if (!SimulationCtor || !MovementWorldCtor || !initPhysicsFn) {
     const [s, p] = await Promise.all([
@@ -285,6 +266,22 @@ async function loadSimulation() {
   }
   await initPhysicsFn();
 }
+
+function openLore(id: number) {
+  const clue = LORE[id];
+  if (!clue) return;
+  text("loreSite", clue.site);
+  text("loreTitle", clue.title);
+  text("loreText", clue.text);
+  text("loreNext", clue.short);
+  show("archive");
+}
+
+function renderResult() {
+  if (!state) return;
+  hudController.renderResult(state, me, mode, room?.sessionId, stunts.localTrickScore);
+}
+
 function receive(next: Snapshot) {
   const previous = state?.phase;
   const previousCompleted = state?.completedAt ?? -1;
@@ -321,12 +318,13 @@ function receive(next: Snapshot) {
         if (predicted.seat < 0) prediction.move(predicted, i);
         prediction.step();
       }
-      if (!portaled && before && previous !== "lobby" && distance(before, predicted) < 3)
+      if (!portaled && before && previous !== "lobby" && distance(before, predicted) < 3) {
         correction = {
           x: before.x - predicted.x,
           y: Math.abs(before.y - predicted.y) < 1 ? before.y - predicted.y : 0,
           z: before.z - predicted.z,
         };
+      }
     }
   }
   if (mode === "coop" && room) {
@@ -375,6 +373,7 @@ function receive(next: Snapshot) {
   document.body.dataset.phase = state.phase;
   document.body.dataset.players = String(state.players.length);
 }
+
 async function practice() {
   releaseSession();
   mode = "practice";
@@ -397,6 +396,28 @@ async function practice() {
     $<HTMLButtonElement>("launch").disabled = false;
   }
 }
+
+const chatConsole = setupChatConsole({
+  canvas,
+  getSim: () => sim,
+  getRoom: () => room,
+  getMe: () => me,
+  notice,
+  lock,
+});
+
+setupFeedbackPanel({
+  canvas,
+  getAuthor: () => me?.name || "探索员",
+  isFeedbackOpen: () => panel === "feedback",
+  openFeedback: () => show("feedback"),
+  closeFeedback: () => {
+    show(null);
+    lock();
+  },
+  notice,
+});
+
 async function connect(create: boolean) {
   if (!endpoint) {
     text("entryStatus", "通讯频道暂未接通");
@@ -407,9 +428,7 @@ async function connect(create: boolean) {
     text("entryStatus", "请输入六位房间编号");
     return;
   }
-  $<HTMLButtonElement>("launch").disabled = $<HTMLButtonElement>(
-    "join",
-  ).disabled = true;
+  $<HTMLButtonElement>("launch").disabled = $<HTMLButtonElement>("join").disabled = true;
   text("entryStatus", "正在建立通讯…");
   unlockAudio();
   try {
@@ -421,7 +440,7 @@ async function connect(create: boolean) {
     );
     room = joined;
     joined.onMessage("snapshot", receive);
-    joined.onMessage("chat", (data: any) => addChatMessage(data));
+    joined.onMessage("chat", (data: any) => chatConsole.addMessage(data));
     joined.onError(() => notice("通讯异常，请稍后重试"));
     joined.onLeave(() => {
       if (room === joined && state?.phase !== "lobby") {
@@ -441,123 +460,30 @@ async function connect(create: boolean) {
   } catch {
     text("entryStatus", "房间不可用：检查编号或创建新房间");
   } finally {
-    $<HTMLButtonElement>("launch").disabled = $<HTMLButtonElement>(
-      "join",
-    ).disabled = false;
+    $<HTMLButtonElement>("launch").disabled = $<HTMLButtonElement>("join").disabled = false;
   }
 }
+
 function command(action: string) {
   if (panel || !state || state.phase === "lobby" || !me) return;
   sim ? sim.action(me.id, action) : room?.send("action", action);
   if (action === "mark") view.sound("mark");
 }
+
+const stuntCallbacks = {
+  command,
+  playSound: (name: string, pitch?: number) => view.sound(name, pitch),
+};
+
 function toggleHoverboard() {
   if (panel || !state || state.phase === "lobby" || !me) return;
-  isSkating = !isSkating;
-  view.sound(isSkating ? "jump" : "dash", 1.2);
-  notice(isSkating ? "反重力滑板已装备 (按 K 收起)" : "反重力滑板已收起");
+  stunts.isSkating = !stunts.isSkating;
+  view.sound(stunts.isSkating ? "jump" : "dash", 1.2);
+  notice(stunts.isSkating ? "反重力滑板已装备 (按 K 收起)" : "反重力滑板已收起");
   const btn = $("toggleSkate");
-  if (btn) btn.textContent = isSkating ? "收起滑板 (K)" : "装备滑板 (K)";
+  if (btn) btn.textContent = stunts.isSkating ? "收起滑板 (K)" : "装备滑板 (K)";
 }
-function recordTrick(title: string, points: number) {
-  localTrickScore += points;
-  command(`trick:${points}`);
-  stuntText = `[STUNT] ${title} +${points}`;
-  stuntUntil = performance.now() + 2200;
-  view.sound("trick", 1.25);
-}
-function updateStunts(dt: number) {
-  const p = predicted || me;
-  if (!p || p.seat >= 0) return;
-  const speed = Math.hypot(p.vx, p.vy, p.vz);
-  const horizSpeed = Math.hypot(p.vx, p.vz);
 
-  // 1. Grapple Swing Stunts
-  if (p.grapple) {
-    if (!lastGrapplePos) {
-      swingMinY = p.y;
-      swingMaxSpeed = speed;
-      swingAirTime = 0;
-      swingTickScore = 0;
-      gravitySwingAwarded = false;
-      apexVaultAwarded = false;
-    }
-    swingMinY = Math.min(swingMinY, p.y);
-    swingMaxSpeed = Math.max(swingMaxSpeed, speed);
-
-    // Real-time ticking calculation for grapple swing
-    if (!p.grounded) {
-      swingAirTime += dt;
-      const comboMult = 1.0 + Math.min(4.0, Math.floor(swingAirTime * 1.5) * 0.5);
-      const tick = speed * 3.5 * dt * comboMult;
-      swingTickScore += tick;
-      localTrickScore += tick;
-      stuntText = `[SWING] 摆荡滞空 ${swingAirTime.toFixed(1)}s · 连击 ×${comboMult.toFixed(1)} · 实时 +${Math.floor(swingTickScore)}`;
-      stuntUntil = performance.now() + 600;
-    }
-
-    // Gravity Swing (+150): swing speed > 16m/s
-    if (speed > 16 && !gravitySwingAwarded) {
-      gravitySwingAwarded = true;
-      recordTrick("重力摆荡", 150);
-    }
-
-    // Apex Vault (+250): climbed > 6m from swing valley and vy slows down towards apex
-    if (!apexVaultAwarded && p.y - swingMinY > 6 && p.vy <= 1.5 && speed > 10) {
-      apexVaultAwarded = true;
-      recordTrick("弧光飞跃", 250);
-    }
-  } else if (lastGrapplePos) {
-    // Just detached grapple: sync final swing score to simulation
-    if (swingAirTime > 0.4 && swingTickScore > 10) {
-      const finalScore = Math.min(1000, Math.round(swingTickScore));
-      command(`trick:${finalScore}`);
-    }
-    // High speed apex ejection: Sling Catapult (+350)
-    if (swingMaxSpeed > 17 && p.vy > 3) {
-      recordTrick("超空弹射", 350);
-    }
-  }
-  lastGrapplePos = p.grapple ? { ...p.grapple } : null;
-
-  // 2. Skateboard Stunts
-  if (isSkating) {
-    // Mach Glide (+50/s): grounded and high horizontal speed (> 16m/s)
-    if (p.grounded && horizSpeed > 16) {
-      skateCruiseTimer += dt;
-      if (skateCruiseTimer >= 1.0) {
-        skateCruiseTimer -= 1.0;
-        recordTrick("极速巡航", 50);
-      }
-    } else {
-      skateCruiseTimer = Math.max(0, skateCruiseTimer - dt * 2);
-    }
-
-    // Airborne tricks: Ollie Air & Starlight Spin
-    if (!p.grounded) {
-      skateAirTime += dt;
-      const dYaw = Math.abs(
-        Math.atan2(Math.sin(yaw - lastPlayerYaw), Math.cos(yaw - lastPlayerYaw)),
-      );
-      skateCumulativeYaw += dYaw;
-      if (skateCumulativeYaw >= Math.PI * 1.75) {
-        skateCumulativeYaw = 0;
-        recordTrick("星芒转体 360°", 500);
-      }
-    } else {
-      if (skateAirTime > 0.75 && horizSpeed > 9) {
-        recordTrick("天际腾空", 200);
-      }
-      skateAirTime = 0;
-      skateCumulativeYaw = 0;
-    }
-  } else {
-    skateCruiseTimer = 0;
-    skateAirTime = 0;
-    skateCumulativeYaw = 0;
-  }
-  lastPlayerYaw = yaw;
-}
 function makeInput(): Input {
   const active = !panel && !reconnecting;
   const input: Input = {
@@ -577,8 +503,7 @@ function makeInput(): Input {
     jet:
       active &&
       (keys.has("KeyJ") ||
-        ((keys.has("Space") || pulses.has("Space")) &&
-          performance.now() - spaceAt > 220)),
+        ((keys.has("Space") || pulses.has("Space")) && performance.now() - spaceAt > 220)),
     dash: active && (keys.has("KeyC") || pulses.has("KeyC")),
     grapple:
       active &&
@@ -588,12 +513,13 @@ function makeInput(): Input {
     fire: active && view.activeWeapon !== "portal" && (keys.has("Mouse0") || keys.has("KeyT")),
     brake: active && keys.has("KeyX"),
     interact: active && (keys.has("KeyE") || pulses.has("KeyE")),
-    skate: active && isSkating,
+    skate: active && stunts.isSkating,
   };
   pulses.clear();
   if (!active) portalActions.length = 0;
   return input;
 }
+
 function step() {
   if (!state || state.phase === "lobby" || !me || reconnecting) return;
   if (!panel) {
@@ -605,14 +531,13 @@ function step() {
     const pitchDelta =
       (Number(keys.has("KeyI")) -
         Number(keys.has("ArrowDown") && !keys.has("KeyS")) -
-        (keys.has("KeyK") ? 3.0 : 0)) * DT;
+        (keys.has("KeyK") ? 3.0 : 0)) *
+      DT;
     pitch = Math.max(-1.3, Math.min(1.3, pitch + pitchDelta));
   }
   if (playerReloadTime > 0) {
     playerReloadTime = Math.max(0, playerReloadTime - DT);
-    if (playerReloadTime === 0) {
-      playerAmmo = 24;
-    }
+    if (playerReloadTime === 0) playerAmmo = 24;
   }
   if (
     view.activeWeapon === "rifle" &&
@@ -628,16 +553,18 @@ function step() {
     if (panel) return;
     const input = makeInput();
     const guideFollowing = view.interplanetary.guideDialogue(me, input.interact);
-    if (guideFollowing !== null)
+    if (guideFollowing !== null) {
       notice(guideFollowing ? "Blerk 已加入队伍" : "Blerk 暂时停留在原地");
+    }
     sim.input(me.id, input);
     sim.tick();
     receive(sim.snapshot());
   } else if (room && predicted && prediction) {
     const i = makeInput();
     const guideFollowing = view.interplanetary.guideDialogue(me, i.interact);
-    if (guideFollowing !== null)
+    if (guideFollowing !== null) {
       notice(guideFollowing ? "Blerk 已加入队伍" : "Blerk 暂时停留在原地");
+    }
     room.send("input", i);
     pending.push(i);
     if (pending.length > 120) {
@@ -648,380 +575,54 @@ function step() {
     if (predicted.seat < 0) prediction.move(predicted, i);
     prediction.step();
   }
-  updateStunts(DT);
+  stunts.update(DT, predicted || me, yaw, stuntCallbacks);
 }
-function objective() {
-  return state && me ? missionObjective(state, me) : null;
-}
-function prompt() {
-  if (!state || !me) return { label: "", progress: 0 };
-  const a = state.adventure,
-    ship = a.ship;
-  if (me.seat >= 0)
-    return { label: ship.grounded ? "E · 已着陆，可以离舱" : "", progress: 0 };
-  const boarding = shipBoardingTarget(me, ship);
-  if (boarding) {
-    return {
-      label: `E · 登上${boarding.name}`,
-      progress: ship.progress,
-    };
-  }
-  const clue = LORE.find((l) => distance3(me!, l) < 8);
-  if (clue) return { label: `E · 阅读 ${clue.site}`, progress: 0 };
-  const n = a.nodes.find(
-    (n) => n.readyAt <= state!.time && distance3(me!, n) < 11,
-  );
-  if (n)
-    return {
-      label:
-        n.item === "core" && a.drones.some((d) => d.hp > 0)
-          ? "核心被封锁 · 先清除守卫"
-          : `瞄准并长按左键 / T · ${RESOURCE_SITES[n.id].name}`,
-      progress: 1 - n.hp / RESOURCE_SITES[n.id].hp,
-    };
-  const b = state.beacons.find(
-    (b) => !b.active && distance(me!, b) < 10 && Math.abs(me!.y - b.y) < 10,
-  );
-  if (b)
-    return {
-      label:
-        b.id > 0 && !state.beacons[b.id - 1].active
-          ? "先点亮上一座信标"
-          : "长按 E · 与信标共鸣（支线升级）",
-      progress: b.progress,
-    };
-  return { label: "", progress: 0 };
-}
-function openLore(id: number) {
-  const clue = LORE[id];
-  if (!clue) return;
-  text("loreSite", clue.site);
-  text("loreTitle", clue.title);
-  text("loreText", clue.text);
-  text("loreNext", clue.short);
-  show("archive");
-}
+
 function inventory() {
-  if (!state || state.phase === "lobby") return;
+  if (!state || state.phase === "lobby" || !me) return;
   if (panel === "inventory") {
     resumeGame();
     return;
   }
   show("inventory");
-  paintInventory();
+  hudController.paintInventory(state, me, mode, openLore);
 }
+
 function resumeGame() {
   show(null);
   command("close-lore");
   lock();
   unlockAudio();
 }
-function paintInventory() {
-  if (!state || !me) return;
-  const signature = JSON.stringify([
-    me.inventory,
-    me.health,
-    state.adventure.ship.cargo,
-    state.adventure.ship.repaired,
-    state.adventure.lore,
-  ]);
-  if (signature === inventorySignature) return;
-  inventorySignature = signature;
-  const a = state.adventure;
-  const entries = (Object.keys(ITEMS) as ItemId[]).filter(
-    (k) => me!.inventory[k] > 0,
-  );
-  $("inventoryGrid").replaceChildren(
-    ...Array.from({ length: 12 }, (_, index) => {
-      const div = document.createElement("div");
-      div.className = "inventory-slot";
-      const key = entries[index];
-      if (key) {
-        const item = ITEMS[key];
-        div.style.setProperty("--item-color", item.color);
-        div.title = item.description;
-        const icon = document.createElement("b"),
-          label = document.createElement("span"),
-          qty = document.createElement("small");
-        icon.textContent = item.label;
-        label.textContent = item.name;
-        qty.textContent = String(me!.inventory[key]);
-        div.append(icon, label, qty);
-      } else {
-        div.classList.add("empty");
-        div.textContent = String(index + 1).padStart(2, "0");
-      }
-      return div;
-    }),
-  );
-  const crew =
-    mode === "coop" && state.players.length > 0
-      ? ` · 远征队 (${state.players.length}/4 人: ` +
-        state.players
-          .map((p) => (p.id === state?.host ? `[队长] ${p.name}` : p.name))
-          .join("，") +
-        ")"
-      : "";
-  text(
-    "inventorySubtitle",
-    `${entries.length} / 12 格 · 随身物资${crew}`,
-  );
-  $("repairRecipe").replaceChildren(
-    ...(Object.keys(REPAIR) as ItemId[]).map((k) => {
-      const row = document.createElement("div");
-      const total = a.ship.cargo[k],
-        needed = REPAIR[k]!;
-      row.textContent = `${ITEMS[k].name}   ${Math.min(total, needed)} / ${needed} 已存入 · 携带 ${me!.inventory[k]}`;
-      row.className = total >= needed ? "supplied" : "";
-      return row;
-    }),
-  );
-  text(
-    "repairTitle",
-    a.ship.repaired ? "游隼号 · 已修复" : "游隼号 · 修复清单",
-  );
-  $("loreList").replaceChildren(
-    ...LORE.map((l) => {
-      const b = document.createElement("button");
-      b.className = "secondary";
-      b.disabled = !a.lore.includes(l.id);
-      b.textContent = a.lore.includes(l.id) ? l.title : "未发现的记录";
-      b.onclick = () => openLore(l.id);
-      return b;
-    }),
-  );
-  text(
-    "inventoryHealth",
-    `护盾 ${Math.ceil(me.health)} / 100 · 凝胶 ${me.inventory.medgel}`,
-  );
-  $<HTMLButtonElement>("heal").disabled =
-    me.health >= 100 || me.inventory.medgel <= 0;
-}
-function crewList(id: string, players: Player[]) {
-  $(id).replaceChildren(
-    ...players.map((p) => {
-      const row = document.createElement(id === "crew" ? "li" : "div"),
-        name = document.createElement("b"),
-        detail = document.createElement("span");
-      name.textContent = p.name;
-      name.style.color = colors[p.color];
-      detail.textContent =
-        id === "crew"
-          ? p.id === state?.host
-            ? "队长"
-            : "已就绪"
-          : `${Math.round(distance(me!, p))} m · 背包 ${p.level + 1}`;
-      row.append(name, detail);
-      return row;
-    }),
-  );
-}
-function renderResult() {
-  if (!state) return;
-  text(
-    "resultReason",
-    "游隼号驶入回声林地。月球缓缓升起，而这片不该存在的森林，仍在呼吸。第一章完成，世界继续开放。",
-  );
-  const totalTricks =
-    state.players.reduce((n, p) => n + (p.trickScore || 0), 0) +
-    (me?.trickScore || localTrickScore);
-  $("resultStats").innerHTML =
-    `<div>探索用时<b>${clock(state.time)}</b></div><div>能源晶体<b>${state.players.reduce((n, p) => n + p.crystals, 0)}</b></div><div>特技动作分<b>${totalTricks}</b></div>`;
-  $<HTMLButtonElement>("again").disabled =
-    mode === "coop" && state.host !== room?.sessionId;
-}
-function hud() {
-  if (!state || !me) return;
-  if (panel === "lobby") {
-    crewList("crew", state.players);
-    $<HTMLButtonElement>("begin").disabled = state.host !== room?.sessionId;
-  }
-  const p = predicted || me,
-    target = objective(),
-    cap = fuelCapacity(p.level);
-  text("clock", clock(state.time));
-  text("sector", sector(p.z, p.x));
-  text("fuel", String(Math.ceil(p.fuel)));
-  $<HTMLProgressElement>("fuelBar").max = cap;
-  $<HTMLProgressElement>("fuelBar").value = p.fuel;
-  text("healthValue", `${Math.ceil(me.health)}`);
-  $<HTMLProgressElement>("healthBar").value = me.health;
-  document.body.classList.toggle("aboard", me.seat >= 0);
-  if (panel === "inventory") paintInventory();
-  text("packLevel", `ION PACK ${p.level >= 1 ? "II" : "I"}`);
-  text("speed", Math.round(Math.hypot(p.vx, p.vz)).toString().padStart(2, "0"));
-  const alt = Math.round(Math.max(0, p.y - groundAt(p.x, p.z) - 0.85));
-  text("altitude", `${alt} m`);
-  const layerEl = document.getElementById("layerBadge");
-  if (layerEl) {
-    if (p.y > 6000) layerEl.textContent = "DEEP SPACE // 深空";
-    else if (p.y > 2500) layerEl.textContent = "ORBIT // 轨道";
-    else if (p.y > 850) layerEl.textContent = "STRATO // 平流层";
-    else if (p.y > 350) layerEl.textContent = "TROPO // 对流层";
-    else layerEl.textContent = "BASIN // 地表";
-  }
-  const flightModeEl = document.getElementById("flightModeBadge");
-  if (flightModeEl && me.seat >= 0) {
-    const ship = state.adventure.ship;
-    const isPilot = me.seat === 0 && ship.seats?.[0] === me.id;
-    const isBraking = isPilot ? keys.has("KeyX") : Boolean(ship.braking);
-    const isBoosting = isPilot
-      ? (keys.has("ShiftLeft") || keys.has("ShiftRight")) && !keys.has("KeyX")
-      : Boolean(ship.boosting);
-    if (isBraking) {
-      flightModeEl.textContent = "RETRO-BRAKE // 逆喷制动";
-      flightModeEl.className = "flight-mode-badge brake";
-    } else if (isBoosting) {
-      flightModeEl.textContent = "AFTERBURNER // 超燃加力";
-      flightModeEl.className = "flight-mode-badge boost";
-    } else {
-      flightModeEl.textContent = "CRUISE // 巡航推进";
-      flightModeEl.className = "flight-mode-badge cruise";
-    }
-  }
-  text("cargo", `${me.crystals.toString().padStart(2, "0")} 晶体 · 特技 ${me.trickScore || localTrickScore}`);
-  const now = performance.now();
-  if (stuntUntil > now) {
-    text("combo", stuntText);
-    $("combo").classList.add("visible", "stunt");
-  } else {
-    $("combo").classList.remove("stunt");
-    text("combo", me.combo >= 2 ? `×${me.combo} 连续收集` : "");
-    $("combo").classList.toggle("visible", me.combo >= 2);
-  }
-  text("dashStatus", p.grapple ? "牵引中 · Q 松开" : "瞄准岩壁");
-  const canEquipPortal = p.seat < 0 && !!state.portals;
-  const portalHeld = canEquipPortal && view.activeWeapon === "portal";
-  $("wepPortal").hidden = !canEquipPortal;
-  $("touchPortal").hidden = !canEquipPortal;
-  $("touchPortalFire").hidden = !portalHeld;
-  $("touchPortalUndo").hidden = !portalHeld;
-  $("touchFire").hidden = portalHeld;
-  $("touchRecallFighter").hidden = p.seat >= 0;
-  $("portalHint").hidden = !portalHeld;
-  $("toolHint").hidden = portalHeld;
-  if (portalHeld) {
-    const color = nextPortalColor(state.portals!, state.lastPortalColor);
-    view.setPortalColor(color);
-    text("portalNext", color === "blue" ? "放蓝门" : "放红门");
-  }
-  text("weaponAmmo", playerReloadTime > 0 ? "换弹中... (R)" : `${playerAmmo} / 24`);
-  const anchor = p.seat < 0 ? (sim?.physics || prediction)?.aim(p, 85) : null;
-  const reticleEl = document.querySelector(".reticle");
-  reticleEl?.classList.toggle("grapple-ready", !!anchor);
 
-  // Reticle minimal boarding crosshair (.reticle.board-ready)
-  const a = state.adventure;
-  const ship = a.ship;
-  const nearbyBody = celestialCapture(me);
-  const isOnPlanet = !!nearbyBody && nearbyBody.altitude < 60;
-  const boarding = shipBoardingTarget(me, ship);
-  let isAimingAtShip = false;
-  const boardingPos = boarding?.position ?? ship;
-  const targetPos = new THREE.Vector3(boardingPos.x, boardingPos.y, boardingPos.z)
-    .addScaledVector(celestialFlightFrame(boardingPos, ship.yaw).up, 1.2);
-  const camPos = view.camera.position;
-  const toShip = targetPos.clone().sub(camPos);
-  const shipDist = toShip.length();
-  if (shipDist > 0.1) {
-    toShip.normalize();
-    const camDir = new THREE.Vector3();
-    view.camera.getWorldDirection(camDir);
-    isAimingAtShip = camDir.dot(toShip) > 0.52;
-  }
-  const boardReady =
-    me.seat < 0 && !!boarding && (!boarding.active || ship.grounded || isOnPlanet) && isAimingAtShip;
-  reticleEl?.classList.toggle("board-ready", boardReady);
+let measured = 0;
+let measureSeconds = 0;
+let fps = 60;
 
-  if (!p.grapple && anchor)
-    text("dashStatus", `${Math.round(distance3(p, anchor))} m 可挂接`);
-  text("viewMode", view.thirdPerson ? "第三人称" : "第一人称");
-  text("thermalStatus", me.level >= 2 ? "上升气流已开启" : "晶体补充燃料");
-  crewList(
-    "team",
-    state.players.filter((p) => p.id !== me!.id),
-  );
-  if (target) {
-    text("objectiveIndex", target.index);
-    text("objective", target.title);
-    text("objectiveDetail", target.detail);
-    const isShipTarget =
-      target.title.includes("游隼号") ||
-      target.title.includes("飞船") ||
-      target.title.includes("战舰") ||
-      target.title.includes("巡航") ||
-      target.title.toLowerCase().includes("cruiser") ||
-      target.title.toLowerCase().includes("fighter") ||
-      target.title.includes("登舰");
-    const point = !isShipTarget ? view.project(target.p) : null;
-    $("targetMarker").hidden = !point;
-    if (point) {
-      $("targetMarker").style.left = `${point.x}px`;
-      $("targetMarker").style.top = `${point.y}px`;
-      text("targetDistance", `${Math.round(distance(p, target.p))} m`);
-    }
-  }
-  $("enemyLabels").replaceChildren(
-    ...state.adventure.drones
-      .filter((d) => d.hp > 0 && distance(p, d) < 80)
-      .flatMap((d) => {
-        const point = view.project({ ...d, y: d.y - 5 });
-        if (!point) return [];
-        const label = document.createElement("div");
-        label.className = "enemy-label";
-        label.style.left = point.x + "px";
-        label.style.top = point.y + "px";
-        label.textContent = `守卫 ${d.hp} / 100${d.mode === "charge" ? " · 已锁定，移动闪避" : ""}`;
-        return [label];
-      }),
-  );
-  const near = prompt();
-  $("interaction").hidden = !near.label;
-  text("interactionText", near.label);
-  $<HTMLProgressElement>("interactionProgress").value = near.progress;
-  view.minimap($<HTMLCanvasElement>("map"), state, { ...me, ...p });
-  $("controlsHint").hidden = state.time > 90;
-  document.body.dataset.camera = view.thirdPerson ? "third" : "first";
-  if (view.activeWeapon === "camera") {
-    const vfZoom = document.getElementById("vfZoomLabel");
-    if (vfZoom) {
-      const focalMm = Math.round(50 * view.cameraZoom);
-      vfZoom.textContent = `${focalMm}mm · ${view.cameraZoom.toFixed(1)}x OPTICAL`;
-    }
-    const vfHeading = document.getElementById("vfHeading");
-    if (vfHeading) {
-      let deg = Math.round(((-yaw * 180) / Math.PI) % 360);
-      if (deg < 0) deg += 360;
-      vfHeading.textContent = `HDG ${deg.toString().padStart(3, "0")}°`;
-    }
-  }
-}
-let measured = 0,
-  measureSeconds = 0,
-  fps = 60;
 function frame(now: number) {
-  const elapsed = (now - lastFrame) / 1000,
-    dt = Math.min(0.15, elapsed);
+  const elapsed = (now - lastFrame) / 1000;
+  const dt = Math.min(0.15, elapsed);
   lastFrame = now;
   accumulator += dt;
   while (accumulator >= DT) {
     accumulator -= DT;
     step();
   }
-  for (const axis of ["x", "y", "z"] as const)
+  for (const axis of ["x", "y", "z"] as const) {
     correction[axis] *= Math.exp(-dt * 18);
-  const p = predicted || me,
-    cameraPlayer =
-      me && p
-        ? {
-            ...p,
-            x: p.x + correction.x,
-            y: p.y + correction.y,
-            z: p.z + correction.z,
-            yaw,
-            pitch,
-          }
-        : null;
+  }
+  const p = predicted || me;
+  const cameraPlayer =
+    me && p
+      ? {
+          ...p,
+          x: p.x + correction.x,
+          y: p.y + correction.y,
+          z: p.z + correction.z,
+          yaw,
+          pitch,
+        }
+      : null;
   const isPilot = !!(me && me.seat === 0 && state?.adventure.ship.seats?.[0] === me.id);
   const pilotFlight = state?.adventure.ship
     ? isPilot
@@ -1050,12 +651,28 @@ function frame(now: number) {
     measured = 0;
     measureSeconds = 0;
   }
-  if (now - uiAt > 90) {
-    hud();
+  if (now - uiAt > 90 && state && me) {
+    hudController.render({
+      state,
+      me,
+      predicted,
+      mode,
+      panel,
+      roomSessionId: room?.sessionId,
+      keys,
+      yaw,
+      playerAmmo,
+      playerReloadTime,
+      physics: sim?.physics || prediction,
+      view,
+      stunts,
+      openLore,
+    });
     uiAt = now;
   }
   requestAnimationFrame(frame);
 }
+
 $("practiceTab").onclick = () => chooseMode("practice");
 $("coopTab").onclick = () => chooseMode("coop");
 $("launch").onclick = () => {
@@ -1069,6 +686,7 @@ $("begin").onclick = () => {
   lock();
   unlockAudio();
 };
+
 function leave() {
   releaseSession();
   show("landing");
@@ -1076,6 +694,7 @@ function leave() {
   history.replaceState({}, "", location.pathname);
   text("linkState", "KEPLER / 07");
 }
+
 for (const id of ["leave", "leaveLobby", "home"]) $(id).onclick = leave;
 $("again").onclick = () => {
   if (sim) void practice();
@@ -1092,9 +711,7 @@ $("explore").onclick = () => {
 };
 $("copy").onclick = async () => {
   try {
-    await navigator.clipboard.writeText(
-      `${location.origin}${location.pathname}?room=${room?.roomId}`,
-    );
+    await navigator.clipboard.writeText(`${location.origin}${location.pathname}?room=${room?.roomId}`);
     notice("邀请链接已复制");
   } catch {
     notice(`房间编号 ${room?.roomId}`);
@@ -1112,10 +729,7 @@ $("resume").onclick = () => {
 };
 $("fullscreen").onclick = () => {
   if (document.fullscreenElement) void document.exitFullscreen();
-  else
-    void document.documentElement
-      .requestFullscreen()
-      .catch(() => notice("全屏不可用"));
+  else void document.documentElement.requestFullscreen().catch(() => notice("全屏不可用"));
 };
 $("volume").oninput = () => {
   const vol = muted ? 0 : Number($<HTMLInputElement>("volume").value);
@@ -1131,36 +745,40 @@ $("sound").onclick = () => {
   unlockAudio();
   const vol = muted ? 0 : Number($<HTMLInputElement>("volume").value);
   cosmicAudio.setVolume(vol);
-  $("sound").innerHTML =
-    `<i data-lucide="${muted ? "volume-x" : "volume-2"}"></i>`;
+  const icon = document.createElement("i");
+  icon.dataset.lucide = muted ? "volume-x" : "volume-2";
+  $("sound").replaceChildren(icon);
   $("sound").setAttribute("aria-label", muted ? "开启声音" : "静音");
   paintIcons();
 };
+
 function updateViewfinderVisibility() {
   const vf = document.getElementById("cameraViewfinder");
-  if (vf) {
-    vf.hidden = view.activeWeapon !== "camera" || view.thirdPerson;
-  }
+  if (vf) vf.hidden = view.activeWeapon !== "camera" || view.thirdPerson;
 }
+
 function camera() {
   view.toggleCamera();
   text("viewMode", view.thirdPerson ? "第三人称" : "第一人称");
   updateViewfinderVisibility();
 }
+
 $("camera").onclick = camera;
 $("recall").onclick = () => {
   show(null);
   command("respawn");
   lock();
 };
+
 function keyDown(key: string) {
-  if (!keys.has(key) && ["KeyE", "KeyQ", "KeyC", "Space"].includes(key))
+  if (!keys.has(key) && ["KeyE", "KeyQ", "KeyC", "Space"].includes(key)) {
     pulses.add(key);
+  }
   if (key === "Space" && !keys.has(key)) {
     const now = performance.now();
-    if (isSkating && now - lastSpaceTime < 350) {
+    if (stunts.isSkating && now - lastSpaceTime < 350) {
       command("ollie");
-      recordTrick("OLLIE 360°", 300);
+      stunts.recordTrick("OLLIE 360°", 300, stuntCallbacks);
       view.sound("jet", 1.4);
     }
     lastSpaceTime = now;
@@ -1168,6 +786,7 @@ function keyDown(key: string) {
   }
   keys.add(key);
 }
+
 function selectWeapon(w: Equipment) {
   if (w === "portal" && (!state?.portals || !me || me.seat >= 0)) return;
   keys.delete("Mouse0");
@@ -1183,10 +802,19 @@ function selectWeapon(w: Equipment) {
     if (el) el.classList.toggle("active", key === w);
   }
   $("touchPortal").classList.toggle("active", w === "portal");
-  if (w === "camera" || w === "portal") {
-    view.thirdPerson = false;
-  }
+  if (w === "camera" || w === "portal") view.thirdPerson = false;
   updateViewfinderVisibility();
+}
+
+function togglePortalGun() {
+  selectWeapon(view.activeWeapon === "portal" ? "none" : "portal");
+}
+
+function usePortalGun(action: PortalAction) {
+  if (panel || reconnecting || !state?.portals || !me || me.seat >= 0 || view.activeWeapon !== "portal") {
+    return;
+  }
+  if (portalActions.length < 8) portalActions.push(action);
 }
 
 addEventListener("keydown", (e) => {
@@ -1225,12 +853,9 @@ addEventListener("keydown", (e) => {
     return;
   }
   if (panel) return;
-  if (
-    ["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(
-      e.code,
-    )
-  )
+  if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code)) {
     e.preventDefault();
+  }
   keyDown(e.code);
   if (e.repeat) return;
   if (e.code === "Digit1") selectWeapon(view.activeWeapon === "rifle" ? "none" : "rifle");
@@ -1248,18 +873,14 @@ addEventListener("keydown", (e) => {
   }
   if (e.code === "KeyK") toggleHoverboard();
   if (e.code === "KeyR") {
-    if (view.activeWeapon === "rifle" || playerAmmo < 24) {
-      playerReloadTime = 2.0;
-    } else {
-      command("mark");
-    }
+    if (view.activeWeapon === "rifle" || playerAmmo < 24) playerReloadTime = 2.0;
+    else command("mark");
   }
   if (e.code === "KeyB") command("respawn");
   if (e.code === "KeyG") command("heal");
-  if (e.code === "KeyH") {
-    document.body.classList.toggle("hide-hud");
-  }
+  if (e.code === "KeyH") document.body.classList.toggle("hide-hud");
 });
+
 addEventListener("keyup", (e) => keys.delete(e.code));
 addEventListener("blur", () => {
   keys.clear();
@@ -1284,7 +905,9 @@ addEventListener(
     const idx = weapons.indexOf(view.activeWeapon);
     const nextIdx =
       idx === -1
-        ? (e.deltaY > 0 ? 1 : weapons.length - 1)
+        ? e.deltaY > 0
+          ? 1
+          : weapons.length - 1
         : e.deltaY > 0
           ? (idx + 1) % weapons.length
           : (idx - 1 + weapons.length) % weapons.length;
@@ -1292,13 +915,14 @@ addEventListener(
   },
   { passive: true },
 );
+
 document.addEventListener("mousemove", (e) => {
   if (document.pointerLockElement !== canvas || panel) return;
   const s = Number($<HTMLInputElement>("sensitivity").value) * 0.0022;
   yaw -= e.movementX * s;
   pitch = Math.max(-1.35, Math.min(1.35, pitch - e.movementY * s));
 });
-canvas.addEventListener("contextmenu", e => {
+canvas.addEventListener("contextmenu", (e) => {
   if (!panel && view.activeWeapon === "portal") e.preventDefault();
 });
 canvas.addEventListener("mousedown", (e) => {
@@ -1310,24 +934,22 @@ canvas.addEventListener("mousedown", (e) => {
     return;
   }
   if (e.button === 0) {
-    if (view.activeWeapon === "none" && !view.thirdPerson) {
-      selectWeapon("rifle");
-    }
-    if (view.activeWeapon === "camera") {
-      takeSnapshot(view);
-    } else {
-      keys.add("Mouse0");
-    }
-    if (!mobile() && document.pointerLockElement !== canvas) {
-      lock();
-    }
+    if (view.activeWeapon === "none" && !view.thirdPerson) selectWeapon("rifle");
+    if (view.activeWeapon === "camera") takeSnapshot(view);
+    else keys.add("Mouse0");
+    if (!mobile() && document.pointerLockElement !== canvas) lock();
   }
 });
 addEventListener("mouseup", () => keys.delete("Mouse0"));
-document.addEventListener("click", (e) => {
-  const target = (e.target as HTMLElement)?.closest("button, .wep-slot, [role='tab'], .icon");
-  if (target) cosmicAudio.playUIClick();
-}, { passive: true });
+document.addEventListener(
+  "click",
+  (e) => {
+    const target = (e.target as HTMLElement)?.closest("button, .wep-slot, [role='tab'], .icon");
+    if (target) cosmicAudio.playUIClick();
+  },
+  { passive: true },
+);
+
 function holdKey(el: HTMLElement, key: string) {
   el.onpointerdown = (e) => {
     e.preventDefault();
@@ -1336,6 +958,7 @@ function holdKey(el: HTMLElement, key: string) {
   };
   el.onpointerup = el.onpointercancel = () => keys.delete(key);
 }
+
 document.querySelectorAll<HTMLElement>("[data-move]").forEach((b) =>
   holdKey(
     b,
@@ -1360,275 +983,40 @@ $("inventoryButton").onclick = inventory;
 $("closeInventory").onclick = resumeGame;
 $("closeLore").onclick = resumeGame;
 $("heal").onclick = () => {
-  sim ? sim.action(me!.id, "heal") : room?.send("action", "heal");
+  if (!me) return;
+  sim ? sim.action(me.id, "heal") : room?.send("action", "heal");
 };
+
 function switchSpacecraft() {
-  notice(me && me.seat >= 0
-    ? "请先降落离舱，再靠近另一艘飞船按 E 登船"
-    : "靠近停机坪上的飞船，按 E 登船并切换舰种");
+  notice(
+    me && me.seat >= 0
+      ? "请先降落离舱，再靠近另一艘飞船按 E 登船"
+      : "靠近停机坪上的飞船，按 E 登船并切换舰种",
+  );
 }
 
 $("snapshot") && ($("snapshot").onclick = () => takeSnapshot(view));
 $("snapPhoto") && ($("snapPhoto").onclick = () => takeSnapshot(view));
 $("toggleSkate") && ($("toggleSkate").onclick = toggleHoverboard);
 $("btnSwitchShip") && ($("btnSwitchShip").onclick = switchSpacecraft);
-function togglePortalGun() {
-  selectWeapon(view.activeWeapon === "portal" ? "none" : "portal");
-}
-function usePortalGun(action: PortalAction) {
-  if (panel || reconnecting || !state?.portals || !me || me.seat >= 0 || view.activeWeapon !== "portal") return;
-  if (portalActions.length < 8) portalActions.push(action);
-}
 $("wepPortal").onclick = togglePortalGun;
 $("touchPortal").onclick = togglePortalGun;
 $("touchPortalFire").onclick = () => usePortalGun("fire");
 $("touchPortalUndo").onclick = () => usePortalGun("undo");
 $("touchRecallFighter").onclick = () => command("recall-fighter");
-$("wepRifle") && ($("wepRifle").onclick = () => selectWeapon(view.activeWeapon === "rifle" ? "none" : "rifle"));
-$("wepGrapple") && ($("wepGrapple").onclick = () => selectWeapon(view.activeWeapon === "grapple" ? "none" : "grapple"));
-$("wepCamera") && ($("wepCamera").onclick = () => selectWeapon(view.activeWeapon === "camera" ? "none" : "camera"));
+$("wepRifle") &&
+  ($("wepRifle").onclick = () => selectWeapon(view.activeWeapon === "rifle" ? "none" : "rifle"));
+$("wepGrapple") &&
+  ($("wepGrapple").onclick = () =>
+    selectWeapon(view.activeWeapon === "grapple" ? "none" : "grapple"));
+$("wepCamera") &&
+  ($("wepCamera").onclick = () => selectWeapon(view.activeWeapon === "camera" ? "none" : "camera"));
 
-// 4 Standalone Prop GLB Exports
 $("downloadBoard") && ($("downloadBoard").onclick = exportHoverboardGlb);
 $("downloadRifle") && ($("downloadRifle").onclick = exportTechRifleGlb);
 $("downloadCamera") && ($("downloadCamera").onclick = exportSurveyCameraGlb);
 $("downloadGrapple") && ($("downloadGrapple").onclick = exportGrappleLauncherGlb);
 
-// Contact & Feedback Sheet Handlers
-$("copyEmail") && ($("copyEmail").onclick = () => {
-  navigator.clipboard.writeText("oodaleek@gmail.com").then(() => {
-    notice("已复制官方邮箱: oodaleek@gmail.com");
-  }).catch(() => {
-    notice("官方邮箱: oodaleek@gmail.com");
-  });
-});
-
-$("feedbackSnap") && ($("feedbackSnap").onclick = () => {
-  try {
-    attachedFeedbackImg = canvas.toDataURL("image/jpeg", 0.85);
-    $<HTMLImageElement>("feedbackPreviewImg").src = attachedFeedbackImg;
-    $("feedbackPreviewContainer").hidden = false;
-    notice("已截取当前游戏画面作为建议附件");
-  } catch {
-    notice("截取画面失败");
-  }
-});
-
-$("feedbackFile") && ($("feedbackFile").onchange = (e) => {
-  const file = (e.target as HTMLInputElement).files?.[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (ev) => {
-    attachedFeedbackImg = String(ev.target?.result || "");
-    $<HTMLImageElement>("feedbackPreviewImg").src = attachedFeedbackImg;
-    $("feedbackPreviewContainer").hidden = false;
-  };
-  reader.readAsDataURL(file);
-});
-
-$("removeFeedbackImg") && ($("removeFeedbackImg").onclick = () => {
-  attachedFeedbackImg = "";
-  $<HTMLImageElement>("feedbackPreviewImg").src = "";
-  $("feedbackPreviewContainer").hidden = true;
-  ($("feedbackFile") as HTMLInputElement).value = "";
-});
-
-interface EchoEntry {
-  author: string;
-  text: string;
-  time: number | string;
-  img?: string;
-}
-
-const DEFAULT_ECHOES: EchoEntry[] = [
-  { author: "探索员·零", text: "低重力滑板手感太棒了！双击空格 Ollie 翻板很有节奏感。", time: "2026-09-30" },
-  { author: "开普勒先锋", text: "希望能有更多的能量晶体滑翔路线和隐藏遗迹。", time: "2026-09-29" },
-  { author: "回声通信站", text: "已收到多份星际航行反馈，游隼号推进器维护正常。", time: "2026-09-28" }
-];
-
-function renderEchoes() {
-  const container = $("echoesList");
-  if (!container) return;
-  let saved: EchoEntry[] = [];
-  try {
-    saved = JSON.parse(localStorage.getItem("kepler_echoes") || "[]");
-  } catch {}
-  const all: EchoEntry[] = [...saved, ...DEFAULT_ECHOES];
-  container.innerHTML = all.map(e => `
-    <div class="echo-card">
-      <div class="echo-meta">
-        <b>${e.author}</b>
-        <span>${typeof e.time === "number" ? new Date(e.time).toLocaleDateString() : e.time}</span>
-      </div>
-      <div class="echo-content">${e.text}</div>
-      ${e.img ? `<img src="${e.img}" style="max-width:140px;margin-top:6px;border-radius:3px;border:1px solid var(--border);" />` : ""}
-    </div>
-  `).join("");
-}
-
-$("submitFeedback") && ($("submitFeedback").onclick = () => {
-  const content = ($<HTMLTextAreaElement>("feedbackContent").value || "").trim();
-  if (!content) {
-    notice("请输入您的建议或反馈");
-    return;
-  }
-  const entry = {
-    author: me?.name || "探索员",
-    text: content,
-    img: attachedFeedbackImg,
-    time: Date.now(),
-  };
-  try {
-    const existing = JSON.parse(localStorage.getItem("kepler_echoes") || "[]");
-    existing.unshift(entry);
-    localStorage.setItem("kepler_echoes", JSON.stringify(existing.slice(0, 30)));
-  } catch {}
-  $<HTMLTextAreaElement>("feedbackContent").value = "";
-  attachedFeedbackImg = "";
-  $("feedbackPreviewContainer").hidden = true;
-  renderEchoes();
-  notice("建议已发射至开普勒基站，感谢探索员！");
-});
-
-$("feedbackBtn") && ($("feedbackBtn").onclick = () => {
-  if (panel === "feedback") {
-    show(null);
-    lock();
-  } else {
-    renderEchoes();
-    show("feedback");
-  }
-});
-
-$("closeFeedback") && ($("closeFeedback").onclick = () => {
-  show(null);
-  lock();
-});
-
-// Chat Log & Form
-function addChatMessage(data: { name: string; color?: number; text: string }) {
-  const list = $("chatMessages");
-  if (!list) return;
-  const item = document.createElement("div");
-  item.className = "chat-item";
-  const color = colors[data.color ?? 0] || "var(--mint)";
-  const author = document.createElement("span");
-  author.className = "chat-author";
-  author.style.color = color;
-  author.textContent = `[${String(data.name || "探索员")}]:`;
-  const body = document.createElement("span");
-  body.textContent = String(data.text || "");
-  item.append(author, body);
-  list.appendChild(item);
-  list.scrollTop = list.scrollHeight;
-  setTimeout(() => item.classList.add("fading"), 6000);
-  setTimeout(() => item.remove(), 7000);
-}
-
-function handleChatCommand(cmdText: string) {
-  const parts = cmdText.trim().split(/\s+/);
-  const cmd = parts[0].toLowerCase();
-  if (cmd === "/boost" || cmd === "/warp" || cmd === "/speed") {
-    if (sim) {
-      const s = sim.s.adventure.ship;
-      s.repaired = true;
-      s.progress = 1;
-      s.thrust = 1.5;
-      const isPiloting = (me && me.seat >= 0) || s.seats.some(Boolean);
-      if (isPiloting) {
-        s.grounded = false;
-        const speed = Math.hypot(s.vx, s.vy, s.vz);
-        if (speed < 2) {
-          s.vz = -120;
-        } else {
-          s.vx *= 2.5;
-          s.vy *= 2.5;
-          s.vz *= 2.5;
-        }
-        notice("战舰曲率引擎过载加速");
-      } else if (me) {
-        me.vx *= 2.5;
-        me.vz *= 2.5;
-        notice("喷气推进动力超频");
-      }
-    } else {
-      notice("联机模式暂仅房主可调试");
-    }
-    return;
-  }
-  if (cmd === "/mercury" || cmd === "/goal") {
-    if (sim) {
-      const merc = SOLAR_SYSTEM.mercury;
-      const s = sim.s.adventure.ship;
-      s.x = merc.position.x;
-      s.y = merc.position.y + merc.radius + 0.3;
-      s.z = merc.position.z;
-      s.vx = 0;
-      s.vy = 0;
-      s.vz = 0;
-      s.repaired = true;
-      s.progress = 1;
-      s.grounded = true;
-      if (me) {
-        if (me.seat >= 0) {
-          me.x = s.x;
-          me.y = s.y;
-          me.z = s.z;
-          me.planet = null;
-        } else {
-          me.x = merc.position.x + 6;
-          me.y = merc.position.y + merc.radius + 0.85;
-          me.z = merc.position.z;
-          me.planet = "mercury";
-          sim.physics.reset(me.id, me);
-        }
-      }
-      notice("已降落停靠至水星表面高曲率空域");
-    }
-    return;
-  }
-  if (cmd === "/repair") {
-    if (sim) {
-      sim.s.adventure.ship.repaired = true;
-      sim.s.adventure.ship.progress = 1;
-      notice("飞船已完成修复与动力检定");
-    }
-    return;
-  }
-  if (cmd === "/help") {
-    notice("可用指令: /boost (加速), /mercury (跃迁水星), /repair (修复飞船)");
-    return;
-  }
-  notice(`未知指令: ${cmd} · 输入 /help 查看`);
-}
-
-function sendChatMessage(text: string) {
-  const trimmed = text.trim().slice(0, 100);
-  if (!trimmed) return;
-  if (trimmed.startsWith("/")) {
-    handleChatCommand(trimmed);
-    return;
-  }
-  if (room) {
-    room.send("chat", { text: trimmed });
-  } else {
-    addChatMessage({
-      name: me?.name || "探索员",
-      color: me?.color ?? 0,
-      text: trimmed,
-    });
-  }
-}
-
-$("chatForm") && ($("chatForm").onsubmit = (e) => {
-  e.preventDefault();
-  const input = $<HTMLInputElement>("chatInput");
-  sendChatMessage(input.value);
-  input.value = "";
-  $("chatForm").hidden = true;
-  canvas.focus();
-  lock();
-});
 let touch: { id: number; x: number; y: number } | null = null;
 canvas.onpointerdown = (e) => {
   if (e.pointerType !== "mouse" && !panel) {
@@ -1639,18 +1027,17 @@ canvas.onpointerdown = (e) => {
 canvas.onpointermove = (e) => {
   if (touch?.id === e.pointerId) {
     yaw -= (e.clientX - touch.x) * 0.005;
-    pitch = Math.max(
-      -1.35,
-      Math.min(1.35, pitch - (e.clientY - touch.y) * 0.005),
-    );
+    pitch = Math.max(-1.35, Math.min(1.35, pitch - (e.clientY - touch.y) * 0.005));
     touch.x = e.clientX;
     touch.y = e.clientY;
   }
 };
 canvas.onpointerup = canvas.onpointercancel = () => (touch = null);
+
 paintIcons();
 show("landing");
 requestAnimationFrame(frame);
+
 void Promise.all([
   view.load(),
   loadSimulation().catch(() => {}),
@@ -1658,7 +1045,7 @@ void Promise.all([
     .then((r) => r.json())
     .catch(() => ({ url: "" })),
 ])
-  .then(([,, config]: [unknown, unknown, any]) => {
+  .then(([, , config]: [unknown, unknown, any]) => {
     endpoint = resolveRoomEndpoint(config, import.meta.env.VITE_ROOM_URL);
     loading = false;
     $<HTMLButtonElement>("launch").disabled = false;
@@ -1669,27 +1056,30 @@ void Promise.all([
     } catch {}
     $<HTMLInputElement>("callsign").addEventListener("input", (e) => {
       try {
-        localStorage.setItem(
-          "last_light_callsign",
-          (e.target as HTMLInputElement).value,
-        );
+        localStorage.setItem("last_light_callsign", (e.target as HTMLInputElement).value);
       } catch {}
     });
     const code = new URLSearchParams(location.search).get("room");
     if (code) {
       $<HTMLInputElement>("roomCode").value = code.slice(0, 6).toUpperCase();
       chooseMode("coop");
-    } else chooseMode("practice");
+    } else {
+      chooseMode("practice");
+    }
   })
   .catch((e) => {
     console.error(e);
     text("entryStatus", "星球加载失败，请刷新重试");
   });
+
 Object.assign(window, {
   __lastLight: {
-    command: (cmd: string) => handleChatCommand(cmd),
+    command: (cmd: string) => chatConsole.runCommand(cmd),
     sim: () => sim,
-    setViewRotation: (y: number, p: number) => { yaw = y; pitch = p; },
+    setViewRotation: (y: number, p: number) => {
+      yaw = y;
+      pitch = p;
+    },
     snapshot: () => (state ? structuredClone(state) : null),
     player: () =>
       me
@@ -1732,12 +1122,8 @@ Object.assign(window, {
       })(),
       joints: (() => {
         const a = me ? view.avatars.get(me.id) : null;
-        const leg =
-          a?.getObjectByName("mixamorig:LeftUpLeg") ||
-          a?.getObjectByName("LeftUpLeg");
-        const shin =
-          a?.getObjectByName("mixamorig:LeftLeg") ||
-          a?.getObjectByName("LeftLeg");
+        const leg = a?.getObjectByName("mixamorig:LeftUpLeg") || a?.getObjectByName("LeftUpLeg");
+        const shin = a?.getObjectByName("mixamorig:LeftLeg") || a?.getObjectByName("LeftLeg");
         const getRotX = (bone: THREE.Object3D | null | undefined) => {
           if (!bone) return 0;
           const e = new THREE.Euler().setFromQuaternion(bone.quaternion);

@@ -33,7 +33,7 @@ import {
   smooth,
   type Vec,
 } from "../shared/map";
-import type { Snapshot, Player } from "../shared/types";
+import { PLAYER_COLORS, type Snapshot, type Player } from "../shared/types";
 import type { MovementWorld } from "../shared/physics";
 import { PortalView } from "./portal-view";
 import { SOLAR_SYSTEM } from "../shared/celestial";
@@ -43,7 +43,7 @@ import { equipmentModel } from "./equipment-model";
 import type { PortalColor } from "../shared/portals";
 
 export type Equipment = "none" | "rifle" | "grapple" | "camera" | "portal";
-const COLORS = [0x9eeafa, 0xffc98b, 0xff9f81, 0xa6baff];
+const COLORS = PLAYER_COLORS.map((c) => c.hex);
 const v3 = (v: Vec) => new THREE.Vector3(v.x, v.y, v.z);
 const vertex = `varying vec2 vUv; varying vec3 vNormal; varying vec3 vPosition; void main(){vUv=uv;vNormal=normal;vPosition=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`;
 const glowMaterial = (color: number, opacity = 0.5) =>
