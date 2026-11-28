@@ -1,11 +1,13 @@
 import { tickFighterRecall } from "./fighter-recall";
 import {
   DT,
+  fuelCapacity,
   idleInput,
   type Adventure,
   type AdventureShip,
   type Input,
   type Player,
+  type SimulationHost,
 } from "./types";
 import {
   ITEMS,
@@ -23,10 +25,16 @@ import {
 import { groundAt, distance3, distance, HALF, clamp, type Vec } from "./map";
 import { HOME_PLANET_SPHERE, SHIP_COLLIDER_SPECS } from "./colliders";
 import { eyePosition, viewDirection, FOOT_OFFSET, surfaceOrientation } from "./surface";
-import { SOLAR_SYSTEM, celestialCapture, geodesicArcDistance, projectToSphere, type SpaceshipKind } from "./celestial";
+import {
+  SOLAR_SYSTEM,
+  WARP_GATE_IDS,
+  celestialCapture,
+  geodesicArcDistance,
+  projectToSphere,
+  type SpaceshipKind,
+} from "./celestial";
 import { celestialFlightFrame } from "./celestial-flight";
 import { Vector3 } from "three";
-import type { Simulation } from "./simulation";
 export function createAdventure(): Adventure {
   return {
     lore: [],
@@ -106,7 +114,7 @@ const towards = (p: Player, target: Vec) => {
       0.965
   );
 };
-export function tool(sim: Simulation, p: Player) {
+export function tool(sim: SimulationHost, p: Player) {
   if (p.seat >= 0 || p.toolCooldown > 0) return;
   p.toolCooldown = 0.28;
   p.shotId++;
@@ -218,7 +226,7 @@ export function shipBoardingTarget(p: BoardingPlayer, ship: BoardingShip) {
   return boardingCandidates(p, ship).find((target) => target.distance < target.boardingRadius) ?? null;
 }
 
-export function interactAdventure(sim: Simulation, p: Player, i: Input) {
+export function interactAdventure(sim: SimulationHost, p: Player, i: Input) {
   const a = sim.s.adventure,
     ship = a.ship;
   const pressed = i.interact && !p.interactHeld;
@@ -360,7 +368,7 @@ export function interactAdventure(sim: Simulation, p: Player, i: Input) {
         p.inventory.circuit++;
         for (const member of sim.s.players) {
           member.level = Math.max(member.level, 1);
-          member.fuel = 150;
+          member.fuel = fuelCapacity(member.level);
         }
       }
       sim.emit(`${clue.title} · ${clue.short}`);
@@ -400,17 +408,14 @@ const FLIGHT_TUNING: Record<SpaceshipKind, FlightTuning> = {
   },
 };
 
-// Clockwise adjacent-horizon route; the visible portal lies in the local XY plane.
-const WARP_ROUTE = ["warpgate", "warpgate_east", "warpgate_south", "warpgate_west"] as const;
-
-function tickWarpGates(sim: Simulation, previous: Vec, inputs: Map<string, Input>) {
+function tickWarpGates(sim: SimulationHost, previous: Vec, inputs: Map<string, Input>) {
   const ship = sim.s.adventure.ship;
   if (!ship.repaired || ship.grounded || !sim.player(ship.seats[0]) ||
       (ship.warpUntil ?? 0) > sim.s.time) return;
   const previousWarp = ship.warpUntil ?? 0;
-  for (const [index, id] of WARP_ROUTE.entries()) {
+  for (const [index, id] of WARP_GATE_IDS.entries()) {
     const source = SOLAR_SYSTEM[id];
-    const target = SOLAR_SYSTEM[WARP_ROUTE[(index + 1) % WARP_ROUTE.length]];
+    const target = SOLAR_SYSTEM[WARP_GATE_IDS[(index + 1) % WARP_GATE_IDS.length]];
     const normal = new Vector3().subVectors(source.landingSite, source.position).normalize();
     const before = new Vector3().subVectors(previous, source.position);
     const after = new Vector3().subVectors(ship, source.position);
@@ -443,7 +448,7 @@ function tickWarpGates(sim: Simulation, previous: Vec, inputs: Map<string, Input
   }
 }
 
-export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
+export function tickShip(sim: SimulationHost, inputs: Map<string, Input>) {
   if (tickFighterRecall(sim)) return;
   const s = sim.s.adventure.ship;
   const previous = { x: s.x, y: s.y, z: s.z };
@@ -706,7 +711,7 @@ export function tickShip(sim: Simulation, inputs: Map<string, Input>) {
       sim.physics.reset(p.id, p);
     }
 }
-export function tickDrones(sim: Simulation) {
+export function tickDrones(sim: SimulationHost) {
   const a = sim.s.adventure;
   for (const p of sim.s.players) {
     p.toolCooldown = Math.max(0, p.toolCooldown - DT);

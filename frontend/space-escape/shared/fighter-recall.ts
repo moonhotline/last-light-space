@@ -1,31 +1,24 @@
 import { Vector3 } from "three";
 import { FIGHTER_POS, SPAWN_FLEET } from "./adventure-data";
 import { clamp, distance, groundAt, HALF, type Vec } from "./map";
-import type { Simulation } from "./simulation";
-import { DT, type Player } from "./types";
+import { DT, type FighterRecall, type Player, type SimulationHost } from "./types";
+
+export type { FighterRecall };
 
 const CLEARANCE = 30;
 const PARKING_DISTANCE = 17;
 const BASIN_CEILING = 620;
 const UPRIGHT = { x: 0, y: 0, z: 0, w: 1 };
 
-export interface FighterRecall {
-  caller: string;
-  phase: "lift" | "approach" | "land";
-  landing: Vec;
-  cruiseY: number;
-  expires: number;
-}
-
 function inBasin(p: Vec) {
   return Math.abs(p.x) < HALF - 20 && Math.abs(p.z) < HALF - 20 && p.y < BASIN_CEILING;
 }
 
-function occupiedLanding(sim: Simulation, landing: Vec) {
+function occupiedLanding(sim: SimulationHost, landing: Vec) {
   return sim.s.players.some(p => !p.planet && distance(p, landing) < 11);
 }
 
-function findLanding(sim: Simulation, caller: Player): Vec | undefined {
+function findLanding(sim: SimulationHost, caller: Player): Vec | undefined {
   const { halfWidth, halfLength } = SPAWN_FLEET.light_fighter;
   for (const radius of [PARKING_DISTANCE, 26, 39]) {
     for (const angle of [0, Math.PI / 2, -Math.PI / 2, Math.PI, Math.PI / 4, -Math.PI / 4, 3 * Math.PI / 4, -3 * Math.PI / 4]) {
@@ -59,7 +52,7 @@ function cruiseAltitude(ship: Vec, landing: Vec) {
   return altitude;
 }
 
-export function recallFighter(sim: Simulation, caller: Player) {
+export function recallFighter(sim: SimulationHost, caller: Player) {
   const ship = sim.s.adventure.ship;
   if (caller.seat >= 0 || caller.planet || !inBasin(caller)) {
     sim.emit("请在开普勒盆地下船后召回游枭号");
@@ -101,7 +94,7 @@ export function recallFighter(sim: Simulation, caller: Player) {
   sim.emit("游枭号正在起飞");
 }
 
-export function tickFighterRecall(sim: Simulation) {
+export function tickFighterRecall(sim: SimulationHost) {
   const ship = sim.s.adventure.ship;
   const recall = ship.recall;
   if (!recall) return false;

@@ -3,10 +3,33 @@
  * Pure mathematical and behavioral definitions, fully decoupled from DOM & WebGL.
  */
 
-export interface Vec3 {
-  x: number;
-  y: number;
-  z: number;
+import type { Vec } from "./map";
+
+export type Vec3 = Vec;
+
+/**
+ * Canonical horizon warp gate IDs in clockwise traversal order.
+ * Order is load-bearing: `tickWarpGates` maps each gate to the next entry in this tuple.
+ */
+export const WARP_GATE_IDS = [
+  "warpgate",
+  "warpgate_east",
+  "warpgate_south",
+  "warpgate_west",
+] as const;
+
+export type WarpGateId = (typeof WARP_GATE_IDS)[number];
+
+const WARP_GATE_YAW: Record<WarpGateId, number> = {
+  warpgate: 0,
+  warpgate_east: -Math.PI / 2,
+  warpgate_south: Math.PI,
+  warpgate_west: Math.PI / 2,
+};
+
+/** Canonical Y-axis rotation for each horizon warp gate frame. */
+export function warpGateYaw(id: string): number {
+  return Object.hasOwn(WARP_GATE_YAW, id) ? WARP_GATE_YAW[id as WarpGateId] : 0;
 }
 
 /** Body-local spherical coordinates in degrees; longitude zero faces +Z. */

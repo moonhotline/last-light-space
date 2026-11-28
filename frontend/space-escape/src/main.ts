@@ -58,7 +58,7 @@ import {
   WORLD_SIZE,
   type Vec,
 } from "../shared/map";
-import { DT, type Input, type Player, type Snapshot } from "../shared/types";
+import { DT, fuelCapacity, type Input, type Player, type Snapshot } from "../shared/types";
 import type { Simulation } from "../shared/simulation";
 import type { MovementWorld } from "../shared/physics";
 import { nextPortalColor, type PortalAction } from "../shared/portals";
@@ -837,7 +837,7 @@ function hud() {
   }
   const p = predicted || me,
     target = objective(),
-    cap = p.level >= 1 ? 150 : 100;
+    cap = fuelCapacity(p.level);
   text("clock", clock(state.time));
   text("sector", sector(p.z, p.x));
   text("fuel", String(Math.ceil(p.fuel)));

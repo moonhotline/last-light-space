@@ -1,10 +1,44 @@
-import type { FighterRecall } from "./fighter-recall";
 import type { Vec } from "./map";
 import type { Inventory, ItemId } from "./adventure-data";
 import type { SpaceshipKind } from "./celestial";
 import type { PortalAction, PortalColor, PortalPair } from "./portals";
 export const DT = 1 / 30;
+export const fuelCapacity = (level: number) => (level >= 1 ? 150 : 100);
 export type Phase = "lobby" | "active" | "won";
+export interface FighterRecall {
+  caller: string;
+  phase: "lift" | "approach" | "land";
+  landing: Vec;
+  cruiseY: number;
+  expires: number;
+}
+export interface ShipMotionContext {
+  kind?: SpaceshipKind;
+  yaw?: number;
+  pitch?: number;
+  bank?: number;
+  flightRotation?: { x: number; y: number; z: number; w: number };
+}
+export interface ShipMotionResult extends Vec {
+  frontalCollision: boolean;
+  collided: boolean;
+  normal?: Vec;
+  impactRatio?: number;
+}
+export interface PhysicsQueries {
+  aim(p: Player, range: number, minDistance?: number): Vec | null;
+  visible(a: Vec, b: Vec): boolean;
+  reset(id: string, p: Vec): void;
+  shipMotion(a: Vec, delta: Vec, ctx?: ShipMotionContext): ShipMotionResult;
+}
+export interface SimulationHost {
+  s: Snapshot;
+  physics: PhysicsQueries;
+  queues: Map<string, Input[]>;
+  player(id: string): Player | undefined;
+  emit(message: string): void;
+  respawn(p: Player): void;
+}
 export interface Input {
   seq: number;
   forward: number;

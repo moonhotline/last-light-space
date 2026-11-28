@@ -9,7 +9,7 @@ import {
   tool,
 } from "./adventure";
 import { type ItemId } from "./adventure-data";
-import { MovementWorld, fuelCapacity } from "./physics";
+import { MovementWorld } from "./physics";
 import { eyePosition, playerUp } from "./surface";
 import {
   SPAWN,
@@ -22,6 +22,7 @@ import {
 } from "./map";
 import {
   DT,
+  fuelCapacity,
   idleInput,
   parseInput,
   type Input,
